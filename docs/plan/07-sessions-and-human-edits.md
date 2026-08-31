@@ -142,7 +142,7 @@ A machine-generated projection under `changes/` provides a human-readable view:
 Date: 2026-10-14 09:17
 Commit: 9b07fa1
 Files:
-- themes/control.md
+- subjects/themes/control.md
 
 ## Diff
 

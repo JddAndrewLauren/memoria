@@ -197,6 +197,17 @@ identity. Pure recomputation would re-propose everything already turned down.
 swapping it is one change, and do not accumulate a large body of stored impact
 records before deciding.
 
+**Narrowed 2026-08-31 by the subject system.** Impact records are no longer
+accumulated at all — a finding is a disagreement set that recomputes each pass
+(part 06 §8.10, part 09 §17). What still needs durable passage identity is only:
+
+- **settlements** — "chosen over SRC-0184, at this passage, on this date";
+- **write-time provenance** — what a passage was written from, a fact about the past.
+
+Both are rare, deliberate, author-triggered acts rather than bulk machine output.
+The safe default is now free to keep, and the reduced requirement may change which of
+the four options above is right. **The decision itself remains open.**
+
 ### Human-edit supremacy / Curator ownership
 **The question.** §1.7 is stated as an invariant but §14 implements it as a
 heuristic — git blame at span granularity. Two expected failures: prose reflow
@@ -281,3 +292,47 @@ A desktop UI was designed after this session and incorporated as
   editor is built, that check is what has to hold the two write paths apart.
 
 Both, and the rest of the reconciliation, are listed in §19.11.
+
+
+---
+
+## 9. Addendum — the subject system, 2026-08-31
+
+A second grilling session replaced §8's five fixed interpretation object types with
+**subjects**: named dimensions along which the archive connects to the book, each
+serving as both an index a writing agent reads and a check the Curator runs. Built-in
+subjects are People, Timeline, Events, Themes and Arcs; the author adds more. Claims
+are not a subject — they are the propositional layer that accretes from the author's
+settlements.
+
+Full model: [`plan/06-subjects-and-attribution.md`](plan/06-subjects-and-attribution.md).
+Vocabulary: [`../CONTEXT.md`](../CONTEXT.md).
+
+**What it changes for this PoC.**
+
+- **The headline benchmark gains a second reading.** The 364 resolvable
+  cross-references already measure retrieval recall. Under the subject system they
+  also measure **index recall** — whether an entry's gathered set is complete enough
+  to write a chapter from. That is the central and otherwise-silent risk of the
+  design (part 06 §8.3, part 11 §33.1). §3's "this only works if the benchmark
+  harness is built early" becomes more load-bearing, not less.
+- **The alias material stops being a side test.** `RECON.md`'s Emerson-under-four-forms
+  and four-Thoreaus-sharing-a-surname are now the worked example of a subject's
+  **matching hazards** (part 06 §8.1), which is a required field on every subject
+  prompt.
+- **Entry population is measurable here.** Recurrence collapses the candidate space
+  hard on this corpus — 516 / 638 / 1,066 distinct capitalized-name candidates per
+  volume, but only 9 / 18 / 36 appearing five or more times, against `RECON.md`'s
+  ground truth of 43 distinct letter recipients. The promotable set is dozens.
+- **The authorship track gains a specific thing to observe.** Author testimony
+  outranks documentary evidence (part 06 §8.6), which means the audit can report
+  author misremembering but never flag it as an error. Whether that feels right in
+  practice is only answerable with a real author writing real prose.
+- **Nothing in §5's reductions is affected.** The subject system is repository and
+  Curator design; it adds no runtime and no interface requirement beyond what §3
+  already scoped.
+
+**Still not decided.** Whether hard-coded subjects can be edited or removed; whether
+adding a subject late backfills over existing prose; and where §17's
+premature-revelation check lives, since it is the one impact question with no natural
+subject. Manuscript durable state and its storage were deferred to their own session.

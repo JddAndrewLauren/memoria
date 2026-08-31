@@ -9,6 +9,13 @@ records it **as it stands**. It describes the design; it does not revise it, and
 does not resolve the places where it runs ahead of the rest of the plan — those are
 named in §19.11 and left open.
 
+> **This part is illustrative throughout.** Every screen, label, verdict, badge,
+> severity, count and card here is example content, chosen to make a picture
+> legible. **None of it is a specification, and none of it may drive data
+> structures.** Where the plan and this design disagree, the plan governs; where
+> the design shows something the plan lacks, that is a question to settle, not a
+> decision already taken. Recorded 2026-08-31.
+
 - Canvas: `https://claude.ai/design/p/afc56bdd-88ec-478e-91a7-ebec712d872c`
 - Source as incorporated: [`../design/memoria-desktop.dc.html`](../design/memoria-desktop.dc.html)
   (canvas source; it needs the canvas runtime and is not a standalone page)
@@ -36,7 +43,7 @@ count badge (`12`). Selection is a 3px maroon left bar plus a sand background.
 | Tree | Contents in the design | Add affordance |
 |---|---|---|
 | `MANUSCRIPT` | Ch 2 — The Call (§2.1 Thursday, §2.2 The board letter, §2.3 An hour with Bob); Ch 5 — Signatures (§5.1 The filing, §5.2 Managing Bob); Ch 8 — Aftermath (§8.1 The announcement, §8.2 Cleveland, §8.3 The Acquisition) | `+` add chapter, `+ Add section` per chapter, `⠿` drag handles to reorder |
-| `INTERPRETATION` | Themes (Control, Loyalty, Inheritance) · Arcs (Bob relationship, Loss of institutional trust) · Timeline (Chronology, Acquisition timeline · 2011) · People (Bob, Alice) · Events (The acquisition, The resignation) · Claims (CLM-0041 · Bob's foreknowledge, CLM-0057 · Freedom as exposure) | `+` per group, `+ New group` |
+| `SUBJECTS` | Themes (Control, Loyalty, Inheritance) · Arcs (Bob relationship, Loss of institutional trust) · Timeline (Chronology, Acquisition timeline · 2011) · People (Bob, Alice) · Events (The acquisition, The resignation) · Claims (CLM-0041 · Bob's foreknowledge, CLM-0057 · Freedom as exposure) | `+` per subject adds an entry; `+ New subject` adds a subject |
 | `SOURCES` | Primary sources `2,847` (Journals · 2004–2019, Email exports, Messages, Transcripts & documents) · Conversations `184` (SES-20260912 · control theme correction, SES-20261018 · acquisition timeline, SES-20261103 · ch 2 rewrite) | `+` add sources, `+ Add sources…` |
 
 **Footer** — `⚙ Settings`, `✉ Feedback`, and a green status dot reading
@@ -225,7 +232,7 @@ layer**, each group a card with a coloured left border and tinted header:
 | Group | Colour | Glyph | Count line |
 |---|---|---|---|
 | `MANUSCRIPT` | maroon `#7a3327` | `✎` | 3 passages |
-| `INTERPRETATION` | blue `#3d5a78` | `◈` | 4 records |
+| `SUBJECTS` | blue `#3d5a78` | `◈` | 4 records |
 | `SOURCES` | green `#4c5c3c` | `▤` | 34 records · evidence |
 
 Each hit is a mono locator (`Ch 2 ¶7`, `§ 8.3`, `Theme · Control`, `CLM-0041`,
@@ -271,7 +278,7 @@ amber     #a8762a on #f3e6c8 / #fbf4e4   citation chips, flags, attention, curat
 ```
 
 The three layer colours are load-bearing information design, not decoration: the same
-maroon/blue/green identify manuscript, interpretation and evidence in the sidebar,
+maroon/blue/green identify manuscript, subjects and evidence in the sidebar,
 the search results, the badges and the card borders.
 
 **Type** — Newsreader for prose and titles; IBM Plex Mono for identifiers, section
@@ -321,20 +328,20 @@ commit d41f2a9            the git commit for an author edit
 - A chapter-level editor with click-to-edit paragraphs.
 - Manuscript structure editing in the sidebar: add chapter, add section, drag to
   reorder.
-- `Timeline` as a sixth interpretation group — this is §04's `chronology.md`, which
-  the §8 list of five object types does not cover.
+- `Timeline` as a sixth group. **Adopted 2026-08-31**: Timeline is a built-in subject,
+  and §04's `chronology.md` is an entry under it.
 - A browsable conversation history, scoped per §31 mode ("book-wide", "Chapter 6",
   "research", "Theme · Control", "§ 8.3"). The plan records sessions; it never
   offers them back as a list to return to.
 - Entry points from an object into a conversation about it: **💬 Discuss this** on a
   Theme, "see the exact turn", "when did this change?". `trace()` and `backlinks()`
   exist as tools; these affordances do not.
-- Hand-creation of interpretation objects from the UI — `+` on each group, and
-  `+ New group` for a group the five §8 types do not cover.
-- A `SUPPORTED` verdict. §18's ten impact categories are all things needing a change;
-  the design also shows the Review confirming a passage and asking nothing.
-- Severity worded as a diagnosis — "4 high — factual conflicts, 5 medium — stale
-  framing, 3 low". §21's tiers are confidence levels; these are kinds of problem.
+- Hand-creation from the UI — `+` on each group, and `+ New group`. **Adopted
+  2026-08-31** as `+ New subject`, with manual entry creation on any subject; see
+  part 06 §8.4.
+- A `SUPPORTED` verdict, and severity worded as a diagnosis. **Superseded
+  2026-08-31**: findings carry no category at all. See part 06 §8.10 and the banner
+  at the head of this part.
 - A `LEGACY DRAFT` badge on pre-Memoria manuscript text. No such state exists in §3's
   state classes or §19's authorship classes.
 - A Curator status line. Nothing in the plan surfaces whether the Curator is running
@@ -365,3 +372,26 @@ commit d41f2a9            the git commit for an author edit
 - **Identifier width.** Every id form on screen comes from §4 — `IMP-20261103-004`,
   `RES-20261018-003`, `DEC-0088`, `SES-20260912-1432 · T017` are the plan's own
   examples. The one divergence is `SRC-0184` against §4's `SRC-000184`.
+
+---
+
+<!-- Editorial note appended 2026-08-31, from the axis-system grilling session. -->
+<!-- The section text above is unchanged. -->
+
+## Editorial note — the Review verdicts, as a worked instance
+
+The banner above applies to the whole part. §19.3 is recorded here as the worked
+instance, because it is the screen most likely to be mistaken for a schema: its
+verdicts — `CONTRADICTED`, `OVERSTATED`, `HINDSIGHT LEAKAGE`, `SUPPORTED` — and its
+severity wording — `4 high · factual conflicts`, `5 medium · stale framing`,
+`3 low` — read like enumerations. They are not. They must not drive curation data
+structures.
+
+Whether a review finding carries a category at all is **open**. §19.11 already
+records that these four verdicts sit against §18's ten impact categories, and that
+§19.3's severities are kinds of problem where §21's tiers are confidence levels.
+Neither list is adopted by recording the other.
+
+Two candidates the labels may be standing in for — which axis raised the finding,
+and which resolutions the finding admits — are noted here as candidates only, and
+are not decided.

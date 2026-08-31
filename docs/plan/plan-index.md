@@ -2,8 +2,13 @@
 
 The build plan is split into 18 parts, each a unit that can be considered,
 revised or grilled on its own. Every one of the original 53 sections appears
-in exactly one part; **section bodies are verbatim**. Part 19 is the exception: it
-records the desktop UI as designed, and has no counterpart in the original plan.
+in exactly one part. **Section bodies were verbatim as of 2026-08-31**; sections
+revised since then are marked in the part's own header comment. Part 19 is the
+exception: it records the desktop UI as designed, and has no counterpart in the
+original plan.
+
+**Revised since:** §8 (rewritten as the subject system), §18's category list
+(withdrawn), §1.5, §3, §4, §12.1, §13.4, §15, §17, §25, §32, §33, §42.
 
 Nine parts — 04, 06, 08, 09, 10, 11, 12, 14, 18 — end in an appended
 `## Editorial note — the desktop design`, recording where that design confirms,
@@ -53,17 +58,24 @@ promise is not falsifiable there.
 |---|---|---|---|
 | 04 | [Repository, State Classes, Identity, Rebuildability](04-repository-and-identity.md) | 2, 3, 4, 42 | open |
 | 05 | [Source Ingestion, Temporal Discipline, Aliases](05-evidence-and-ingestion.md) | 5, 6, 7 | **active** |
-| 06 | [Interpretation Layer and Attribution](06-interpretation-and-attribution.md) | 8, 9 | stable |
+| 06 | [The Subject System and Attribution](06-subjects-and-attribution.md) | 8, 9 | **active** |
 
-**04** carries the unresolved anchoring question: §4 gives sources durable
-anchors but never says what makes a manuscript paragraph address stable.
+**04** still carries the unresolved anchoring question, but it is **narrower than it
+was**: under part 06 §8.11 impact edges recompute every pass, so only **settlements**
+and **write-time provenance** need durable passage identity. See the editorial note
+at the foot of the part. §2's tree now has `subjects/`; §3 splits the old
+Interpretation class into Subjects and Claims.
 **05 is where the current risk concentrates.** The Thoreau recon
 (`../../sources/raw/gutenberg/RECON.md`) shows normalization is the hard part —
 1906 editorial voice sits inside 1837 evidence, and year resolution depends on
 chapter headings plus a weekday checksum. If this is wrong, everything
 downstream is quietly wrong with no failing test.
-**06** defines `[source]` / `[author]` / `[inferred]` / `[open]` and the five
-interpretation object types.
+**06 was rewritten 2026-08-31** and is now the load-bearing part. §8 defines
+**subjects** (People, Timeline, Events, Themes, Arcs, plus whatever the author adds),
+**entries**, the derived **gathered set** with its pin/exclude overlay, promotion from
+candidates, the two consumers (assembly and audit), **author testimony**,
+**settlements**, and why claims are the accretion layer rather than a subject. §9
+keeps the four attribution statuses and adds §9.5: author testimony needs no badge.
 
 ### The record — conversations, edits, curation
 
@@ -77,7 +89,9 @@ with stable `#T017` anchors are derived from Claude Code's per-session JSONL as 
 post-session pass.
 **08** holds the deferred ownership decision. §14's git-blame span inference is
 expected to fail on prose reflow. Safe default while open: **the Curator does not
-rewrite prose a human has touched.**
+rewrite prose a human has touched.** §12.1's trigger table now carries the audit pass
+(new text only, subject-bounded); §13.4 forbids harvesting manuscript prose into an
+entry without a settlement.
 
 ### The manuscript — impact, authorship, authorization
 
@@ -86,8 +100,10 @@ rewrite prose a human has touched.**
 | 09 | [Dependency, Propagation, Manuscript Impact](09-dependency-and-impact.md) | 16, 17, 18, 22 | open |
 | 10 | [Manuscript Rules, Authorship, Authorization](10-manuscript-authorship.md) | 19, 20, 21, 36, 37, 38 | stable |
 
-**09** is blocked behind the anchoring decision in 04 — impact records store
-pointers into prose, and §38's dismissal memory needs stable passage identity.
+**09** is **no longer blocked** behind the anchoring decision. Findings are derived
+and recomputed rather than stored; a finding is a **disagreement set plus prose**,
+with no category, and the set is its own identity for §38's dismissal memory. §18's
+ten-category list is withdrawn.
 **10** is the plan's strongest material: autonomy in observation, reasoning and
 recommendation; authorization at the point of canonical authorship.
 
@@ -99,8 +115,10 @@ recommendation; authorization at the point of canonical authorship.
 | 12 | [Session Modes, Research Workflows, Resumability](12-research-and-resumability.md) | 31, 34, 35, 39 | stable |
 
 **11** — FTS5 only to start; semantic embeddings deferred pending a measured
-number from the cross-reference benchmark. §33's search-scope honesty is the part
-that matters most and is unaffected.
+number from the cross-reference benchmark. §32's Tier 2 is now the **declared scope**,
+which is what bounds the working context. New **§33.1** states the sharper version of
+the search-scope problem: an index reports nothing about its own recall, and that is
+the central risk of the subject system.
 **12** — §39's resumption test ("leave a section for weeks, return, continue
 without a recap") is the plan's own stated bar for whether the rest is premature.
 
@@ -118,7 +136,9 @@ the client, and the subscription bet is avoided rather than validated.
 **14** — local only. §40.5 auth and remote access are gone entirely; §40.6's write
 coordinator reduces to a stale-revision check. Four of the five surfaces need no
 model driver and are in scope; "Ask Memoria" is deferred.
-**19** is the designed desktop UI, recorded as it stands — six screens, the
+**19 is illustrative throughout** — every label, verdict, badge and count in it is
+example content and may not drive data structures (banner recorded 2026-08-31).
+It is the designed desktop UI, recorded as it stands — six screens, the
 slide-over citation panel, cross-layer search, and the vocabulary the interface
 puts on screen. It reads as an acceptance description of §40.3 with navigation
 added. It is **open** because the design leads with "Ask Memoria", which the PoC
@@ -156,6 +176,7 @@ independent requirements.
 ## Reading orders
 
 - **Orienting from scratch:** 01 → 02 → 03 → 18
+- **The subject system:** 06 → 11 (§32, §33.1) → 09 → 08, then 04's anchoring note
 - **Working on ingest now:** 05 → 04 → 06, with `RECON.md` alongside
 - **Resolving the open decisions:** 04 (anchoring) and 08 (ownership), then 09
 - **Re-planning the build:** 13 → 14 → 19 → 15 → 16
@@ -163,6 +184,7 @@ independent requirements.
 ## Files
 
 ```
+CONTEXT.md                          settled domain vocabulary
 docs/
 ├── poc-plan.md                     decisions from the grilling session
 ├── design/
@@ -170,6 +192,7 @@ docs/
 └── plan/
     ├── plan-index.md               this file
     ├── 01-…18-…                    the plan, split
-    ├── 19-desktop-ui.md            the desktop UI as designed
+    ├── 06-subjects-and-attribution.md   the subject system (rewritten)
+    ├── 19-desktop-ui.md            the desktop UI as designed (illustrative)
     └── _original-memoria-plan.md   archived single-file original
 ```

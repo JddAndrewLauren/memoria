@@ -22,14 +22,22 @@ The Curator runs after events such as:
 | Event | Response |
 |---|---|
 | AI session ends | Post-session curation |
-| Human edits interpretation files | Propagation + manuscript-impact pass |
-| Human edits manuscript | Interpretation/continuity impact scan |
-| Research memo completes | Fold supported findings into interpretation |
-| New evidence ingested | Index, alias scan, question/theme/arc impact scan |
+| Human edits an entry | Propagation + manuscript-impact pass |
+| **New manuscript prose exists** (hand-written or AI-written) | **Audit pass** — evaluate it against the entries, bounded by the subjects that exist |
+| Research memo completes | Fold supported findings into entries |
+| New evidence ingested | Index, match against every subject, refresh candidates and gathered sets |
+| **A subject is added or its prompt changes** | **Re-match that subject across the corpus; refresh its candidates** |
 
 Passes are debounced and materiality-gated.
 
 A spelling correction should not trigger a cascade through the book.
+
+Two scoping rules govern the audit, and both exist to make its coverage inspectable:
+
+- **It evaluates only new text.** Prose that has already been audited and settled is
+  not re-argued. §15 supplies the memory.
+- **It evaluates only on subjects that exist.** A risk with no subject is not
+  checked, and the pass says so. See part 06 §8.5.
 
 ---
 
@@ -82,17 +90,23 @@ The Curator records:
 
 ---
 
-## 13.4 Interpretation changes
+## 13.4 Entry changes
 
 The Curator is deliberately conservative.
 
 If the author muses about an interpretation, it belongs under an open thread.
 
-If the author clearly adopts a position, it may enter current interpretation as `[author]`, citing the precise transcript turn.
+If the author clearly adopts a position, it may enter an entry as `[author]`, citing the precise transcript turn.
 
 If the Curator independently identifies a pattern from evidence, it may enter as `[inferred]`, with supporting provenance.
 
 The Curator may never convert exploratory discussion into an author belief merely because doing so makes the knowledge base neater.
+
+The same restraint applies with more force to manuscript prose. **The Curator never
+harvests a passage into an entry.** It may link freely, and it may surface a
+disagreement as a finding; changing what an entry says requires the author's
+settlement. Part 06 §8.8 gives the reasoning: narrative prose is not assertion, and
+AI-drafted prose carries an authorization to write, not to believe.
 
 ---
 
@@ -146,6 +160,11 @@ If the author deletes a Curator-created interpretation, the Curator should not r
 The deletion itself is an author action.
 
 The system remembers it.
+
+This is the same mechanism as the subject system's curated overlay. An **exclusion**
+from a gathered set, a **dismissed finding** and a **settlement** are all boundaries
+of this kind, and a finding's disagreement set is what makes the boundary
+identifiable without minting an ID. See part 06 §§8.3, 8.7, 8.10.
 
 Materially new evidence may justify resurfacing the possibility, but it should appear explicitly as something previously rejected or removed.
 

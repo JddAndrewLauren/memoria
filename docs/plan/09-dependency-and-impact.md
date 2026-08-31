@@ -21,13 +21,13 @@ SQLite indexes these relationships into a rebuildable dependency graph.
 If the author materially changes:
 
 ```text
-themes/control.md
+subjects/themes/control.md
 ```
 
 Memoria may calculate affected material such as:
 
 ```text
-arcs/bob-relationship.md
+subjects/arcs/bob-relationship.md
 claims/CLM-0041.md
 chapters/02/draft.md#p7
 chapters/08/sections/03/state.md
@@ -63,30 +63,31 @@ If an impact is plausible, Memoria creates a manuscript-impact record.
 Example:
 
 ```text
-IMP-20261103-004
-
-Trigger:
-    CHG-20261103-1024
-    Author revised ARC-bob-relationship
-
-Affected passage:
+Disagreement set:
     chapters/02/draft.md#p7
+    SUB-arcs/bob-relationship
+    SRC-0184 ¶17
 
-Assessment:
-    High-confidence contradiction
-
-Reason:
+Statement:
     Paragraph treats Bob's July 15 behavior as evidence
     of foreknowledge. The revised timeline now places
     his probable knowledge on July 18.
 
-Basis:
-    ARC-bob-relationship
-    EVT-acquisition
-    CLM-0041
-    SRC-0184
-    SRC-0391
+Confidence:
+    high
+
+Raised by:
+    SUB-timeline
 ```
+
+A finding **carries no category**. Everything a surface needs derives from the
+disagreement set: which actions are available, which subject raised it, and — since
+the set is the finding's identity — whether it has already been settled. Ordering is
+by confidence, per §21's tiers. Part 06 §8.10 is authoritative.
+
+Findings are **derived**. They are recomputed each pass rather than accumulated, so
+a stale finding cannot outlive the disagreement that produced it. What persists is
+the author's **settlement**, not the finding.
 
 Memoria may prepare a proposed rewrite automatically.
 
@@ -100,31 +101,32 @@ It may not apply that rewrite to `draft.md` without authorization.
 
 Manuscript suggestions are first-class working state.
 
-Typical categories include:
-
-```text
-factual contradiction
-chronology conflict
-unsupported assertion
-weakened claim
-theme misalignment
-arc misalignment
-premature reveal
-continuity issue
-source/citation change
-editorial opportunity
-```
+**The category list this section originally carried is withdrawn.** Enumerating kinds
+of problem was superseded 2026-08-31: a finding is a disagreement set plus prose, and
+its shape is read from the set rather than classified. The old list is preserved in
+`_original-memoria-plan.md` §18.
 
 Each suggestion records:
 
-- what triggered it;
-- affected manuscript location;
+- its disagreement set — the members that disagree;
+- prose stating how they disagree;
 - confidence;
-- explanation;
-- relevant evidence and interpretation records;
-- proposed action;
+- which subject raised it;
 - optional candidate patch;
 - current disposition.
+
+The disagreement set determines what can be done about it:
+
+| Set | Available resolutions |
+|---|---|
+| passage + source | rewrite the passage; exclude the source |
+| passage + entry + source | settle in any of three directions |
+| passage + entry | rewrite the passage; update the entry |
+| passage + decision | rewrite the passage; revise the decision |
+| passage + declared scope | rewrite the passage; update the declaration |
+
+Every one of these is a **settlement** (part 06 §8.7) except a plain rewrite, and
+every settlement records what was chosen, against what, and when.
 
 Suggested actions may include:
 
@@ -155,7 +157,7 @@ Interpretive changes may have narrative consequences even when existing prose re
 For example, suppose:
 
 ```text
-themes/control.md
+subjects/themes/control.md
 ```
 
 changes from:

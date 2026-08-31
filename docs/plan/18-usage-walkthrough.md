@@ -87,7 +87,7 @@ If the author adopts the idea, the conversation turn becomes durable provenance.
 Memoria may create or update:
 
 ```text
-themes/control.md
+subjects/themes/control.md
 arcs/...
 claims/...
 ```
@@ -183,18 +183,19 @@ The system should distinguish manuscript refinement from canonical interpretatio
 
 ---
 
-## 52.6 Correcting the interpretation layer
+## 52.6 Correcting a subject entry
 
-The author then decides the broader interpretation really was wrong and directly edits:
+The author then decides the broader interpretation really was wrong and directly edits
+an entry:
 
 ```text
-arcs/bob-relationship.md
+subjects/arcs/bob-relationship.md
 ```
 
 or:
 
 ```text
-themes/control.md
+subjects/themes/control.md
 ```
 
 Now the intent is explicit.

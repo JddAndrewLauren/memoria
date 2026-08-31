@@ -106,15 +106,17 @@ The terminal records are the original source evidence and attributable author ac
 
 Memoria should not maintain several competing semantic models of the book.
 
-There is one curated **interpretation layer** containing:
+There is one curated layer of **subjects** and their entries:
 
-- themes;
-- arcs;
-- people;
-- events;
-- important claims;
-- chronology;
-- structural interpretation.
+- People;
+- Timeline;
+- Events;
+- Themes;
+- Arcs;
+- and whatever else the author adds.
+
+Claims are not a subject. They are the propositional layer that accretes from the
+author's settlements, cutting across every subject. Part 06 is authoritative.
 
 Other generated summaries are compressions of this layer and its evidence.
 

@@ -35,14 +35,16 @@ Potential filters include:
 ```text
 event date
 recorded date
-person
 source type
 contemporaneous/retrospective
 chapter
-theme
-arc
 record class
+subject            e.g. SUB-people
+entry              e.g. SUB-people/bob, SUB-themes/control
 ```
+
+`person`, `theme` and `arc` are no longer separate filters. They are entries, and an
+entry filter covers them and every subject the author adds.
 
 ---
 
@@ -118,7 +120,7 @@ The model may:
 7. inspect neighboring records;
 8. compare contemporaneous and retrospective accounts;
 9. search for contradictions;
-10. revisit the interpretation layer;
+10. revisit the subjects;
 11. form or revise a conclusion.
 
 The agent is not expected to get the right evidence from a single vector search.
@@ -220,18 +222,15 @@ For a section session:
 Tier 1 — always
     book.md
     chapter.md
-    section state.md
+    section state.md          including its declared scope
     section draft.md
 
-Tier 2 — declared relevance
-    themes
-    arcs
-    people
-    events
+Tier 2 — the declared scope, resolved
+    the named entries' author text
+    the named entries' settlements
     relevant claims
     active decisions
     local questions
-    unresolved manuscript impacts
 
 Tier 3 — structural neighborhood
     previous section ending
@@ -239,15 +238,42 @@ Tier 3 — structural neighborhood
     chapter digest
 
 Tier 4 — on demand
+    the named entries' gathered sets
+    unpromoted candidates
     search results
     full sources
     research memos
     additional digests
 ```
 
-Each `state.md` contains or accumulates references to the entities relevant to that segment.
+**Tier 2 is declared, not inferred.** A section states its own scope, in the author's
+terms:
 
-The Curator maintains these links, and the author may edit them.
+```text
+Covers June 1839 to October 1841, and my interactions with Bob about
+the conflict in the capital.
+```
+
+Assembly resolves that declaration through the subjects (part 06 §8.5). What loads is
+an entry's author text and settlements — short and dense. What does **not** load is
+its gathered set, which stays queryable at Tier 4, and the unpromoted candidates,
+which never load at all.
+
+The consequence matters for Invariant 1: **the working context is bounded by the size
+of the declared scope, not by the number of subjects or entries.** Ten subjects and
+four hundred promoted entries cost the same as two and twelve, because a session
+still names a handful. The only thing that would break this is automatic inclusion —
+transitive expansion from a named entry to its neighbours, or loading a whole
+subject. Neither is done; §28's loop retrieves instead.
+
+The declared scope is **durable on the section**, which makes assembly reproducible
+and gives §39's resumption test something to resume from. It is also the section's
+contract: prose that drifts from it produces a finding whose disagreement set is
+`{passage, declared scope}`, resolvable by rewriting the prose or updating the
+declaration. Neither is an error.
+
+A declared scope that names something with no entry does not fail. Assembly falls
+back to the unpromoted candidate and reports that it did.
 
 ---
 
@@ -272,6 +298,29 @@ Memoria should never allow:
 > “The archive shows...”
 
 when the model has actually examined twelve documents.
+
+## 33.1 An index reports nothing about its own recall
+
+Subject-based assembly (part 06 §8.5) introduces a harder version of this problem
+than search does.
+
+When a writing agent works from an entry's gathered set **instead of** searching the
+corpus, the completeness of that set determines what the chapter is written from. A
+source that never joined the set is invisible, and the agent cannot know it is
+missing. A search at least reports its query and can honestly say *"I did not search
+unrelated correspondence."* An index says nothing.
+
+Two obligations follow:
+
+- **Assembly must report what it resolved** — which entries the declared scope named,
+  which fell back to unpromoted candidates, and that the gathered sets are indexes
+  rather than exhaustive searches.
+- **Recall must be measured, not assumed.** The PoC's 364 resolvable
+  cross-references are the instrument; recall@10 over those links is the measure of
+  whether the index is complete enough to write from. See `poc-plan.md` §3.
+
+This is the central risk of the subject system and it is silent by nature. Part 06
+§8.3 states it; §15's evaluation suite is where it is caught.
 
 ---
 
