@@ -1,0 +1,109 @@
+# Memoria PoC corpus - raw acquisition manifest
+# Source: Project Gutenberg (volunteer-proofread editions).
+# Files are byte-for-byte as retrieved. No normalization has been applied.
+retrieved: 2026-08-31
+base: sources/raw/gutenberg
+files:
+  - gutenberg_id: 57393
+    title: "The Writings of Henry David Thoreau, Volume VII (of 20): Journal I: 1837-1846"
+    role: evidence
+    format: txt
+    url: https://www.gutenberg.org/cache/epub/57393/pg57393.txt
+    path: sources/raw/gutenberg/57393-journal-01/pg57393.txt
+    retrieved: 2026-08-31
+    sha256: 732b4eaa8b7296f0b9fb7c2e9a8782e4c852777b36afa3b55130f7b523555506
+    bytes: 823274
+    words: 139336
+  - gutenberg_id: 57393
+    title: "The Writings of Henry David Thoreau, Volume VII (of 20): Journal I: 1837-1846"
+    role: evidence
+    format: html
+    url: https://www.gutenberg.org/cache/epub/57393/pg57393-images.html
+    path: sources/raw/gutenberg/57393-journal-01/pg57393-images.html
+    retrieved: 2026-08-31
+    sha256: a5858994a70cab38229e7367928418188ccd9e206c0255b4727a17c658cb964a
+    bytes: 1000936
+    words: null
+  - gutenberg_id: 59031
+    title: "The Writings of Henry David Thoreau, Volume VIII (of 20): Journal II: 1850-September 15, 1851"
+    role: evidence
+    format: txt
+    url: https://www.gutenberg.org/cache/epub/59031/pg59031.txt
+    path: sources/raw/gutenberg/59031-journal-02/pg59031.txt
+    retrieved: 2026-08-31
+    sha256: 3fc0a677f8dfa73001fcbd38ec65224016651f494a8f796a06d1a4855dde3350
+    bytes: 827580
+    words: 142119
+  - gutenberg_id: 59031
+    title: "The Writings of Henry David Thoreau, Volume VIII (of 20): Journal II: 1850-September 15, 1851"
+    role: evidence
+    format: html
+    url: https://www.gutenberg.org/cache/epub/59031/pg59031-images.html
+    path: sources/raw/gutenberg/59031-journal-02/pg59031-images.html
+    retrieved: 2026-08-31
+    sha256: 5b0f122e149057147e2cf7428ce3977d493adcaaf0da57bba817f9218d87e995
+    bytes: 976285
+    words: null
+  - gutenberg_id: 205
+    title: "Walden, and On The Duty Of Civil Disobedience"
+    role: audit_target
+    format: txt
+    url: https://www.gutenberg.org/cache/epub/205/pg205.txt
+    path: sources/raw/gutenberg/205-walden/pg205.txt
+    retrieved: 2026-08-31
+    sha256: 2d9a76a2e3e8195c69430516ebd33c4d0757a53ad432ff6186b7b794e6fe99f9
+    bytes: 667957
+    words: 118874
+  - gutenberg_id: 205
+    title: "Walden, and On The Duty Of Civil Disobedience"
+    role: audit_target
+    format: html
+    url: https://www.gutenberg.org/cache/epub/205/pg205-images.html
+    path: sources/raw/gutenberg/205-walden/pg205-images.html
+    retrieved: 2026-08-31
+    sha256: c38ab1617e85370da799b380297bd5eef8c108f8bd067c1feffe4e72ea494670
+    bytes: 685911
+    words: null
+  - gutenberg_id: 4232
+    title: "A Week on the Concord and Merrimack Rivers"
+    role: audit_target
+    format: txt
+    url: https://www.gutenberg.org/cache/epub/4232/pg4232.txt
+    path: sources/raw/gutenberg/4232-a-week/pg4232.txt
+    retrieved: 2026-08-31
+    sha256: 0e4d5b6339aa25cd58e0eb32695bf3a6725b9da9d34f10098746bde9049bbc7e
+    bytes: 682396
+    words: 118406
+  - gutenberg_id: 4232
+    title: "A Week on the Concord and Merrimack Rivers"
+    role: audit_target
+    format: html
+    url: https://www.gutenberg.org/cache/epub/4232/pg4232-images.html
+    path: sources/raw/gutenberg/4232-a-week/pg4232-images.html
+    retrieved: 2026-08-31
+    sha256: 874629b165bbfd8542a68742a98851a2095746219166102919a8dd3c6ee1134e
+    bytes: 714199
+    words: null
+  - gutenberg_id: 43523
+    title: "Familiar Letters"
+    role: evidence
+    format: txt
+    url: https://www.gutenberg.org/cache/epub/43523/pg43523.txt
+    path: sources/raw/gutenberg/43523-familiar-letters/pg43523.txt
+    retrieved: 2026-08-31
+    sha256: f3044a548d6717e03aabfb3e4f3faee82dfd43e2be9a1212103ffe236cc2aa08
+    bytes: 827869
+    words: 143211
+  - gutenberg_id: 43523
+    title: "Familiar Letters"
+    role: evidence
+    format: html
+    url: https://www.gutenberg.org/cache/epub/43523/pg43523-images.html
+    path: sources/raw/gutenberg/43523-familiar-letters/pg43523-images.html
+    retrieved: 2026-08-31
+    sha256: d4a78120ac9806cac7810e1297bf5bc593a86baf41247f12e6510817150a3c56
+    bytes: 1123450
+    words: null
+totals:
+  files: 10
+  text_words: 661946
