@@ -193,3 +193,29 @@ The author determines whether the canonical manuscript changes.
 This lets Memoria function as a persistent developmental editor as well as a research and fact-checking system.
 
 ---
+
+<!-- Editorial note appended 2026-08-31, when the desktop design was incorporated. -->
+<!-- The section text above is unchanged. -->
+
+## Editorial note — the desktop design
+
+The design's Review shows four verdict labels. Two sit outside §18's ten categories:
+
+- **`SUPPORTED`** — *"The draft's account matches contemporaneous records"*, dimmed,
+  with no action offered. All ten §18 categories are defects; a confirmation is not
+  one of them, and the design surfaces it anyway.
+- **`HINDSIGHT LEAKAGE`** — *"Presents knowledge from Alice's 2019 account as available
+  to the narrator in 2011."* §47 tests for exactly this; §18 does not name it.
+
+`CONTRADICTED` and `OVERSTATED` map onto *factual contradiction* and *unsupported
+assertion*.
+
+Severity is also worded as a diagnosis rather than a confidence level: *"4 high —
+factual conflicts, 5 medium — stale framing, 3 low."* §18 records confidence per
+suggestion; the design groups by kind of problem as well.
+
+Impact records reach the interface by id (`IMP-20261103-004` on the finding card),
+so the §16–§18 pointers are load-bearing for the UI too — the same anchoring
+dependency noted in part 04.
+
+Full reconciliation: [19. Desktop UI — as designed](19-desktop-ui.md) §19.11.

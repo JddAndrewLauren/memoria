@@ -274,3 +274,22 @@ Memoria should never allow:
 when the model has actually examined twelve documents.
 
 ---
+
+<!-- Editorial note appended 2026-08-31, when the desktop design was incorporated. -->
+<!-- The section text above is unchanged. -->
+
+## Editorial note — the desktop design
+
+§33 is the part of this section the design leans on hardest, and it appears twice:
+as the scope note under an answer — *"Searched July 2011 – June 2014 journals and
+Bob-linked email… I did not search unrelated correspondence from that period"* — and
+as *"31 more"* above the filter line. §27's filter list is that footer verbatim:
+**"refine with filters — dates, people, contemporaneous only."**
+
+What is new: the design turns `search_text` into **a surface the author drives**. One
+query, results grouped by layer with per-layer counts and colours — MANUSCRIPT
+3 passages (maroon), INTERPRETATION 4 records (blue), SOURCES 34 records (green).
+§§25–33 describe retrieval as tools the model calls on the author's behalf; a search
+screen is not described anywhere in the plan.
+
+Full reconciliation: [19. Desktop UI — as designed](19-desktop-ui.md) §19.11.

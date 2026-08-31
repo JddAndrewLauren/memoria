@@ -262,3 +262,22 @@ interface.
 - Scope and trigger policy for the Curator.
 - Subject and length of the authorship-track piece.
 - Whether and when to acquire *Excursions*, *Cape Cod* and *The Service*.
+
+---
+
+## 8. Addendum — desktop design, 2026-08-31
+
+A desktop UI was designed after this session and incorporated as
+[`plan/19-desktop-ui.md`](plan/19-desktop-ui.md); the canvas source is at
+[`design/memoria-desktop.dc.html`](design/memoria-desktop.dc.html).
+
+**Nothing above is revised by it.** Two points of contact worth recording:
+
+- The design makes **Home / Ask Memoria** the front door — the one surface §3 defers
+  as needing a model driver. The deferral stands; the design simply assumes it
+  resolved.
+- The design **edits manuscript prose in the app**, paragraph at a time. §3 above puts
+  editing in Obsidian, and §5 reduces §40.6 to a stale-revision check. If the in-app
+  editor is built, that check is what has to hold the two write paths apart.
+
+Both, and the rest of the reconciliation, are listed in §19.11.

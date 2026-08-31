@@ -2,7 +2,13 @@
 
 The build plan is split into 18 parts, each a unit that can be considered,
 revised or grilled on its own. Every one of the original 53 sections appears
-in exactly one part; content is verbatim.
+in exactly one part; **section bodies are verbatim**. Part 19 is the exception: it
+records the desktop UI as designed, and has no counterpart in the original plan.
+
+Nine parts — 04, 06, 08, 09, 10, 11, 12, 14, 18 — end in an appended
+`## Editorial note — the desktop design`, recording where that design confirms,
+extends or collides with the section above it. The notes sit below the section text
+and never alter it.
 
 - **These parts are canonical.** `_original-memoria-plan.md` is an archived copy
   of the single-file plan as of 2026-08-31, kept for reference only. Do not edit it.
@@ -104,6 +110,7 @@ without a recap") is the plan's own stated bar for whether the rest is premature
 |---|---|---|---|
 | 13 | [Model Runtime](13-model-runtime.md) | 24 | **reduced** |
 | 14 | [Interfaces](14-interfaces.md) | 40 | **reduced** |
+| 19 | [Desktop UI — as designed](19-desktop-ui.md) | — (design canvas) | open |
 
 **13** is the most heavily narrowed part. The `ModelBackend` abstraction and the
 §24.3–24.4 capacity scheduler are out: Memoria is an MCP server, Claude Code is
@@ -111,6 +118,12 @@ the client, and the subscription bet is avoided rather than validated.
 **14** — local only. §40.5 auth and remote access are gone entirely; §40.6's write
 coordinator reduces to a stale-revision check. Four of the five surfaces need no
 model driver and are in scope; "Ask Memoria" is deferred.
+**19** is the designed desktop UI, recorded as it stands — six screens, the
+slide-over citation panel, cross-layer search, and the vocabulary the interface
+puts on screen. It reads as an acceptance description of §40.3 with navigation
+added. It is **open** because the design leads with "Ask Memoria", which the PoC
+defers, and because every locator it shows assumes the part 04 anchoring
+decision. Those conflicts are listed in §19.11 and left unresolved.
 
 ### Checking and sequencing
 
@@ -145,15 +158,18 @@ independent requirements.
 - **Orienting from scratch:** 01 → 02 → 03 → 18
 - **Working on ingest now:** 05 → 04 → 06, with `RECON.md` alongside
 - **Resolving the open decisions:** 04 (anchoring) and 08 (ownership), then 09
-- **Re-planning the build:** 13 → 14 → 15 → 16
+- **Re-planning the build:** 13 → 14 → 19 → 15 → 16
 
 ## Files
 
 ```
 docs/
 ├── poc-plan.md                     decisions from the grilling session
+├── design/
+│   └── memoria-desktop.dc.html     the design canvas source, as incorporated
 └── plan/
     ├── plan-index.md               this file
     ├── 01-…18-…                    the plan, split
+    ├── 19-desktop-ui.md            the desktop UI as designed
     └── _original-memoria-plan.md   archived single-file original
 ```

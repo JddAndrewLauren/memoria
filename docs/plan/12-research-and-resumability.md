@@ -201,3 +201,28 @@ The defining test is simple:
 If Memoria cannot pass that test, the rest of the architecture is premature.
 
 ---
+
+<!-- Editorial note appended 2026-08-31, when the desktop design was incorporated. -->
+<!-- The section text above is unchanged. -->
+
+## Editorial note — the desktop design
+
+§39's resumption test is the design's most literal borrowing: **Resume →**, the
+`CHECKPOINT` card with its *"Next — rewrite the final three paragraphs using only
+contemporaneous evidence"*, and the line *"Last worked October 18, 2026 · six weeks
+ago."* §34's research memos land as `✓ Saved as research memo RES-20261018-003 ·
+linked to CLM-0041`.
+
+§31's three modes are visible as conversation scope labels — "book-wide",
+"Chapter 6", "research", "Theme · Control", "§ 8.3".
+
+Two additions:
+
+- **A browsable conversation history.** The plan records sessions (§10, part 07) but
+  never offers them back as a list to return to. The design gives them a 264px rail
+  with `+ New`.
+- **Entry points from an object into a conversation about it** — `💬 Discuss this` on a
+  theme, *"see the exact turn"*, *"when did this change?"* `trace()` and `backlinks()`
+  exist as tools; these affordances do not.
+
+Full reconciliation: [19. Desktop UI — as designed](19-desktop-ui.md) §19.11.

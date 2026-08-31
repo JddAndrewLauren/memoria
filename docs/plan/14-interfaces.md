@@ -1,5 +1,6 @@
 <!-- Part of the Memoria build plan. Index: ./plan-index.md -->
 <!-- Source sections: 40 of the original memoria-plan.md -->
+<!-- The desktop UI as designed is recorded in ./19-desktop-ui.md; §19.11 lists where it differs from §40. -->
 
 # 40. Interfaces
 
@@ -203,3 +204,32 @@ It does not need to be the primary daily interface.
 The primary product experience should be the responsive web interface.
 
 ---
+
+<!-- Editorial note appended 2026-08-31, when the desktop design was incorporated. -->
+<!-- The section text above is unchanged. -->
+
+## Editorial note — the desktop design
+
+All six §40.3 surfaces exist in the design, and §40.7's activity lines appear in the
+plan's own wording. §40 specifies surfaces but not an application, so the design adds:
+
+- **Navigation** — a persistent 232px sidebar with three trees (manuscript,
+  interpretation, sources), mirroring the repository's own divisions. §40 never says
+  how the author moves between surfaces.
+- **A search screen** and **a slide-over source panel** — the panel is the flagship
+  interaction, so that checking a citation never costs the author their place. The
+  canvas leaves the choice open as a `citationPattern` prop (slide-over / full-screen).
+- **In-app prose editing**, paragraph at a time — against §40.4's warning off a
+  rich-text editor and the PoC's "Obsidian is the editor". Not rich text, but still a
+  second write path; see the note in part 10.
+- **Settings**, **Feedback**, and a Curator status line.
+
+Two divergences from §40.3 itself: **Section** shows no `Source packet` or
+`Unresolved impacts` block — the packet survives only as a backlink on the source
+page ("Chapter 8 source packet"), and impacts are folded into `NEEDS ATTENTION`; and
+**Review**'s `Apply` is a batch action rather than a per-finding one.
+
+The design also makes **Home / Ask Memoria** the front door, which `../poc-plan.md`
+§5 defers as the one surface needing a model driver. That deferral is unchanged.
+
+Full reconciliation: [19. Desktop UI — as designed](19-desktop-ui.md) §19.11.

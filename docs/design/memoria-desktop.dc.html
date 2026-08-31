@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f6f2ea;color:#241f18}
+a{color:#3d5a78;text-decoration:none}a:hover{color:#7a3327;text-decoration:underline}
+@keyframes slideIn{from{transform:translateX(40px);opacity:0}to{transform:translateX(0);opacity:1}}
+::selection{background:#e9ddc8}
+</style>
+</helmet>
+<div style="display:flex;height:100vh;font-family:system-ui,'Segoe UI',sans-serif;font-size:14px;overflow:hidden">
+
+  <!-- Sidebar -->
+  <div style="width:232px;flex:none;background:#efe9dd;border-right:1px solid #ddd3c0;display:flex;flex-direction:column;padding:20px 0 14px;overflow-y:auto;overflow-x:hidden">
+    <div style="flex:none;padding:0 20px 18px;border-bottom:1px solid #ddd3c0;display:flex;align-items:flex-start;justify-content:space-between">
+      <div>
+        <div style="font-family:Newsreader,serif;font-size:21px;font-weight:600;letter-spacing:.02em">Memoria</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#8a7f6d;margin-top:2px">THE ARCHIVE · 2004–2019</div>
+      </div>
+      <span onClick="{{ openSearch }}" title="Search everything" style="cursor:pointer;color:#6b6152;padding:5px 7px;border-radius:6px;font-size:15px;line-height:1;margin-top:2px" style-hover="background:#e6decd;color:#241f18">⌕</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:2px;padding:14px 10px 0">
+      <div onClick="{{ goHome }}" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;cursor:pointer;border-left:3px solid {{ homeBar }};background:{{ homeBg }}" style-hover="background:#e6decd">Ask Memoria</div>
+      <div onClick="{{ goReview }}" style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-radius:6px;cursor:pointer;border-left:3px solid {{ reviewBar }};background:{{ reviewBg }}" style-hover="background:#e6decd"><span>Review</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#7a3327;color:#f6f2ea;border-radius:9px;padding:1px 7px">12</span></div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px 6px 12px;margin-top:14px;border-top:1px solid #e2d9c6">
+      <span onClick="{{ toggleMs }}" style="display:flex;align-items:center;gap:6px;cursor:pointer;border-radius:4px;padding:2px 4px" style-hover="background:#e6decd"><span style="font-size:9px;color:#241f18;transform:rotate({{ msRot }});transition:transform .15s;display:inline-block">▶</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:700;letter-spacing:.12em;color:#241f18">MANUSCRIPT</span></span>
+      <span onClick="{{ addChapter }}" title="Add chapter" style="font-size:13px;color:#8a7f6d;cursor:pointer;padding:0 4px;border-radius:4px" style-hover="background:#e6decd;color:#241f18">+</span>
+    </div>
+    <sc-if value="{{ msOpen }}" hint-placeholder-val="{{ true }}">
+    <div style="display:flex;flex-direction:column;gap:1px;padding:0 10px">
+      <sc-for list="{{ chapters }}" as="ch" hint-placeholder-count="3">
+        <div style="display:flex;align-items:center;gap:0;border-radius:6px;border-left:3px solid {{ ch.bar }};background:{{ ch.bg }}" style-hover="background:#e6decd">
+          <span onClick="{{ ch.toggle }}" style="width:20px;flex:none;text-align:center;font-size:9px;color:#8a7f6d;cursor:pointer;transform:rotate({{ ch.rot }});transition:transform .15s">▶</span>
+          <span onClick="{{ ch.open }}" style="flex:1;padding:6px 4px 6px 0;cursor:pointer;color:#33291d;font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ ch.label }}</span>
+          <span title="Drag to reorder" style="flex:none;padding:0 8px;color:#c4b89f;cursor:grab;font-size:12px;letter-spacing:-1px">⠿</span>
+        </div>
+        <sc-if value="{{ ch.expanded }}" hint-placeholder-val="{{ false }}">
+          <sc-for list="{{ ch.sections }}" as="sec" hint-placeholder-count="2">
+            <div style="display:flex;align-items:center;border-radius:6px;border-left:3px solid {{ sec.bar }};background:{{ sec.bg }}" style-hover="background:#e6decd">
+              <span onClick="{{ sec.open }}" style="flex:1;padding:5px 4px 5px 32px;cursor:pointer;color:#6b6152;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ sec.label }}</span>
+              <span title="Drag to reorder" style="flex:none;padding:0 8px;color:#c4b89f;cursor:grab;font-size:12px;letter-spacing:-1px">⠿</span>
+            </div>
+          </sc-for>
+          <div onClick="{{ ch.addSection }}" style="padding:4px 4px 4px 32px;font-size:12px;color:#a99d88;cursor:pointer;border-radius:6px" style-hover="background:#e6decd;color:#5a4632">+ Add section</div>
+        </sc-if>
+      </sc-for>
+    </div>
+    </sc-if>
+    <div style="padding:16px 20px 6px 12px;margin-top:14px;border-top:1px solid #e2d9c6">
+      <span onClick="{{ toggleInterp }}" style="display:flex;align-items:center;gap:6px;cursor:pointer;border-radius:4px;padding:2px 4px;width:fit-content" style-hover="background:#e6decd"><span style="font-size:9px;color:#241f18;transform:rotate({{ interpRot }});transition:transform .15s;display:inline-block">▶</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:700;letter-spacing:.12em;color:#241f18">INTERPRETATION</span></span>
+    </div>
+    <sc-if value="{{ interpOpen }}" hint-placeholder-val="{{ true }}">
+    <div style="display:flex;flex-direction:column;gap:1px;padding:0 10px">
+      <sc-for list="{{ interpGroups }}" as="g" hint-placeholder-count="4">
+        <div style="display:flex;align-items:center;border-radius:6px" style-hover="background:#e6decd">
+          <span onClick="{{ g.toggle }}" style="width:20px;flex:none;text-align:center;font-size:9px;color:#8a7f6d;cursor:pointer;transform:rotate({{ g.rot }});transition:transform .15s">▶</span>
+          <span onClick="{{ g.toggle }}" style="flex:1;padding:5px 0;cursor:pointer;font-size:13.5px;font-weight:600;color:#33291d">{{ g.label }}</span>
+          <span onClick="{{ g.add }}" title="Add" style="flex:none;padding:0 8px;font-size:13px;color:#a99d88;cursor:pointer" style-hover="color:#241f18">+</span>
+        </div>
+        <sc-if value="{{ g.expanded }}" hint-placeholder-val="{{ false }}">
+          <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="2">
+            <div onClick="{{ it.open }}" style="padding:5px 10px 5px 32px;border-radius:6px;cursor:pointer;border-left:3px solid {{ it.bar }};background:{{ it.bg }};color:#6b6152;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" style-hover="background:#e6decd">{{ it.label }}</div>
+          </sc-for>
+        </sc-if>
+      </sc-for>
+      <div onClick="{{ addGroup }}" style="padding:5px 10px 5px 20px;font-size:12px;color:#a99d88;cursor:pointer;border-radius:6px" style-hover="background:#e6decd;color:#5a4632">+ New group</div>
+    </div>
+    </sc-if>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px 6px 12px;margin-top:14px;border-top:1px solid #e2d9c6">
+      <span onClick="{{ toggleSrcs }}" style="display:flex;align-items:center;gap:6px;cursor:pointer;border-radius:4px;padding:2px 4px" style-hover="background:#e6decd"><span style="font-size:9px;color:#241f18;transform:rotate({{ srcsRot }});transition:transform .15s;display:inline-block">▶</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:700;letter-spacing:.12em;color:#241f18">SOURCES</span></span>
+      <span onClick="{{ addSource }}" title="Add sources" style="font-size:13px;color:#8a7f6d;cursor:pointer;padding:0 4px;border-radius:4px" style-hover="background:#e6decd;color:#241f18">+</span>
+    </div>
+    <sc-if value="{{ srcsOpen }}" hint-placeholder-val="{{ true }}">
+    <div style="display:flex;flex-direction:column;gap:1px;padding:0 10px">
+      <sc-for list="{{ srcGroups }}" as="g" hint-placeholder-count="2">
+        <div style="display:flex;align-items:center;border-radius:6px" style-hover="background:#e6decd">
+          <span onClick="{{ g.toggle }}" style="width:20px;flex:none;text-align:center;font-size:9px;color:#8a7f6d;cursor:pointer;transform:rotate({{ g.rot }});transition:transform .15s">▶</span>
+          <span onClick="{{ g.toggle }}" style="flex:1;padding:5px 0;cursor:pointer;font-size:13.5px;font-weight:600;color:#33291d">{{ g.label }}</span>
+          <span style="flex:none;padding:0 8px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#a99d88">{{ g.count }}</span>
+        </div>
+        <sc-if value="{{ g.expanded }}" hint-placeholder-val="{{ false }}">
+          <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="2">
+            <div onClick="{{ it.open }}" style="padding:5px 10px 5px 32px;border-radius:6px;cursor:pointer;border-left:3px solid {{ it.bar }};background:{{ it.bg }};color:#6b6152;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" style-hover="background:#e6decd">{{ it.label }}</div>
+          </sc-for>
+        </sc-if>
+      </sc-for>
+      <div onClick="{{ addSource }}" style="padding:5px 10px 5px 20px;font-size:12px;color:#a99d88;cursor:pointer;border-radius:6px" style-hover="background:#e6decd;color:#5a4632">+ Add sources…</div>
+    </div>
+    </sc-if>
+    <div style="margin-top:auto;flex:none;border-top:1px solid #ddd3c0;padding:10px 10px 0">
+      <div style="display:flex;gap:2px;margin-bottom:8px">
+        <span style="flex:1;display:flex;align-items:center;gap:7px;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:12.5px;color:#6b6152" style-hover="background:#e6decd;color:#241f18">⚙ Settings</span>
+        <span style="flex:1;display:flex;align-items:center;gap:7px;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:12.5px;color:#6b6152" style-hover="background:#e6decd;color:#241f18">✉ Feedback</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:7px;padding:0 10px 2px">
+        <span style="width:7px;height:7px;border-radius:50%;background:#8aa17a;flex:none"></span>
+        <span style="font-size:11.5px;color:#8a7f6d">Curator idle · last pass 09:41</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Conversations rail (Ask Memoria) -->
+  <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+    <div style="width:264px;flex:none;background:#f4f0e7;border-right:1px solid #ddd3c0;display:flex;flex-direction:column;overflow-y:auto">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:22px 18px 12px">
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#8a7f6d">CONVERSATIONS</span>
+        <span onClick="{{ newConvo }}" style="font-size:12px;color:#5a4632;border:1px solid #cdbfa4;border-radius:6px;padding:2px 9px;cursor:pointer" style-hover="background:#e6decd">+ New</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px;padding:0 8px 16px">
+        <sc-for list="{{ convos }}" as="c" hint-placeholder-count="4">
+          <div onClick="{{ c.pick }}" style="padding:10px 12px;border-radius:8px;cursor:pointer;background:{{ c.bg }};box-shadow:{{ c.ring }}" style-hover="background:#e9e2d1">
+            <div style="font-family:Newsreader,serif;font-size:14.5px;line-height:1.35;color:#33291d;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">{{ c.title }}</div>
+            <div style="font-size:11px;color:#8a7f6d;margin-top:3px">{{ c.meta }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- Main -->
+  <div style="flex:1;overflow-y:auto;position:relative">
+
+    <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+      <div style="max-width:760px;margin:0 auto;padding:56px 40px 120px;display:flex;flex-direction:column;min-height:calc(100vh - 176px)">
+        <div style="font-family:Newsreader,serif;font-size:26px;font-weight:500">Ask Memoria</div>
+        <div style="font-size:13px;color:#8a7f6d;margin:4px 0 36px">Book-wide conversation · the whole archive is in reach</div>
+        <div style="align-self:flex-end;max-width:520px;background:#efe9dd;border-radius:14px 14px 3px 14px;padding:12px 18px;font-family:Newsreader,serif;font-size:16.5px;line-height:1.5">What changed in my understanding of Bob between 2011 and 2014?</div>
+        <div style="margin-top:28px;max-width:640px;display:flex;flex-direction:column;gap:14px;font-family:Newsreader,serif;font-size:16.5px;line-height:1.62">
+          <p style="margin:0">In mid-2011 your journals treat Bob as a confidant. The entry the evening of the call is warm and unguarded <span onClick="{{ cite184 }}" style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;background:#e9ddc8;color:#5a4632;border-radius:4px;padding:1.5px 7px;cursor:pointer;white-space:nowrap" style-hover="background:#7a3327;color:#f6f2ea">SRC-0184 ¶17</span> and there is no contemporaneous suspicion of his role in the acquisition.</p>
+          <p style="margin:0">By late 2012 the language changes. You begin writing about him with distance — "measured," "careful with me" — and by the spring of 2014 the relationship is explicitly framed as one you are managing rather than trusting <span onClick="{{ cite1102 }}" style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;background:#e9ddc8;color:#5a4632;border-radius:4px;padding:1.5px 7px;cursor:pointer;white-space:nowrap" style-hover="background:#7a3327;color:#f6f2ea">SRC-1102 ¶8</span>. The pivot aligns with the chronology revision in <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;background:#e9ddc8;color:#5a4632;border-radius:4px;padding:1.5px 7px;white-space:nowrap">CLM-0041</span>: the belief that he probably knew before July 17.</p>
+          <div style="border-left:2px solid #ddd3c0;padding:6px 0 6px 14px;font-family:system-ui,sans-serif;font-size:12.5px;color:#8a7f6d;line-height:1.5">Searched July 2011 – June 2014 journals and Bob-linked email; compared contemporaneous entries against your 2018 recollections. I did not search unrelated correspondence from that period.</div>
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-family:system-ui,sans-serif;font-size:12.5px;color:#6b6152">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.08em;color:#8a7f6d">IN THE MANUSCRIPT</span>
+            <span onClick="{{ goEditor }}" style="background:#efe9dd;border:1px solid #ddd3c0;border-radius:4px;padding:2px 9px;cursor:pointer" style-hover="background:#e6decd">Ch 2 ¶7 — the call</span>
+            <span onClick="{{ goEditor }}" style="background:#efe9dd;border:1px solid #ddd3c0;border-radius:4px;padding:2px 9px;cursor:pointer" style-hover="background:#e6decd">Ch 5 ¶12 — managing Bob</span>
+            <span style="color:#a8762a">· the 2012 shift in language is not yet in the draft</span>
+          </div>
+        </div>
+        <div style="align-self:flex-end;max-width:520px;background:#efe9dd;border-radius:14px 14px 3px 14px;padding:12px 18px;font-family:Newsreader,serif;font-size:16.5px;line-height:1.5;margin-top:32px">What is the strongest contemporaneous evidence that Bob knew beforehand?</div>
+        <div style="margin:22px 0 0;border-left:2px solid #ddd3c0;padding-left:16px;display:flex;flex-direction:column;gap:7px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8a7f6d">
+          <div>› searching 2011 email · "acquisition" + Bob aliases (Bob, Robert, R.) — 34 hits</div>
+          <div>› reading SRC-0184 ¶12–19 · journal, Jul 17 2011</div>
+          <div>› reading SRC-0391 ¶2–6 · email, Jul 18 2011</div>
+          <div>› searching for disconfirming evidence · Jul–Sep 2011 — 3 candidates</div>
+          <div>› comparing contemporaneous vs. retrospective accounts</div>
+        </div>
+        <div style="margin-top:20px;max-width:640px;font-family:Newsreader,serif;font-size:16.5px;line-height:1.62;display:flex;flex-direction:column;gap:14px">
+          <p style="margin:0">The strongest single piece is the July 18 email in which Bob refers to "the terms we discussed" three days before you told him any terms <span onClick="{{ cite1102 }}" style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;background:#e9ddc8;color:#5a4632;border-radius:4px;padding:1.5px 7px;cursor:pointer" style-hover="background:#7a3327;color:#f6f2ea">SRC-1102 ¶8</span>. Your journal from the call itself records his surprise as believable at the time <span onClick="{{ cite184 }}" style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;background:#e9ddc8;color:#5a4632;border-radius:4px;padding:1.5px 7px;cursor:pointer" style-hover="background:#7a3327;color:#f6f2ea">SRC-0184 ¶17</span> — which cuts against certainty, not against knowledge.</p>
+          <p style="margin:0">Verdict: <b>probably supported</b>, moderate confidence. The case rests on two contemporaneous documents; the disconfirming candidates are all retrospective.</p>
+          <div style="display:flex;align-items:center;gap:10px;font-family:system-ui,sans-serif;font-size:12.5px;color:#4c5c3c;background:#e4ead9;border-radius:6px;padding:8px 14px;width:fit-content">✓ Saved as research memo <span style="font-family:'IBM Plex Mono',monospace">RES-20261018-003</span> · linked to CLM-0041</div>
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-family:system-ui,sans-serif;font-size:12.5px;color:#6b6152">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.08em;color:#8a7f6d">IN THE MANUSCRIPT</span>
+            <span onClick="{{ goEditor }}" style="background:#efe9dd;border:1px solid #ddd3c0;border-radius:4px;padding:2px 9px;cursor:pointer" style-hover="background:#e6decd">Ch 2 ¶7 — asserts knowledge by July 15</span>
+            <span style="color:#a8762a">· the July 18 email itself is not mentioned anywhere in the draft</span>
+          </div>
+        </div>
+        <div style="margin-top:auto;padding-top:48px">
+          <div style="display:flex;align-items:center;gap:10px;background:#fdfbf7;border:1px solid #ddd3c0;border-radius:10px;padding:13px 18px;box-shadow:0 1px 3px rgba(60,48,30,.06)">
+            <span style="font-family:Newsreader,serif;font-size:16px;color:#a99d88;font-style:italic;flex:1">Ask anything about the book or the archive…</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#a99d88;border:1px solid #ddd3c0;border-radius:4px;padding:2px 6px">⏎</span>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isReview }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:860px;margin:0 auto;padding:48px 40px 80px">
+        <div style="font-family:Newsreader,serif;font-size:26px;font-weight:500">Review</div>
+        <div style="font-size:13px;color:#8a7f6d;margin:4px 0 24px">Draft-vs-archive audit · Chapter 2 · nothing changes without your say-so</div>
+        <div style="display:flex;align-items:center;gap:18px;background:#fdfbf7;border:1px solid #ddd3c0;border-radius:10px;padding:14px 20px;margin-bottom:26px">
+          <div style="flex:1"><b>12 findings</b> after the chronology revision</div>
+          <div style="display:flex;gap:14px;font-size:12.5px">
+            <span><span style="color:#7a3327;font-weight:600">4</span> high — factual conflicts</span>
+            <span><span style="color:#a8762a;font-weight:600">5</span> medium — stale framing</span>
+            <span><span style="color:#8a7f6d;font-weight:600">3</span> low</span>
+          </div>
+          <div style="background:#241f18;color:#f6f2ea;border-radius:7px;padding:7px 14px;font-size:12.5px;cursor:pointer" style-hover="background:#7a3327">Apply high-confidence fixes…</div>
+        </div>
+
+        <!-- expanded finding -->
+        <div style="background:#fdfbf7;border:1px solid #ddd3c0;border-left:4px solid #7a3327;border-radius:10px;padding:20px 24px;margin-bottom:12px">
+          <div style="display:flex;align-items:baseline;gap:10px">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5a4632">Chapter 2 ¶7</span>
+            <span style="font-size:11px;font-weight:600;letter-spacing:.06em;color:#7a3327">CONTRADICTED</span>
+            <span style="margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#a99d88">IMP-20261103-004</span>
+          </div>
+          <div style="font-family:Newsreader,serif;font-size:16.5px;line-height:1.55;margin:12px 0 4px">The draft states Bob knew by July 15. Contemporaneous evidence places his probable knowledge on July 18.</div>
+          <div style="font-size:13px;color:#6b6152;line-height:1.55;margin-bottom:14px">The paragraph treats his July 15 behavior as evidence of foreknowledge; the revised timeline makes that reading unavailable to the narrator at the time.</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">
+            <span style="font-size:11px;color:#8a7f6d;align-self:center">Supporting:</span>
+            <span onClick="{{ cite184 }}" style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;background:#e9ddc8;color:#5a4632;border-radius:4px;padding:1.5px 7px;cursor:pointer" style-hover="background:#7a3327;color:#f6f2ea">SRC-0184 ¶17</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;background:#e9ddc8;color:#5a4632;border-radius:4px;padding:1.5px 7px;cursor:pointer">SRC-0391 ¶4</span>
+            <span style="font-size:11px;color:#8a7f6d;align-self:center;margin-left:8px">Contradicting the draft:</span>
+            <span onClick="{{ cite1102 }}" style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;background:#e9ddc8;color:#5a4632;border-radius:4px;padding:1.5px 7px;cursor:pointer" style-hover="background:#7a3327;color:#f6f2ea">SRC-1102 ¶8</span>
+          </div>
+          <div style="display:flex;gap:8px;border-top:1px solid #ece4d4;padding-top:14px">
+            <span style="border:1px solid #cdbfa4;border-radius:7px;padding:6px 13px;font-size:12.5px;cursor:pointer" style-hover="background:#efe9dd">View evidence</span>
+            <span style="border:1px solid #cdbfa4;border-radius:7px;padding:6px 13px;font-size:12.5px;cursor:pointer" style-hover="background:#efe9dd">Explain</span>
+            <span style="border:1px solid #cdbfa4;border-radius:7px;padding:6px 13px;font-size:12.5px;cursor:pointer" style-hover="background:#efe9dd">Preview diff</span>
+            <span style="margin-left:auto;background:#241f18;color:#f6f2ea;border-radius:7px;padding:6px 14px;font-size:12.5px;cursor:pointer" style-hover="background:#7a3327">Rewrite</span>
+            <span style="border:1px solid #cdbfa4;border-radius:7px;padding:6px 13px;font-size:12.5px;cursor:pointer;color:#8a7f6d" style-hover="background:#efe9dd">Dismiss</span>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;align-items:baseline;gap:10px;background:#fdfbf7;border:1px solid #ddd3c0;border-radius:10px;padding:14px 24px;cursor:pointer" style-hover="border-color:#cdbfa4">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5a4632">Chapter 3 ¶2</span>
+            <span style="font-size:11px;font-weight:600;letter-spacing:.06em;color:#a8762a">OVERSTATED</span>
+            <span style="font-family:Newsreader,serif;font-size:15px;color:#4a4237">The draft presents the narrator as certain at the time; the July–August journals show sustained uncertainty.</span>
+          </div>
+          <div style="display:flex;align-items:baseline;gap:10px;background:#fdfbf7;border:1px solid #ddd3c0;border-radius:10px;padding:14px 24px;cursor:pointer" style-hover="border-color:#cdbfa4">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5a4632">Chapter 4 ¶9</span>
+            <span style="font-size:11px;font-weight:600;letter-spacing:.06em;color:#a8762a">HINDSIGHT LEAKAGE</span>
+            <span style="font-family:Newsreader,serif;font-size:15px;color:#4a4237">Presents knowledge from Alice's 2019 account as available to the narrator in 2011.</span>
+          </div>
+          <div style="display:flex;align-items:baseline;gap:10px;background:#fdfbf7;border:1px solid #ddd3c0;border-radius:10px;padding:14px 24px;cursor:pointer;opacity:.75" style-hover="border-color:#cdbfa4">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5a4632">Chapter 6 ¶14</span>
+            <span style="font-size:11px;font-weight:600;letter-spacing:.06em;color:#6d7f5d">SUPPORTED</span>
+            <span style="font-family:Newsreader,serif;font-size:15px;color:#4a4237">The draft's account matches contemporaneous records.</span>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isSource }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:960px;margin:0 auto;padding:48px 40px 80px;display:flex;gap:36px">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:baseline;gap:12px">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#5a4632">SRC-0184</span>
+            <span style="font-family:Newsreader,serif;font-size:24px;font-weight:500">Journal — July 17, 2011</span>
+          </div>
+          <div style="display:flex;gap:8px;margin:12px 0 28px;flex-wrap:wrap">
+            <span style="font-size:11px;background:#e4ead9;color:#4c5c3c;border-radius:4px;padding:2.5px 8px;font-weight:600">CONTEMPORANEOUS</span>
+            <span style="font-size:11px;background:#efe9dd;color:#6b6152;border-radius:4px;padding:2.5px 8px">recorded 2011-07-17</span>
+            <span style="font-size:11px;background:#efe9dd;color:#6b6152;border-radius:4px;padding:2.5px 8px">event 2011-07-17 · exact</span>
+            <span style="font-size:11px;background:#efe9dd;color:#6b6152;border-radius:4px;padding:2.5px 8px">journal · 2011.docx</span>
+          </div>
+          <div style="font-family:Newsreader,serif;font-size:17px;line-height:1.72;color:#33291d;display:flex;flex-direction:column;gap:16px">
+            <p style="margin:0;color:#8a7f6d"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;margin-right:10px">¶16</span>The office had mostly emptied out by six. I stayed to finish the board letter and nearly missed the phone.</p>
+            <p style="margin:0;background:#f3e6c8;border-radius:6px;padding:12px 16px;box-shadow:inset 3px 0 0 #a8762a"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;margin-right:10px;color:#a8762a">¶17</span>I called Bob that evening. He sounded genuinely surprised about the acquisition — or I believed he did. We talked for almost an hour, mostly about what it would mean for the Cleveland office, and he asked twice whether I was all right.</p>
+            <p style="margin:0;color:#8a7f6d"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;margin-right:10px">¶18</span>I don't know why I keep returning to the way he said "well, there it is." As if a thing long expected had finally arrived.</p>
+          </div>
+        </div>
+        <div style="width:230px;flex:none;padding-top:8px">
+          <div style="background:#241f18;color:#f6f2ea;border-radius:8px;padding:9px 0;text-align:center;font-size:13px;cursor:pointer;margin-bottom:24px" style-hover="background:#7a3327">Open original ↗</div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#8a7f6d;margin-bottom:10px">CITED BY</div>
+          <div style="display:flex;flex-direction:column;gap:6px;font-size:13px">
+            <a href="#" style="display:block">CLM-0041 · Bob's foreknowledge</a>
+            <a href="#" style="display:block">Theme · Control</a>
+            <a href="#" style="display:block">Arc · Bob relationship</a>
+            <a href="#" style="display:block">RES-20261018-003</a>
+            <a href="#" style="display:block">IMP-20261103-004</a>
+            <a href="#" style="display:block">Chapter 8 source packet</a>
+          </div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#8a7f6d;margin:24px 0 10px">PROVENANCE</div>
+          <div style="font-size:12px;color:#6b6152;line-height:1.6">Normalized from <i>2011.docx</i>, "Entry dated July 17, 2011" · normalizer v3 · anchors verified</div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isSection }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:1060px;margin:0 auto;padding:48px 40px 80px;display:flex;gap:36px;align-items:flex-start">
+        <div style="flex:1;min-width:0;max-width:640px">
+          <div style="display:flex;align-items:center;gap:16px">
+            <div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8a7f6d">SECTION 8.3</div>
+              <div style="font-family:Newsreader,serif;font-size:26px;font-weight:500">The Acquisition</div>
+            </div>
+            <div style="margin-left:auto;background:#7a3327;color:#f6f2ea;border-radius:8px;padding:10px 22px;font-size:14px;cursor:pointer;box-shadow:0 1px 3px rgba(60,48,30,.15)" style-hover="background:#241f18">Resume →</div>
+          </div>
+          <div style="font-size:12.5px;color:#8a7f6d;margin:6px 0 30px">Last worked October 18, 2026 · six weeks ago · <span style="background:#e0dbd0;color:#6b6152;border-radius:3px;padding:1px 6px;font-size:10.5px;font-weight:700;letter-spacing:.06em">LEGACY DRAFT</span></div>
+          <div style="font-family:Newsreader,serif;font-size:17.5px;line-height:1.75;color:#33291d;display:flex;flex-direction:column;gap:18px">
+            <p style="margin:0;padding:4px 8px;border-radius:6px;cursor:text" style-hover="background:#f1ece1">The papers were signed in a conference room I had sat in a hundred times, and the strangest part was how ordinary it felt — the same coffee, the same view of the parking structure, the same chairs.</p>
+            <p style="margin:0;padding:4px 8px;border-radius:6px;cursor:text" style-hover="background:#f1ece1">It was only afterward, replaying the week in my head, that the small things began to line up: the meeting Bob moved without explanation, the questions he didn't ask, the way nothing in the announcement seemed to reach him.</p>
+            <div>
+              <p style="margin:0;padding:4px 8px;border-radius:6px;background:#fbf4e4;box-shadow:inset 3px 0 0 #a8762a">He had known for weeks — of that I was certain, standing in the hallway with the folder still in my hand.</p>
+              <div style="display:flex;align-items:center;gap:10px;margin:8px 0 0 8px;font-family:system-ui,sans-serif;font-size:12.5px;color:#8a6a33">
+                <span>⚑ May overstate Bob's foreknowledge after the chronology revision</span>
+                <span style="border:1px solid #d9c48e;border-radius:6px;padding:3px 10px;cursor:pointer;color:#5a4632" style-hover="background:#f3e6c8">Preview rewrite</span>
+                <span style="border:1px solid #d9c48e;border-radius:6px;padding:3px 10px;cursor:pointer;color:#5a4632" style-hover="background:#f3e6c8">View impact</span>
+              </div>
+            </div>
+            <p style="margin:0;padding:4px 8px;border-radius:6px;cursor:text" style-hover="background:#f1ece1">What I could not have said then — what took years to be able to say — was why it mattered so much that he had let me find out with everyone else. <span style="font-size:11px;color:#a99d88;font-family:system-ui,sans-serif">✎ click to edit</span></p>
+          </div>
+        </div>
+        <div style="width:290px;flex:none;position:sticky;top:0;padding-top:8px;display:flex;flex-direction:column;gap:10px">
+          <div style="background:#fdfbf7;border:1px solid #ddd3c0;border-radius:10px;padding:14px 16px">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#8a7f6d;margin-bottom:6px">PURPOSE</div>
+            <div style="font-size:13px;line-height:1.55;color:#33291d">Show the first point at which the narrator realizes that Bob may have known substantially more than he admitted.</div>
+          </div>
+          <div style="background:#fdfbf7;border:1px solid #ddd3c0;border-radius:10px;padding:14px 16px">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#8a7f6d;margin-bottom:6px">CHECKPOINT</div>
+            <div style="font-size:13px;line-height:1.55;color:#33291d">Opening works. Middle section overstates certainty — distinguish what was knowable in 2011 from what became clear later.</div>
+            <div style="margin-top:8px;border-top:1px dashed #ddd3c0;padding-top:8px;font-size:12.5px;color:#6b6152"><b style="color:#241f18">Next</b> — rewrite the final three paragraphs using only contemporaneous evidence.</div>
+          </div>
+          <div style="background:#fbf4e4;border:1px solid #e5d5ac;border-radius:10px;padding:14px 16px">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#a8762a;margin-bottom:6px">NEEDS ATTENTION</div>
+            <div style="font-size:12.5px;line-height:1.55;color:#33291d">¶7 may overstate Bob's foreknowledge. <a href="#">View impact</a></div>
+          </div>
+          <div style="background:#fdfbf7;border:1px solid #ddd3c0;border-radius:10px;padding:14px 16px">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#8a7f6d;margin-bottom:6px">DECISIONS</div>
+            <ul style="margin:0;padding-left:16px;font-size:12.5px;line-height:1.6;color:#33291d">
+              <li>Do not reveal Alice's later account until §8.5. <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#a99d88">DEC-0088</span></li>
+              <li>Keep Bob's knowledge ambiguous here.</li>
+            </ul>
+          </div>
+          <div style="background:#fdfbf7;border:1px solid #ddd3c0;border-radius:10px;padding:14px 16px">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#8a7f6d;margin-bottom:6px">OPEN QUESTION</div>
+            <div style="font-size:12.5px;line-height:1.55;color:#33291d">Did Bob receive the July 14 document? <span style="color:#8a7f6d">· researching</span></div>
+          </div>
+          <div style="background:#fdfbf7;border:1px solid #ddd3c0;border-radius:10px;padding:14px 16px">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#8a7f6d;margin-bottom:8px">RELEVANT</div>
+            <div style="display:flex;flex-wrap:wrap;gap:5px">
+              <a href="#" style="font-size:11.5px;background:#efe9dd;border-radius:4px;padding:2px 8px">Control</a>
+              <a href="#" style="font-size:11.5px;background:#efe9dd;border-radius:4px;padding:2px 8px">Loyalty</a>
+              <a href="#" style="font-size:11.5px;background:#efe9dd;border-radius:4px;padding:2px 8px">Bob relationship</a>
+              <a href="#" style="font-size:11.5px;background:#efe9dd;border-radius:4px;padding:2px 8px">CLM-0041</a>
+            </div>
+            <div style="font-size:12.5px;line-height:1.6;margin-top:8px"><a href="#">Acquisition knowledge timeline</a><br><a href="#">Bob / Alice account comparison</a></div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isTheme }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:780px;margin:0 auto;padding:48px 40px 80px">
+        <div style="display:flex;align-items:center;gap:14px">
+          <div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8a7f6d">THEME</div>
+            <div style="font-family:Newsreader,serif;font-size:26px;font-weight:500">Control</div>
+          </div>
+          <div style="margin-left:auto;border:1px solid #cdbfa4;border-radius:8px;padding:9px 18px;font-size:13.5px;cursor:pointer" style-hover="background:#efe9dd">💬 Discuss this</div>
+        </div>
+        <div style="margin:26px 0 0;background:#fdfbf7;border:1px solid #ddd3c0;border-radius:10px;padding:20px 24px">
+          <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
+            <span style="font-size:10.5px;font-weight:700;letter-spacing:.08em;background:#3d5a78;color:#f6f2ea;border-radius:3px;padding:2px 7px">AUTHOR</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#a99d88">SES-20260912-1432 · T017</span>
+          </div>
+          <div style="font-family:Newsreader,serif;font-size:17.5px;line-height:1.6">Control was never really about professional authority — that was a symptom. It is about the fear of dependence: on Bob, on the institution, on being taken care of.</div>
+          <div style="font-size:12px;color:#8a7f6d;margin-top:10px">Adopted from conversation, September 12 · <a href="#">see the exact turn</a> · <a href="#">when did this change?</a></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px">
+          <div style="background:#fdfbf7;border:1px solid #ddd3c0;border-radius:10px;padding:18px 22px">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#8a7f6d;margin-bottom:10px">SUPPORTING CLAIMS</div>
+            <div style="display:flex;flex-direction:column;gap:10px;font-size:13.5px;line-height:1.5">
+              <div><a href="#">CLM-0041</a> — Bob probably knew before July 17 <span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;background:#efe0d3;color:#7a4a27;border-radius:3px;padding:1px 6px">INFERRED</span></div>
+              <div><a href="#">CLM-0057</a> — The resignation was framed as freedom, felt as exposure <span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;background:#e4ead9;color:#4c5c3c;border-radius:3px;padding:1px 6px">SOURCE</span></div>
+            </div>
+          </div>
+          <div style="background:#fdfbf7;border:1px solid #ddd3c0;border-radius:10px;padding:18px 22px">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#8a7f6d;margin-bottom:10px">AFFECTED PASSAGES</div>
+            <div style="display:flex;flex-direction:column;gap:8px;font-size:13.5px">
+              <a href="#">Chapter 2 ¶14–17 — frames episode as ambition</a>
+              <a href="#">Chapter 5 ¶12 — likely framing conflict</a>
+              <a href="#">Chapter 9 ¶4 — possible implication</a>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:14px;background:#fbf4e4;border:1px solid #e5d5ac;border-radius:10px;padding:18px 22px">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#a8762a;margin-bottom:8px">MEMORIA NOTE — 2026-10-18</div>
+          <div style="font-family:Newsreader,serif;font-size:15.5px;line-height:1.6;color:#33291d">Later research cuts against part of the reading above: the 2013 letters to Alice show comfort with dependence in one relationship while it was feared in another. Your text has been left unchanged — worth a conversation? See <a href="#">RES-20261018-003</a> and <span onClick="{{ cite1102 }}" style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;background:#efe4c4;color:#5a4632;border-radius:4px;padding:1.5px 7px;cursor:pointer" style-hover="background:#7a3327;color:#f6f2ea">SRC-1102 ¶8</span>.</div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isEditor }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:1060px;margin:0 auto;padding:48px 40px 80px;display:flex;gap:36px;align-items:flex-start">
+        <div style="flex:1;min-width:0;max-width:640px">
+        <div style="display:flex;align-items:center;gap:16px">
+          <div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8a7f6d">CHAPTER 2</div>
+            <div style="font-family:Newsreader,serif;font-size:26px;font-weight:500">The Call</div>
+          </div>
+          <div style="margin-left:auto;background:#7a3327;color:#f6f2ea;border-radius:8px;padding:10px 22px;font-size:14px;cursor:pointer;box-shadow:0 1px 3px rgba(60,48,30,.15)" style-hover="background:#241f18">Resume →</div>
+        </div>
+        <div style="font-size:12.5px;color:#8a7f6d;margin:6px 0 30px">Last worked November 3, 2026 · <span style="background:#e0dbd0;color:#6b6152;border-radius:3px;padding:1px 6px;font-size:10.5px;font-weight:700;letter-spacing:.06em">LEGACY DRAFT</span> · every edit saves as yours</div>
+        <div style="font-family:Newsreader,serif;font-size:17.5px;line-height:1.75;color:#33291d;display:flex;flex-direction:column;gap:18px">
+          <div style="display:flex;align-items:center;gap:12px;margin:4px 0 -4px">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.1em;color:#a8762a">§ 2.1 · THURSDAY</span>
+            <span style="flex:1;height:1px;background:#e2d9c6"></span>
+          </div>
+          <p style="margin:0;padding:4px 8px;border-radius:6px;cursor:text" style-hover="background:#f1ece1">The announcement came on a Thursday, though I had stopped being surprised by Thursdays. What surprised me was the calm — mine, and everyone else's.</p>
+          <div style="display:flex;align-items:center;gap:12px;margin:14px 0 -4px">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.1em;color:#a8762a">§ 2.2 · THE BOARD LETTER</span>
+            <span style="flex:1;height:1px;background:#e2d9c6"></span>
+          </div>
+          <div>
+            <p style="margin:0;padding:4px 8px;border-radius:6px;background:#fbf4e4;box-shadow:inset 3px 0 0 #a8762a">By the fifteenth of July Bob already knew. I am sure of it now, and I think some part of me was sure of it then — in the way he took the news without taking a breath.</p>
+            <div style="display:flex;align-items:center;gap:10px;margin:8px 0 0 8px;font-family:system-ui,sans-serif;font-size:12.5px;color:#8a6a33">
+              <span>⚑ May conflict with the revised timeline (knowledge likely July 18)</span>
+              <span style="border:1px solid #d9c48e;border-radius:6px;padding:3px 10px;cursor:pointer;color:#5a4632" style-hover="background:#f3e6c8">Preview rewrite</span>
+              <span style="border:1px solid #d9c48e;border-radius:6px;padding:3px 10px;cursor:pointer;color:#5a4632" style-hover="background:#f3e6c8">Explain</span>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;margin:14px 0 -4px">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.1em;color:#a8762a">§ 2.3 · AN HOUR WITH BOB</span>
+            <span style="flex:1;height:1px;background:#e2d9c6"></span>
+          </div>
+          <sc-if value="{{ editing }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1.5px solid #3d5a78;border-radius:8px;background:#fdfbf7;padding:14px 16px">
+              <div style="font-family:Newsreader,serif;font-size:17.5px;line-height:1.7;min-height:76px" contentEditable="{{ true }}" suppressContentEditableWarning="{{ true }}">We spoke that evening for almost an hour. I remember deciding, somewhere in the middle of it, that his surprise was real — a decision I would spend three years unmaking.</div>
+              <div style="display:flex;gap:8px;margin-top:12px;font-family:system-ui,sans-serif;font-size:12.5px">
+                <span onClick="{{ saveEdit }}" style="background:#241f18;color:#f6f2ea;border-radius:6px;padding:6px 14px;cursor:pointer" style-hover="background:#7a3327">Save</span>
+                <span onClick="{{ cancelEdit }}" style="border:1px solid #cdbfa4;border-radius:6px;padding:6px 13px;cursor:pointer" style-hover="background:#efe9dd">Cancel</span>
+                <span style="margin-left:auto;color:#8a7f6d;align-self:center">will commit as author-authored · supreme</span>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ notEditing }}" hint-placeholder-val="{{ true }}">
+            <p onClick="{{ startEdit }}" style="margin:0;padding:4px 8px;border-radius:6px;cursor:text" style-hover="background:#f1ece1">We spoke that evening for almost an hour. I remember deciding, somewhere in the middle of it, that his surprise was real — a decision I would spend three years unmaking. <span style="font-size:11px;color:#a99d88;font-family:system-ui,sans-serif">✎ click to edit</span></p>
+          </sc-if>
+          <sc-if value="{{ savedNote }}" hint-placeholder-val="{{ false }}">
+            <div style="font-family:system-ui,sans-serif;font-size:12.5px;color:#4c5c3c;background:#e4ead9;border-radius:6px;padding:8px 14px;align-self:flex-start">✓ Saved as your edit · commit d41f2a9 · the Curator may ask whether this changes the Bob arc</div>
+          </sc-if>
+          <div style="display:flex;align-items:center;gap:12px;margin-top:14px">
+            <span style="flex:1;height:1px;background:#e2d9c6"></span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.1em;color:#a99d88">END OF CHAPTER 2</span>
+            <span style="flex:1;height:1px;background:#e2d9c6"></span>
+          </div>
+        </div>
+        </div>
+        <div style="width:290px;flex:none;position:sticky;top:0;padding-top:8px;display:flex;flex-direction:column;gap:10px">
+          <div style="background:#fdfbf7;border:1px solid #ddd3c0;border-radius:10px;padding:14px 16px">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#8a7f6d;margin-bottom:6px">PURPOSE</div>
+            <div style="font-size:13px;line-height:1.55;color:#33291d">Establish the call as the hinge of Part I: the last moment the narrator trusts Bob without reservation.</div>
+          </div>
+          <div style="background:#fdfbf7;border:1px solid #ddd3c0;border-radius:10px;padding:14px 16px">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#8a7f6d;margin-bottom:6px">CHECKPOINT</div>
+            <div style="font-size:13px;line-height:1.55;color:#33291d">Voice is settled. §2.2 carries the timeline problem; §2.3 is close to final.</div>
+            <div style="margin-top:8px;border-top:1px dashed #ddd3c0;padding-top:8px;font-size:12.5px;color:#6b6152"><b style="color:#241f18">Next</b> — resolve the ¶7 timeline conflict, then reread the chapter end to end.</div>
+          </div>
+          <div style="background:#fbf4e4;border:1px solid #e5d5ac;border-radius:10px;padding:14px 16px">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#a8762a;margin-bottom:6px">NEEDS ATTENTION</div>
+            <div style="font-size:12.5px;line-height:1.55;color:#33291d">§2.2 ¶7 may conflict with the revised timeline (knowledge likely July 18). <a href="#">View impact</a></div>
+          </div>
+          <div style="background:#fdfbf7;border:1px solid #ddd3c0;border-radius:10px;padding:14px 16px">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#8a7f6d;margin-bottom:6px">DECISIONS</div>
+            <ul style="margin:0;padding-left:16px;font-size:12.5px;line-height:1.6;color:#33291d">
+              <li>Keep the reader inside what was knowable in 2011.</li>
+              <li>Bob's foreknowledge stays a suspicion, not a fact, until Part III.</li>
+            </ul>
+          </div>
+          <div style="background:#fdfbf7;border:1px solid #ddd3c0;border-radius:10px;padding:14px 16px">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#8a7f6d;margin-bottom:8px">RELEVANT</div>
+            <div style="display:flex;flex-wrap:wrap;gap:5px">
+              <a href="#" style="font-size:11.5px;background:#efe9dd;border-radius:4px;padding:2px 8px">Control</a>
+              <a href="#" style="font-size:11.5px;background:#efe9dd;border-radius:4px;padding:2px 8px">Bob relationship</a>
+              <a href="#" style="font-size:11.5px;background:#efe9dd;border-radius:4px;padding:2px 8px">CLM-0041</a>
+            </div>
+            <div style="font-size:12.5px;line-height:1.6;margin-top:8px"><a href="#">Acquisition knowledge timeline</a></div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- Search dialog -->
+    <sc-if value="{{ searchOpen }}" hint-placeholder-val="{{ false }}">
+      <div onClick="{{ closeSearch }}" style="position:fixed;inset:0;background:rgba(36,31,24,.32);z-index:60"></div>
+      <div style="position:fixed;top:76px;left:50%;transform:translateX(-50%);width:620px;max-width:calc(100vw - 48px);max-height:calc(100vh - 140px);background:#fdfbf7;border:1px solid #ddd3c0;border-radius:12px;box-shadow:0 20px 60px rgba(36,31,24,.25);z-index:61;display:flex;flex-direction:column;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid #ece4d4">
+          <span style="font-size:16px;color:#8a7f6d">⌕</span>
+          <span style="flex:1;font-family:Newsreader,serif;font-size:17px">Bob acquisition july<span style="display:inline-block;width:1.5px;height:18px;background:#7a3327;margin-left:2px;vertical-align:middle"></span></span>
+          <span onClick="{{ closeSearch }}" style="cursor:pointer;color:#8a7f6d;font-size:16px;padding:2px 6px" style-hover="color:#241f18">✕</span>
+        </div>
+        <div style="overflow-y:auto;padding:14px 14px 16px;display:flex;flex-direction:column;gap:12px;background:#f6f2ea">
+          <div style="background:#fdfbf7;border:1px solid #ddd3c0;border-left:4px solid #7a3327;border-radius:10px;overflow:hidden">
+            <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:#f4ece5;border-bottom:1px solid #ecdfd3">
+              <span style="font-size:12px">✎</span><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.1em;color:#7a3327;font-weight:600">MANUSCRIPT</span><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#a99d88">3 passages</span>
+            </div>
+            <div onClick="{{ searchGoEditor }}" style="padding:9px 14px;cursor:pointer" style-hover="background:#f4ece5">
+              <div style="font-size:13px;color:#33291d"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#7a3327;margin-right:8px">Ch 2 ¶7</span>By the fifteenth of <b style="background:#f3e6c8">July Bob</b> already knew…</div>
+            </div>
+            <div onClick="{{ searchGoSection }}" style="padding:9px 14px;cursor:pointer;border-top:1px solid #f2ece0" style-hover="background:#f4ece5">
+              <div style="font-size:13px;color:#33291d"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#7a3327;margin-right:8px">§ 8.3</span>…the narrator realizes that <b style="background:#f3e6c8">Bob</b> may have known substantially more…</div>
+            </div>
+          </div>
+          <div style="background:#fdfbf7;border:1px solid #ddd3c0;border-left:4px solid #3d5a78;border-radius:10px;overflow:hidden">
+            <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:#eceef0;border-bottom:1px solid #dde2e7">
+              <span style="font-size:12px">◈</span><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.1em;color:#3d5a78;font-weight:600">INTERPRETATION</span><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#a99d88">4 records</span>
+            </div>
+            <div onClick="{{ searchGoTheme }}" style="padding:9px 14px;cursor:pointer" style-hover="background:#eceef0">
+              <div style="font-size:13px;color:#33291d"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#3d5a78;margin-right:8px">Theme · Control</span>…fear of dependence: on <b style="background:#f3e6c8">Bob</b>, on the institution…</div>
+            </div>
+            <div style="padding:9px 14px;cursor:pointer;border-top:1px solid #eceae2" style-hover="background:#eceef0">
+              <div style="font-size:13px;color:#33291d"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#3d5a78;margin-right:8px">CLM-0041</span><b style="background:#f3e6c8">Bob</b> probably knew about the <b style="background:#f3e6c8">acquisition</b> before <b style="background:#f3e6c8">July</b> 17</div>
+            </div>
+          </div>
+          <div style="background:#fdfbf7;border:1px solid #ddd3c0;border-left:4px solid #4c5c3c;border-radius:10px;overflow:hidden">
+            <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:#ebeee4;border-bottom:1px solid #dde3d2">
+              <span style="font-size:12px">▤</span><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.1em;color:#4c5c3c;font-weight:600">SOURCES</span><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#a99d88">34 records · evidence</span>
+            </div>
+            <div onClick="{{ searchGoSource }}" style="padding:9px 14px;cursor:pointer" style-hover="background:#ebeee4">
+              <div style="font-size:13px;color:#33291d"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#4c5c3c;margin-right:8px">SRC-0184 ¶17</span>I called <b style="background:#f3e6c8">Bob</b> that evening. He sounded genuinely surprised about the <b style="background:#f3e6c8">acquisition</b>…<span style="font-size:11px;color:#8a7f6d;margin-left:6px">journal · 2011-07-17</span></div>
+            </div>
+            <div style="padding:9px 14px;cursor:pointer;border-top:1px solid #eceae2" style-hover="background:#ebeee4">
+              <div style="font-size:13px;color:#33291d"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#4c5c3c;margin-right:8px">SRC-1102 ¶8</span>Given the terms we discussed, I'd hold off on saying anything…<span style="font-size:11px;color:#8a7f6d;margin-left:6px">email · 2011-07-18</span></div>
+            </div>
+            <div style="padding:7px 14px 9px;font-size:11.5px;color:#8a7f6d;border-top:1px solid #eceae2">31 more · <a href="#">refine with filters</a> — dates, people, contemporaneous only</div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- Slide-over source panel (flagship) -->
+    <sc-if value="{{ srcOpen }}" hint-placeholder-val="{{ false }}">
+      <div onClick="{{ closeSrc }}" style="position:fixed;inset:0;left:232px;background:rgba(36,31,24,.28);z-index:40"></div>
+      <div style="position:fixed;top:0;right:0;bottom:0;width:440px;background:#fdfbf7;border-left:1px solid #ddd3c0;box-shadow:-12px 0 40px rgba(36,31,24,.18);z-index:41;display:flex;flex-direction:column;animation:slideIn .22s ease-out">
+        <div style="display:flex;align-items:center;gap:10px;padding:18px 22px;border-bottom:1px solid #ece4d4">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5a4632">{{ srcId }}</span>
+          <span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;border-radius:3px;padding:2px 7px;background:{{ srcTagBg }};color:{{ srcTagC }}">{{ srcTag }}</span>
+          <span onClick="{{ closeSrc }}" style="margin-left:auto;cursor:pointer;color:#8a7f6d;font-size:18px;line-height:1;padding:4px" style-hover="color:#241f18">✕</span>
+        </div>
+        <div style="padding:20px 24px;overflow-y:auto;flex:1">
+          <div style="font-family:Newsreader,serif;font-size:19px;font-weight:500;margin-bottom:6px">{{ srcTitle }}</div>
+          <div style="font-size:12px;color:#8a7f6d;margin-bottom:20px">recorded {{ srcDate }} · {{ srcType }} · {{ srcOrig }}</div>
+          <sc-for list="{{ srcParas }}" as="p" hint-placeholder-count="3">
+            <p style="font-family:Newsreader,serif;font-size:15.5px;line-height:1.7;margin:0 0 14px;color:{{ p.color }};background:{{ p.bg }};border-radius:6px;padding:{{ p.pad }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;margin-right:9px;color:#a99d88">{{ p.n }}</span>{{ p.text }}</p>
+          </sc-for>
+        </div>
+        <div style="display:flex;gap:8px;padding:16px 22px;border-top:1px solid #ece4d4">
+          <span onClick="{{ goSourceFromPanel }}" style="flex:1;text-align:center;background:#241f18;color:#f6f2ea;border-radius:7px;padding:8px 0;font-size:13px;cursor:pointer" style-hover="background:#7a3327">Open full source</span>
+          <span style="flex:1;text-align:center;border:1px solid #cdbfa4;border-radius:7px;padding:8px 0;font-size:13px;cursor:pointer" style-hover="background:#efe9dd">Open original ↗</span>
+        </div>
+      </div>
+    </sc-if>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;citationPattern&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;slide-over&quot;,&quot;full-screen&quot;],&quot;default&quot;:&quot;slide-over&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Flagship interaction&quot;}}">
+const SOURCES = {
+  'SRC-0184': {
+    id: 'SRC-0184', title: 'Journal — July 17, 2011', date: '2011-07-17', type: 'journal · contemporaneous', orig: '2011.docx',
+    tag: 'CONTEMPORANEOUS', tagBg: '#e4ead9', tagC: '#4c5c3c',
+    paras: [
+      { n: '¶16', text: 'The office had mostly emptied out by six. I stayed to finish the board letter and nearly missed the phone.', hl: false },
+      { n: '¶17', text: 'I called Bob that evening. He sounded genuinely surprised about the acquisition — or I believed he did. We talked for almost an hour, mostly about what it would mean for the Cleveland office, and he asked twice whether I was all right.', hl: true },
+      { n: '¶18', text: 'I don\u2019t know why I keep returning to the way he said \u201cwell, there it is.\u201d As if a thing long expected had finally arrived.', hl: false }
+    ]
+  },
+  'SRC-1102': {
+    id: 'SRC-1102', title: 'Email from Bob — July 18, 2011', date: '2011-07-18', type: 'email · contemporaneous', orig: 'mail-export-2011.mbox',
+    tag: 'CONTEMPORANEOUS', tagBg: '#e4ead9', tagC: '#4c5c3c',
+    paras: [
+      { n: '¶7', text: 'Either way, Cleveland will land on its feet. It always does.', hl: false },
+      { n: '¶8', text: 'Given the terms we discussed, I\u2019d hold off on saying anything to the team until the filing is public. No sense getting ahead of it.', hl: true },
+      { n: '¶9', text: 'Call me this weekend if you want to talk it through properly. \u2014 B', hl: false }
+    ]
+  }
+};
+class Component extends DCLogic {
+  state = { screen: 'home', src: null, editing: false, saved: false, convo: 0, openCh: { 8: true } };
+  static CHAPTERS = [
+    { n: 2, label: 'Chapter 2 — The Call', screen: 'editor', sections: [{ label: '§ 2.1 Thursday', screen: 'editor' }, { label: '§ 2.2 The board letter', screen: 'editor' }, { label: '§ 2.3 An hour with Bob', screen: 'editor' }] },
+    { n: 5, label: 'Chapter 5 — Signatures', screen: null, sections: [{ label: '§ 5.1 The filing', screen: null }, { label: '§ 5.2 Managing Bob', screen: null }] },
+    { n: 8, label: 'Chapter 8 — Aftermath', screen: null, sections: [{ label: '§ 8.1 The announcement', screen: null }, { label: '§ 8.2 Cleveland', screen: null }, { label: '§ 8.3 The Acquisition', screen: 'section' }] }
+  ];
+  static SRCGROUPS = [
+    { key: 'primary', label: 'Primary sources', count: '2,847', items: [
+      { label: 'Journals · 2004–2019' }, { label: 'Email exports' }, { label: 'Messages' }, { label: 'Transcripts & documents' }, { label: 'SRC-0184 · Journal, Jul 17 2011', screen: 'source' } ] },
+    { key: 'convos', label: 'Conversations', count: '184', items: [
+      { label: 'SES-20260912 · control theme correction' }, { label: 'SES-20261018 · acquisition timeline' }, { label: 'SES-20261103 · ch 2 rewrite' } ] }
+  ];
+  static INTERP = [
+    { key: 'themes', label: 'Themes', items: [{ label: 'Control', screen: 'theme' }, { label: 'Loyalty' }, { label: 'Inheritance' }] },
+    { key: 'arcs', label: 'Arcs', items: [{ label: 'Bob relationship' }, { label: 'Loss of institutional trust' }] },
+    { key: 'timeline', label: 'Timeline', items: [{ label: 'Chronology' }, { label: 'Acquisition timeline · 2011' }] },
+    { key: 'people', label: 'People', items: [{ label: 'Bob' }, { label: 'Alice' }] },
+    { key: 'events', label: 'Events', items: [{ label: 'The acquisition' }, { label: 'The resignation' }] },
+    { key: 'claims', label: 'Claims', items: [{ label: 'CLM-0041 · Bob\u2019s foreknowledge' }, { label: 'CLM-0057 · Freedom as exposure' }] }
+  ];
+  static CONVOS = [
+    { title: 'What changed in my understanding of Bob, 2011\u20132014?', meta: 'Today \u00b7 book-wide' },
+    { title: 'Is Chapter 6 overstating the evidence for the loyalty reading?', meta: 'Yesterday \u00b7 Chapter 6' },
+    { title: 'Acquisition knowledge timeline \u2014 who knew what by July 18?', meta: 'Nov 28 \u00b7 research' },
+    { title: 'The control theme correction \u2014 fear of dependence', meta: 'Sep 12 \u00b7 Theme \u00b7 Control' },
+    { title: 'Draft \u00a72.3 from the source packet', meta: 'Oct 18 \u00b7 \u00a7 8.3' }
+  ];
+  renderVals() {
+    const s = this.state;
+    const pattern = this.props.citationPattern ?? 'slide-over';
+    const go = (screen) => () => this.setState({ screen, src: null });
+    const openSrc = (id) => () => pattern === 'full-screen' ? this.setState({ screen: 'source', src: null }) : this.setState({ src: id });
+    const bar = (k) => s.screen === k ? '#7a3327' : 'transparent';
+    const bg = (k) => s.screen === k ? '#e6decd' : 'transparent';
+    const src = s.src ? SOURCES[s.src] : SOURCES['SRC-0184'];
+    return {
+      isHome: s.screen === 'home', isReview: s.screen === 'review', isSource: s.screen === 'source',
+      isSection: s.screen === 'section', isTheme: s.screen === 'theme', isEditor: s.screen === 'editor',
+      goHome: go('home'), goReview: go('review'), goSource: go('source'), goSection: go('section'),
+      goTheme: go('theme'), goEditor: go('editor'),
+      homeBar: bar('home'), homeBg: bg('home'), reviewBar: bar('review'), reviewBg: bg('review'),
+      editorBar: bar('editor'), editorBg: bg('editor'),
+      sectionBar: bar('section'), sectionBg: bg('section'), themeBar: bar('theme'), themeBg: bg('theme'),
+      cite184: openSrc('SRC-0184'), cite1102: openSrc('SRC-1102'),
+      newConvo: () => this.setState({ convo: 0 }),
+      addChapter: () => {},
+      msOpen: s.msOpen ?? true, msRot: (s.msOpen ?? true) ? '90deg' : '0deg',
+      toggleMs: () => this.setState({ msOpen: !(s.msOpen ?? true) }),
+      interpOpen: s.interpOpen ?? true, interpRot: (s.interpOpen ?? true) ? '90deg' : '0deg',
+      toggleInterp: () => this.setState({ interpOpen: !(s.interpOpen ?? true) }),
+      addGroup: () => {}, addSource: () => {},
+      searchOpen: !!s.searchOpen,
+      openSearch: () => this.setState({ searchOpen: true }),
+      closeSearch: () => this.setState({ searchOpen: false }),
+      searchGoEditor: () => this.setState({ searchOpen: false, screen: 'editor', src: null }),
+      searchGoSection: () => this.setState({ searchOpen: false, screen: 'section', src: null }),
+      searchGoTheme: () => this.setState({ searchOpen: false, screen: 'theme', src: null }),
+      searchGoSource: () => this.setState({ searchOpen: false, screen: 'source', src: null }),
+      srcsOpen: s.srcsOpen ?? true, srcsRot: (s.srcsOpen ?? true) ? '90deg' : '0deg',
+      toggleSrcs: () => this.setState({ srcsOpen: !(s.srcsOpen ?? true) }),
+      srcGroups: Component.SRCGROUPS.map(g => {
+        const open = (s.openSrcG ?? {})[g.key] ?? false;
+        return {
+          label: g.label, count: g.count, expanded: open, rot: open ? '90deg' : '0deg',
+          toggle: () => this.setState({ openSrcG: { ...(s.openSrcG ?? {}), [g.key]: !open } }),
+          items: g.items.map(it => {
+            const active = it.screen === 'source' && s.screen === 'source';
+            return { label: it.label, bar: active ? '#7a3327' : 'transparent', bg: active ? '#e6decd' : 'transparent',
+              open: it.screen ? go(it.screen) : () => {} };
+          })
+        };
+      }),
+      interpGroups: Component.INTERP.map(g => {
+        const open = (s.openInterp ?? { themes: true, arcs: true })[g.key] ?? false;
+        return {
+          label: g.label, expanded: open, rot: open ? '90deg' : '0deg',
+          toggle: () => this.setState({ openInterp: { ...(s.openInterp ?? { themes: true, arcs: true }), [g.key]: !open } }),
+          add: () => {},
+          items: g.items.map(it => {
+            const active = it.screen === 'theme' && s.screen === 'theme';
+            return { label: it.label, bar: active ? '#7a3327' : 'transparent', bg: active ? '#e6decd' : 'transparent',
+              open: it.screen ? go(it.screen) : () => {} };
+          })
+        };
+      }),
+      chapters: Component.CHAPTERS.map(ch => {
+        const expanded = !!s.openCh[ch.n];
+        const chActive = ch.screen === 'editor' && s.screen === 'editor';
+        return {
+          label: ch.label, expanded, rot: expanded ? '90deg' : '0deg',
+          bar: chActive ? '#7a3327' : 'transparent', bg: chActive ? '#e6decd' : 'transparent',
+          toggle: () => this.setState({ openCh: { ...s.openCh, [ch.n]: !expanded } }),
+          open: ch.screen ? go(ch.screen) : () => this.setState({ openCh: { ...s.openCh, [ch.n]: !expanded } }),
+          addSection: () => {},
+          sections: ch.sections.map(sec => {
+            const active = sec.screen === 'section' && s.screen === 'section';
+            return { label: sec.label, bar: active ? '#7a3327' : 'transparent', bg: active ? '#e6decd' : 'transparent',
+              open: sec.screen ? go(sec.screen) : () => {} };
+          })
+        };
+      }),
+      convos: Component.CONVOS.map((c, i) => ({ ...c,
+        pick: () => this.setState({ convo: i }),
+        bg: s.convo === i ? '#fdfbf7' : 'transparent',
+        ring: s.convo === i ? 'inset 0 0 0 1px #ddd3c0, inset 3px 0 0 #7a3327' : 'none' })),
+      srcOpen: !!s.src, closeSrc: () => this.setState({ src: null }),
+      goSourceFromPanel: () => this.setState({ screen: 'source', src: null }),
+      srcId: src.id, srcTitle: src.title, srcDate: src.date, srcType: src.type, srcOrig: src.orig,
+      srcTag: src.tag, srcTagBg: src.tagBg, srcTagC: src.tagC,
+      srcParas: src.paras.map(p => ({ ...p, color: p.hl ? '#33291d' : '#8a7f6d', bg: p.hl ? '#f3e6c8' : 'transparent', pad: p.hl ? '10px 12px' : '0' })),
+      editing: s.editing, notEditing: !s.editing, savedNote: s.saved,
+      startEdit: () => this.setState({ editing: true, saved: false }),
+      cancelEdit: () => this.setState({ editing: false }),
+      saveEdit: () => this.setState({ editing: false, saved: true })
+    };
+  }
+}
+</script>
+</body>
+</html>

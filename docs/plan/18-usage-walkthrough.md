@@ -368,3 +368,21 @@ That is the intended end state of Memoria:
 > **A system that lets the author use AI across a book-sized body of evidence as naturally as if the whole project fit in the model's mind—without sacrificing provenance, search-scope honesty, evidentiary discipline, or control of canonical authorship.**
 
 Resumability is an important consequence of that architecture: because the book's understanding is durable rather than trapped inside model context, the author can leave and return without rebuilding it.
+
+<!-- Editorial note appended 2026-08-31, when the desktop design was incorporated. -->
+<!-- The section text above is unchanged. -->
+
+## Editorial note — the desktop design
+
+The desktop design renders this walkthrough rather than inventing a scenario: the
+acquisition, Bob's foreknowledge, `CLM-0041`, Chapter 2 ¶7, `SRC-0184 ¶17`, and §21's
+"12 manuscript impacts found after chronology revision". Several lines are on screen
+near-verbatim — *"Opening works. Middle section overstates certainty"*, *"¶7 may
+overstate Bob's foreknowledge after the chronology revision"*, *"Acquisition
+knowledge timeline"*.
+
+The index calls this part an acceptance description containing no independent
+requirements. It is now also the source material for an interface, which raises the
+cost of its example being illustrative rather than specified.
+
+Full reconciliation: [19. Desktop UI — as designed](19-desktop-ui.md) §19.11.

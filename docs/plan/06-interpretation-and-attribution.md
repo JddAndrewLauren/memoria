@@ -232,3 +232,23 @@ An `[open]` idea is not part of the current accepted interpretation.
 This gives interesting speculation a durable home without allowing it to silently harden into doctrine.
 
 ---
+
+<!-- Editorial note appended 2026-08-31, when the desktop design was incorporated. -->
+<!-- The section text above is unchanged. -->
+
+## Editorial note — the desktop design
+
+The design's sidebar carries **six** interpretation groups, not §8's five: Themes,
+Arcs, **Timeline**, People, Events, Claims. Timeline is §4's `chronology.md` — which
+§3's state-class row already lists alongside the other five, and §8 does not.
+
+Two additions §8 does not describe:
+
+- Every group carries a `+`, and the tree ends with `+ New group`. §8 describes objects
+  the Curator proposes and the author authorizes; hand-creation from the UI, and
+  groups beyond the five types, are new. §1.11 applies to the second one.
+- §9's attribution reaches the screen as badges: `AUTHOR` on a theme's interpretation
+  (with `SES-20260912-1432 · T017` beside it), `SOURCE` / `INFERRED` on claims,
+  `CONTEMPORANEOUS` on evidence.
+
+Full reconciliation: [19. Desktop UI — as designed](19-desktop-ui.md) §19.11.

@@ -170,3 +170,25 @@ This includes:
 Deleting `.memoria/index.db` must never destroy intellectual work.
 
 ---
+
+<!-- Editorial note appended 2026-08-31, when the desktop design was incorporated. -->
+<!-- The section text above is unchanged. -->
+
+## Editorial note — the desktop design
+
+Every locator the design puts on screen — `Ch 2 ¶7`, `SRC-0184 ¶17`,
+`Chapter 2 ¶14–17` — assumes the §4 anchoring question is settled. Past mock data,
+the interface cannot be built before that decision, which makes it a UI blocker as
+well as a Curator one.
+
+Three smaller collisions:
+
+- The design writes `SRC-0184` where §4's example is `SRC-000184`. Every other id on
+  screen — `IMP-20261103-004`, `RES-20261018-003`, `DEC-0088`,
+  `SES-20260912-1432 · T017` — is §4's own, unchanged.
+- Pre-Memoria manuscript prose is badged `LEGACY DRAFT`. §3's state classes have no
+  such state.
+- The sidebar edits manuscript structure: add chapter, add section, drag to reorder.
+  §2 gives `outline.md` a place in the repository; no operation changes it.
+
+Full reconciliation: [19. Desktop UI — as designed](19-desktop-ui.md) §19.11.

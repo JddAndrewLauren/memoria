@@ -285,3 +285,26 @@ Rejecting a suggestion is itself useful working state.
 Memoria should avoid repeatedly proposing the same rejected change unless materially new evidence or interpretation emerges.
 
 ---
+
+<!-- Editorial note appended 2026-08-31, when the desktop design was incorporated. -->
+<!-- The section text above is unchanged. -->
+
+## Editorial note — the desktop design
+
+§21 is the Review summary bar, near-verbatim: **"Apply high-confidence fixes…"** over
+*"4 high — factual conflicts, 5 medium — stale framing, 3 low."* §19.1–§19.2 autonomy
+is the Curator having produced twelve findings unasked; §19.3 is the header line
+*"nothing changes without your say-so."*
+
+Two divergences worth recording:
+
+- **The per-finding action set differs from §40.3's list.** The card offers
+  View evidence, Explain, Preview diff, **Rewrite**, Dismiss. `Apply` is not on the
+  card at all — it exists only as the batch action above.
+- **The design edits prose in the app.** §1.7 supremacy is written on screen —
+  *"will commit as author-authored · supreme"* beside Save, *"every edit saves as
+  yours"* under the chapter title, and *"✓ Saved as your edit · commit d41f2a9"*
+  after. That is a second write path into `chapters/**/draft.md`, which §19.3's
+  authorization rules and the reduced §40.6 stale-revision check both have to cover.
+
+Full reconciliation: [19. Desktop UI — as designed](19-desktop-ui.md) §19.11.

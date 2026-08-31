@@ -152,3 +152,20 @@ Materially new evidence may justify resurfacing the possibility, but it should a
 This prevents autonomous curation from repeatedly arguing with the author.
 
 ---
+
+<!-- Editorial note appended 2026-08-31, when the desktop design was incorporated. -->
+<!-- The section text above is unchanged. -->
+
+## Editorial note — the desktop design
+
+§14.2's Memoria note is on screen almost verbatim — down to `RES-20261018-003` — as
+an amber card closing the Theme page: *"Later research cuts against part of the
+reading above… **Your text has been left unchanged** — worth a conversation?"* The
+deferred-ownership safe default is what the design draws, not the §14 git-blame
+mechanism.
+
+Nothing in §§12–15 surfaces Curator run state. The design does: a green dot and
+**"Curator idle · last pass 09:41"** in the sidebar footer, plus, after an author
+edit, *"the Curator may ask whether this changes the Bob arc."*
+
+Full reconciliation: [19. Desktop UI — as designed](19-desktop-ui.md) §19.11.
