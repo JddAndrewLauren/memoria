@@ -1,5 +1,7 @@
 <!-- Part of the Memoria build plan. Index: ./plan-index.md -->
 <!-- Source sections: 10, 11, 41 of the original memoria-plan.md -->
+<!-- §11 amended 2026-09-01: the watcher and the editing burst are withdrawn; two -->
+<!-- explicit triggers, a CHG- trailer, and a gitignored projection. ADR-0008. -->
 
 # 10. Session Records
 
@@ -133,20 +135,46 @@ The author should be able to work normally in Obsidian or another editor.
 
 Memoria should not require every thought to pass through the AI.
 
-A lightweight repository watcher or synchronization layer observes human changes.
+~~A lightweight repository watcher or synchronization layer observes human changes.~~
 
-After a meaningful editing burst, or before an agent modifies affected files, Memoria creates a human checkpoint commit.
+~~After a meaningful editing burst, or before an agent modifies affected files, Memoria creates a human checkpoint commit.~~
 
-That change receives an identifier such as:
+**Amended 2026-09-01 (ADR-0008).** There is no watcher and no editing burst. A daemon
+would be the first long-running process in the system and would buy only earlier commit
+timestamps; an uncommitted edit is already safe, because §32's dirty-tree rule protects
+it. A "meaningful editing burst" was vocabulary belonging to the watcher — a threshold
+exists so a daemon can guess when the author stopped typing, and with explicit triggers
+there is nothing to guess.
+
+Memoria creates a human checkpoint commit on two triggers:
+
+- **automatically, before any machine actor writes to durable files.** This is where
+  correctness lives: it is the moment the dirty-tree rule stops protecting a file and
+  §32's human-touched flag, which is defined over commits, has to take over.
+- **on demand, via `memoria checkpoint`.** This is where granularity lives, as an author
+  act rather than a heuristic.
+
+A checkpoint commits tracked files with uncommitted modifications under a durable state
+class (§3) — never untracked files, never Derived state.
+
+Every **human-authored** commit receives an identifier, checkpoints of outside edits and
+writes through the write path (ADR-0003) alike; which editor was open is a surface
+accident, and §41 calls both human-authored. Curator and AI manuscript commits receive
+none. The identifier is carried by a `change-id:` trailer on the commit, so git history
+is its own ledger:
 
 ```text
-CHG-20261014-0917
+CHG-20261014-003
 ```
+
+The form is a per-day sequence, as `RES-20261018-003` is, rather than the `HHMM` form
+this section originally showed: minute resolution collides once writes through the app
+are frequent. The clock time survives in the projection's `Date:` line.
 
 A machine-generated projection under `changes/` provides a human-readable view:
 
 ```markdown
-# CHG-20261014-0917
+# CHG-20261014-003
 
 Date: 2026-10-14 09:17
 Commit: 9b07fa1
@@ -162,6 +190,12 @@ Files:
 Git remains canonical.
 
 `changes/` is a deterministic, rebuildable view that makes Git history easy to link from Markdown and the UI.
+
+It is rendered by the same function `read(CHG-…)` uses, and it is **gitignored**
+(ADR-0008): `memoria rebuild` regenerates it, the read path never consults it, and
+tracking it would write regenerated machine output into the history §41 makes the audit
+record. It is the only derived state whose input ships inside the clone, so a bare clone
+can rebuild it with no evidence root and no corpus.
 
 A direct edit proves **what changed**.
 
@@ -196,7 +230,7 @@ authorized-by:
   SES-20261103-1041#T008
 
 triggered-by:
-  CHG-20261103-1024
+  CHG-20261103-004
 
 evidence:
   SRC-0184

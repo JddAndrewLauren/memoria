@@ -1,5 +1,6 @@
 <!-- Part of the Memoria build plan. Index: ./plan-index.md -->
 <!-- Source sections: 2, 3, 4, 42 of the original memoria-plan.md -->
+<!-- §4's CHG- form amended 2026-09-01 to a per-day sequence. ADR-0008. -->
 
 # 2. Repository Structure
 
@@ -59,7 +60,7 @@ memoria/
 │               └── events.jsonl
 │
 ├── changes/
-│   └── CHG-20261014-0917.md
+│   └── CHG-20261014-003.md
 │
 ├── digests/
 │
@@ -162,7 +163,7 @@ Examples:
 SRC-000184                normalized source record
 SES-20260912-1432         AI session
 SES-20260912-1432#T017    exact transcript turn
-CHG-20261014-0917         direct change
+CHG-20261014-003          direct change
 CLM-0041                  important claim
 RES-20261018-003          research memo
 DEC-0088                  author decision
