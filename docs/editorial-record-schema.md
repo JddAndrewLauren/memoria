@@ -36,8 +36,8 @@ original_locator: "Journal I, footnote 42"
 
 | Field | Meaning |
 |---|---|
-| `id` | Stable `ED-NNNNNN` identifier (six digits, zero-padded, the same form as `SRC-`). Assigned sequentially: both volumes' introductions first, then each volume's footnotes (in footnote-number order) and bracketed spans (in entry/paragraph order), volume order (J01, J02). |
-| `editorial_type` | `introduction`, `footnote`, or `bracketed-span`. |
+| `id` | Stable `ED-NNNNNN` identifier (six digits, zero-padded, the same form as `SRC-`). Assigned sequentially: both volumes' introductions first, then each volume's footnotes (in footnote-number order), standalone bracketed asides, and interpolations (each in entry/paragraph order), volume order (J01, J02). |
+| `editorial_type` | `introduction`, `footnote`, `bracketed-span` (a standalone aside, removed from evidence), or `interpolation` (an editor-supplied word/phrase, kept in evidence - see "What gets extracted" below). |
 | `recorded_date` | The edition's own date - `"1906"` for every record this slice produces (RECON.md's corpus table: all three source volumes are the 1906 Houghton Mifflin "Writings" edition). Distinct from, and never overwrites, the evidence record's `event_date`. |
 | `retrospective` | Always `true` - an editorial record is retrospective commentary by construction (`docs/open-problems.md` §6). |
 | `linked_record_id` | The `SRC-` ID of the evidence record this annotates, or `null` for an introduction (volume-level, not tied to one entry) or a footnote whose marker fell outside the entries this slice covers (see "Known gaps" below). |
@@ -55,23 +55,45 @@ bracketed span's contents, or the introduction's full text.
   volume's back-matter `FOOTNOTES` section (already cut from evidence by
   #3) and stored as one `footnote` editorial record, linked to the
   evidence paragraph the marker was in.
-- **Bracketed editorial spans.** Every other `[...]` span found directly
-  in entry text - editorial asides, illustration captions, cross-
-  references to the published works, `[?]` and `[_sic_]` markers alike -
-  is stripped and stored as one `bracketed-span` record. `docs/
-  open-problems.md` §6 asks that no editorial voice leak into evidence;
-  this slice draws that line at "bracket-delimited," not at a finer
-  sub-classification RECON.md §4 uses for its own analysis.
+- **Standalone bracketed asides.** A `[...]` span that reads as its own
+  complete remark - illustration captions (`[Illustration: ...]`),
+  cross-references to the published works (`[_Week_, p. 319; Riv.
+  395.]`), `[?]` and `[_sic_]` markers, structural notes (`[Two pages
+  missing.]`), and any bracket that is a whole paragraph on its own with
+  nothing else around it - is stripped from the evidence text and stored
+  as one `bracketed-span` record.
+- **Interpolations.** Roughly two-thirds of the non-numeric `[...]` spans
+  in entry text are not asides at all: they are single words or short
+  phrases the 1906 editor supplied to complete a gap in Thoreau's own
+  sentence - `"must surely [be] the circulations of God"`, `"Walked to
+  Concord [N. H.], 10 miles."`, `"resort [to], it would be difficult"`.
+  Excising these mangles the evidence (PR #51 review round 1, BLOCKING
+  2), so an interpolation's *text* stays in the evidence paragraph -
+  only its brackets are removed - while it is still extracted as its own
+  `interpolation` editorial record, linked to the same paragraph and
+  anchor, recording that a 1906 editor supplied it.
+
+  `_is_standalone_editorial_aside` (`src/memoria/editorial.py`) draws
+  the line: a bracket consuming its whole paragraph, one starting with
+  italic markup (`_..._`, covering cross-references and notes like
+  `[_sic_]`/`[_Undated._]`), `[?]`, an `[Illustration...]` marker, a
+  `[See ...]`/`[Cf. ...]` cross-reference, or content that reads as a
+  complete capitalized sentence of its own is a standalone aside;
+  anything shorter - one or two words, or an abbreviation-shaped token
+  like `[Dec.]` or `[N. H.]` - is an interpolation.
 - **Introductions.** Torrey's Introduction (Journal I) and Sanborn's
   Introduction (Familiar Letters) are each extracted whole, between the
   raw file's `INTRODUCTION` heading and the heading that follows it, as a
   single `introduction` record - never split, never treated as journal or
   letter evidence.
 
-A paragraph that was nothing but a bracketed span (e.g. a standalone
-`[Two pages missing.]` aside) is dropped from the evidence record's
+A paragraph that was nothing but a standalone aside (e.g. a
+`[Two pages missing.]` note) is dropped from the evidence record's
 paragraph list once stripped, and the record's anchors renumber over what
-survives - the same treatment #3 gives chapter-marker-only paragraphs.
+survives - the same treatment #3 gives chapter-marker-only paragraphs. An
+interpolation's paragraph never empties this way, since its text stays
+behind. Whitespace left by a removed span next to punctuation (e.g. "word
+, next") is closed up the same way line-wrap whitespace is collapsed.
 
 ## Known gaps
 
@@ -110,8 +132,23 @@ matches RECON's own per-file numbers (1,017 / 744) exactly - it counts
 each footnote twice, once as the inline citation marker and once as the
 footnote list's own `[N]` number label, which is why the extracted
 `footnote` record count (880, one per distinct footnote) is roughly half
-this total rather than close to it. `tests/test_editorial.py`'s
-`TestAgainstTheRealEvidenceCorpus` pins both the raw-text reconciliation
-counts above and the extracted-record counts (880 footnotes, 232
-in-entry bracketed spans, 2 introductions) rather than either number in
-isolation.
+this total rather than close to it. The 1,105 non-numeric spans split
+232 in-entry (86 standalone asides + 146 interpolations) against 873
+inside back-matter footnote bodies and the two introductions - already
+extracted whole as part of those records, not decomposed further.
+`tests/test_editorial.py`'s `TestAgainstTheRealEvidenceCorpus` pins both
+the raw-text reconciliation counts above and the extracted-record counts
+(880 footnotes, 86 standalone asides, 146 interpolations, 2
+introductions) rather than either number in isolation.
+
+## Indexing (issue #7's `memoria rebuild`)
+
+`memoria rebuild` (`src/memoria/index.py`) runs
+`extract_editorial_apparatus` on every normalized record before writing
+or indexing anything, so the FTS5 index and `sources/normalized/` both
+reflect stripped, apparatus-free evidence text - not the unstripped
+paragraphs `normalize_journals` alone produces. Every `EditorialRecord`
+is indexed too, under `source_type: "editorial"`, so
+`memoria.index.search(..., exclude_editorial=True)` genuinely excludes
+footnotes, asides, and interpolations from a search rather than being a
+no-op (PR #51 review round 1, BLOCKING 1).

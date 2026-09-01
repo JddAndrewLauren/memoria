@@ -26,6 +26,7 @@ from memoria.normalize import (
     write_normalized_records,
 )
 from memoria.validate import NORMALIZED_RELATIVE_PATH
+from memoria.year_resolution import resolve_years
 
 INDEX_RELATIVE_PATH = ".memoria/index.db"
 
@@ -145,6 +146,7 @@ def rebuild(evidence_root: Path, repo_root: Path) -> list[NormalizedRecord]:
     repo_root = Path(repo_root)
 
     records = normalize_journals(evidence_root)
+    resolve_years(records, evidence_root)
     editorial_records = extract_editorial_apparatus(evidence_root, records)
     write_normalized_records(records, repo_root / NORMALIZED_RELATIVE_PATH)
     write_editorial_records(editorial_records, repo_root / EDITORIAL_RELATIVE_PATH)
