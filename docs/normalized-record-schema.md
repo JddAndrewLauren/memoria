@@ -31,10 +31,10 @@ original_locator: "Journal I, entry dated Oct. 22."
 | Field | Meaning |
 |---|---|
 | `id` | Stable `SRC-NNNNNN` identifier (six digits, zero-padded — part 04 §4's `SRC-000184` form; the `SRC-0184` seen in the desktop mockup is a noted divergence, part 19 §19.11). Assigned sequentially: volume order, then entry order within the volume. Stable across re-runs over unchanged input because the assignment is a deterministic function of that input, not a hash or a counter file. |
-| `source_type` | `journal` or `letter` (the 130 *Familiar Letters*, issue #6). Other source types (email, ...) are later slices. |
+| `source_type` | `journal`, `letter` (the 130 *Familiar Letters*, issue #6), or `book` (the two audit targets, issue #9 — see "The audit targets" below). Other source types (email, ...) are later slices. |
 | `recorded_date` | The date heading text, verbatim, exactly as it appears in the source — never rewritten by year resolution. Empty for the 29 undated opening fragments of J02's Chapter I (`date_confidence: chapter-only`), which have no date heading to quote; see "J02's undated opening fragments" below. |
 | `event_date` | `recorded_date` with its resolved year appended (`"Oct. 22., 1845"`), or unchanged from `recorded_date` where the heading already states its own year, or where no year could be resolved at all (`date_confidence: unresolved` — no invented date). Empty for the `chapter-only` fragments: their chapter scopes them to 1850, but `event_date` is a date and they have no day, so the field is left empty rather than filled with a year pretending to be one. The chapter's year stays recoverable from `original_locator`. Journals have no retrospective/contemporaneous date split within one entry, so before year resolution `recorded_date` and `event_date` were identical; year resolution (`src/memoria/year_resolution.py`, issue #4) is what makes them diverge. |
-| `date_confidence` | `exact` only where a weekday in the heading confirmed the resolved year against a real calendar; `inferred` where the year came from an unambiguous chapter heading, an explicit year in the entry heading itself, or position within a multi-year chapter, without a weekday to confirm it; `chapter-only` where the record has **no date heading of its own**, so its enclosing chapter is the only date context there is — RECON.md §3's reading of the value exactly ("scoped to 1850, no day"), and the 29 undated opening fragments of J02's Chapter I are the records that carry it (see below); `unresolved` where a resolution was attempted and produced nothing — a dated entry with no chapter marker before it anywhere (no record in the corpus: both volumes open with a chapter heading), and all 130 letters: their datelines do carry an explicit year (see the `dateline` row below), but year resolution is a separate M0 step from letters parsing, so that year is left unparsed rather than absent. A weekday that does not match any candidate year is never silently accepted as `exact`; `memoria normalize` prints it as a warning instead. |
+| `date_confidence` | `exact` only where a weekday in the heading confirmed the resolved year against a real calendar; `inferred` where the year came from an unambiguous chapter heading, an explicit year in the entry heading itself, or position within a multi-year chapter, without a weekday to confirm it; `chapter-only` where the record has **no date heading of its own**, so its enclosing chapter is the only date context there is — RECON.md §3's reading of the value exactly ("scoped to 1850, no day"), and the 29 undated opening fragments of J02's Chapter I are the records that carry it (see below); `unresolved` where a resolution was attempted and produced nothing — a dated entry with no chapter marker before it anywhere (no record in the corpus: both volumes open with a chapter heading), and all 130 letters: their datelines do carry an explicit year (see the `dateline` row below), but year resolution is a separate M0 step from letters parsing, so that year is left unparsed rather than absent. A weekday that does not match any candidate year is never silently accepted as `exact`; `memoria normalize` prints it as a warning instead. `published` is the audit targets' value: a book's date is its year of publication — a documentary fact about the volume, not a year resolved out of the text — so none of the four resolution outcomes describes it honestly. |
 | `contemporaneous` | `true` for journal entries — a diary entry is contemporaneous evidence by definition (part 05 §6). |
 | `original_file` | Path to the raw source, relative to the evidence root (`MEMORIA_EVIDENCE_ROOT`) — the same convention `manifest.yaml` and `memoria validate` use, e.g. `raw/gutenberg/57393-journal-01/pg57393.txt`. |
 | `original_locator` | Human-readable pointer into the original, e.g. `"Journal I, entry dated Oct. 22."`; for an undated fragment, the chapter and its position within the chapter's opening run, e.g. `"Journal II, Chapter I, undated fragment 3 of 29"`. |
@@ -294,3 +294,62 @@ chapter-only=29** (`tests/test_year_resolution.py`'s
 invariant that no record is `exact` without a weekday in its heading, and
 that a `chapter-only` record carries neither a `recorded_date` nor an
 `event_date`). The 130 letters are `unresolved`, for 717 records in all.
+
+
+## The audit targets
+
+Issue #9 normalizes the two published works the journals' cross-references
+point at — *A Week on the Concord and Merrimack Rivers* (Gutenberg 4232) and
+*Walden* (Gutenberg 205) — under `source_type: book`.
+
+They exist for one reason: the answer key needs a stable `SRC-` ID and
+paragraph anchor **on the target side**. The journals and letters had both
+from issues #3 and #6; the books had neither, and no other slice covered
+them.
+
+**One record per chapter.** A chapter is the natural documentary boundary
+here (part 05 §5.2) the way a dated entry is for a journal — it is what the
+work declares in its own Contents. That yields 27 records,
+`SRC-000718`–`SRC-000744`: *A Week*'s 8 (`CONCORD RIVER`, `SATURDAY` …
+`FRIDAY`), *Walden*'s 18, and *On the Duty of Civil Disobedience*, which
+Gutenberg 205 carries in the same file and which is kept rather than dropped
+so the file normalizes whole. No cross-reference cites the essay.
+
+**Two extra frontmatter fields**, on book records only, the same "written
+only when set" rule the letters' `recipient`/`dateline`/`salutation` follow:
+
+| Field | Meaning |
+|---|---|
+| `work` | `Week` or `Walden` — the value a cross-reference's `target_work` joins against. |
+| `chapter` | The chapter title verbatim, as the volume's Contents gives it. |
+
+**Chapter headings are a closed set matched in document order**, the same
+discipline `DATE_HEADING_RE` applies to date headings, and necessary for the
+same reason. A generic "line is all capitals, flush left" rule breaks twice
+on this corpus:
+
+- `THE INWARD MORNING` (`pg4232.txt:8936`) is a poem title inside
+  `WEDNESDAY`, and would become a ninth chapter of *A Week*;
+- `ON THE DUTY OF CIVIL DISOBEDIENCE` appears flush left on *Walden*'s title
+  page (`pg205.txt:36`) as well as at its real heading (`pg205.txt:9421`), and
+  the title-page line would start the last chapter 9,385 lines early,
+  swallowing all 18 of *Walden*'s own chapters.
+
+Both are regression tests in `tests/test_normalize.py::TestTargetNormalization`.
+
+**`contemporaneous: false`.** *A Week* (1849) and *Walden* (1854) are works
+Thoreau built *from* the journals — the relation the cross-references label
+and the benchmark scores. This flag is what lets a date-leakage test tell the
+two sides apart (part 05 §6).
+
+**Not indexed.** `memoria rebuild` writes the book records but does not put
+them in `.memoria/index.db`. The index is the *evidence* retrieval surface,
+and a book paragraph is the benchmark's **probe** (part 06 §8.3): indexing
+the targets would let a search for a book paragraph return that same
+paragraph as its own top hit, which is exactly the self-agreement failure the
+answer key exists to prevent. Appearances over the audit targets (part 06
+§8.11) are M2's, and get their own structure.
+
+`"THE END"` sits between *Walden*'s last paragraph and the essay's heading
+rather than after both, so it cannot be used as a back-matter cut; it is
+dropped as a paragraph instead.

@@ -137,7 +137,7 @@ the first Curator pass.
 **Recall is the central risk of the whole design.** A source that never joins an
 entry's gathered set is invisible to a writing agent, which cannot know it is
 missing. This is worse than search under §33: a search reports its query; an index
-reports nothing about its own completeness. The PoC's 364 resolvable
+reports nothing about its own completeness. The PoC's 348 resolved
 cross-references measure it directly — **gathered-set recall** over those links, a
 set metric asking whether the passage is in the set at all rather than where it
 ranks, *is* the measure of whether the index is complete enough to write from. It

@@ -107,8 +107,10 @@ def test_normalize_writes_records_under_sources_normalized(tmp_path):
     assert result.returncode == 0
     written = list((tmp_path / "sources" / "normalized").glob("SRC-*.md"))
     # 587 journal records (issue #3, plus J02 Chapter I's 29 recovered
-    # undated fragments) + 130 letter records (issue #6).
-    assert len(written) == 717
+    # undated fragments) + 130 letter records (issue #6) + 27 audit-target
+    # book chapters (issue #9: A Week's 8, Walden's 18 plus Civil
+    # Disobedience).
+    assert len(written) == 744
     recipients_path = tmp_path / "sources" / "normalized" / "recipients.yaml"
     assert recipients_path.is_file()
     table = yaml.safe_load(recipients_path.read_text())
@@ -167,10 +169,11 @@ def test_rebuild_writes_normalized_records_and_the_index(tmp_path):
 
     assert result.returncode == 0
     written = list((tmp_path / "sources" / "normalized").glob("SRC-*.md"))
-    # 587 journal + 130 letter records (issue #6 review round 1: rebuild()
-    # used to call normalize_journals alone, silently deleting every
-    # letter record produced by `memoria normalize`).
-    assert len(written) == 717
+    # 587 journal + 130 letter + 27 book records (issue #6 review round 1:
+    # rebuild() used to call normalize_journals alone, silently deleting
+    # every letter record produced by `memoria normalize`; issue #9 added
+    # the books, which rebuild must write too).
+    assert len(written) == 744
     recipients_path = tmp_path / "sources" / "normalized" / "recipients.yaml"
     assert recipients_path.is_file()
     table = yaml.safe_load(recipients_path.read_text())
@@ -260,3 +263,12 @@ def test_rebuild_produces_byte_identical_output_to_normalize(tmp_path):
         # covered here too, not just picked up incidentally by the glob above.
         if subdir == "normalized":
             assert "cross-references.yaml" in normalize_files
+
+    # Issue #9's instance: the answer key is written by both commands and
+    # lives outside sources/, so the loop above cannot see it. It is the one
+    # committed artifact of the three, which makes a rebuild that quietly
+    # produces a different key worse than a rebuild that drops one.
+    normalize_key = (normalize_dir / "benchmark" / "answer-key.yaml").read_text()
+    rebuild_key = (rebuild_dir / "benchmark" / "answer-key.yaml").read_text()
+    assert normalize_key == rebuild_key
+    assert "two-edition-alignment" in normalize_key

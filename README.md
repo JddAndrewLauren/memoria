@@ -42,7 +42,10 @@ resolve, such as a `.claude/worktrees/issue-<n>` sub-worktree.
 the hash recorded in `raw/gutenberg/manifest.yaml`, and exits non-zero, naming
 the offending file, if a raw file has been modified or is missing. It also
 checks every normalized record under `sources/normalized/` for a `SRC-` ID
-reference that does not resolve to an actual record.
+reference that does not resolve to an actual record, and checks that every
+answer-key row still quotes the paragraphs it names — the key is committed
+while the records it points into are derived, so the two can otherwise drift
+apart silently.
 
 `memoria normalize` reads the journal volumes (J01, J02) and the letters
 volume from the evidence corpus and writes one normalized Markdown record
@@ -53,13 +56,23 @@ on demand; see `docs/normalized-record-schema.md` for the schema and the
 (cross-references extracted from editorial apparatus). Editorial apparatus
 (footnotes, front/back matter, and other non-evidence text) is segregated
 into its own Markdown records under `sources/editorial/` (also gitignored).
+The two audit targets (*Walden*, *A Week*) are normalized too, one record
+per chapter, under `source_type: book`.
+
+It also writes `benchmark/answer-key.yaml`, which — unlike everything else
+above — **is committed**. The key resolves each cross-reference's
+target-side citation to a span of held book paragraphs, by aligning the
+1906 Manuscript and 1894 Riverside scans the footnotes cite against the
+held text and keeping only the links where the two editions agree. It uses
+no part of Memoria's retrieval, deliberately: see
+`docs/answer-key-protocol.md`.
 
 `memoria rebuild` deletes and regenerates all derived state — the normalized
 records under `sources/normalized/`, the editorial records under
 `sources/editorial/`, and the SQLite FTS5 full-text search index at
 `.memoria/index.db` (all gitignored) — from evidence, losing nothing (§42:
 derived state carries no authority and can always be thrown away).
-`sources/normalized/` and `sources/editorial/` come out byte-identical to
-what `memoria normalize` produces. Use `memoria.index.search(db_path, query)`
+`sources/normalized/`, `sources/editorial/` and `benchmark/answer-key.yaml`
+come out byte-identical to what `memoria normalize` produces. Use `memoria.index.search(db_path, query)`
 to query the index; pass `exclude_editorial=True` to search evidence records
 only, excluding editorial voice.

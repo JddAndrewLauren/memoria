@@ -6,6 +6,11 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from memoria.answer_key import (
+    ANSWER_KEY_RELATIVE_PATH,
+    build_answer_key,
+    write_answer_key,
+)
 from memoria.cross_references import (
     CROSS_REFERENCES_RELATIVE_PATH,
     extract_cross_references,
@@ -20,6 +25,7 @@ from memoria.index import INDEX_RELATIVE_PATH, rebuild
 from memoria.normalize import (
     normalize_journals,
     normalize_letters,
+    normalize_targets,
     recipients_table,
     write_normalized_records,
     write_recipients_table,
@@ -109,7 +115,13 @@ def main(argv=None):
         letter_records = normalize_letters(
             evidence_root(), start_id=len(journal_records) + 1
         )
-        records = journal_records + letter_records
+        # The audit targets (issue #9) come last in the SRC- sequence, so
+        # adding them moves no existing ID.
+        target_records = normalize_targets(
+            evidence_root(),
+            start_id=len(journal_records) + len(letter_records) + 1,
+        )
+        records = journal_records + letter_records + target_records
         output_root = repo_root() / NORMALIZED_RELATIVE_PATH
         written = write_normalized_records(records, output_root)
         editorial_output_root = repo_root() / EDITORIAL_RELATIVE_PATH
@@ -119,7 +131,13 @@ def main(argv=None):
         counts = Counter(record.date_confidence for record in records)
         counts_text = ", ".join(
             f"{level}={counts[level]}"
-            for level in ("exact", "inferred", "chapter-only", "unresolved")
+            for level in (
+                "exact",
+                "inferred",
+                "chapter-only",
+                "unresolved",
+                "published",
+            )
             if counts[level]
         )
         print(
@@ -141,6 +159,20 @@ def main(argv=None):
         print(
             f"normalize: wrote {len(cross_references)} cross-references to "
             f"{cross_references_path}"
+        )
+        key_rows, key_summaries, key_editions = build_answer_key(
+            evidence_root(), cross_references, records
+        )
+        key_path = write_answer_key(
+            key_rows,
+            key_summaries,
+            key_editions,
+            repo_root() / ANSWER_KEY_RELATIVE_PATH,
+        )
+        resolved = sum(s.resolved for s in key_summaries)
+        print(
+            f"normalize: wrote {len(key_rows)} answer-key links to {key_path} "
+            f"({resolved} resolved)"
         )
         return 0
 
