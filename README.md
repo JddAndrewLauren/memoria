@@ -13,9 +13,9 @@ Practically, this means:
 
 - `memoria normalize` produces normalized records from any raw unit whose suffix
   has a registered converter — plain text today, with docx and PDF owed by #77
-  and #78. What was removed with that corpus is the rest of its ingestion layer:
-  editorial segregation, year resolution, cross-reference extraction and the
-  benchmark answer key.
+  and email by #78. What was removed with that corpus is the rest of its
+  ingestion layer: editorial segregation, year resolution, cross-reference
+  extraction and the benchmark answer key.
 - `docs/normalized-record-schema.md` survives as the **contract** a future
   normalizer must satisfy. It is what `memoria.index` and `memoria validate`
   already read, and it is what to build against.
@@ -147,9 +147,9 @@ derived state carries no authority and can always be thrown away).
 
 **`rebuild` does not normalize.** It regenerates the index from whatever records
 are already on disk; producing those records is `memoria normalize`'s job, and
-the two stay separate so a reindex never rewrites evidence-derived records
-(ADR-0006). On an empty corpus `rebuild` indexes nothing and says so — choosing a
-corpus is what fills it, not a gap to patch.
+the two stay separate so a reindex never rewrites evidence-derived records. On
+an empty corpus `rebuild` indexes nothing and says so — choosing a corpus is
+what fills it, not a gap to patch.
 
 Use `memoria.index.search(repository, query, filters)` to query the index —
 it takes the frozen `Repository` value, like every other core read (ADR-0004).
