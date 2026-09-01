@@ -100,3 +100,19 @@ def test_normalize_writes_records_under_sources_normalized(tmp_path):
     assert result.returncode == 0
     written = list((tmp_path / "sources" / "normalized").glob("SRC-*.md"))
     assert len(written) == 558
+
+
+@pytest.mark.skipif(
+    EVIDENCE_ROOT_ENV_VAR not in os.environ,
+    reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
+)
+def test_normalize_writes_editorial_records_under_sources_editorial(tmp_path):
+    env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=os.environ[EVIDENCE_ROOT_ENV_VAR])
+
+    result = run_cli("normalize", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0
+    written = list((tmp_path / "sources" / "editorial").glob("ED-*.md"))
+    # 880 footnotes (508 J01 + 372 J02) + 232 bracketed spans (83 + 149)
+    # + 2 introductions (Torrey, Sanborn) - see test_editorial.py.
+    assert len(written) == 1114

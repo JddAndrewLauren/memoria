@@ -5,6 +5,11 @@ import os
 import sys
 from pathlib import Path
 
+from memoria.editorial import (
+    EDITORIAL_RELATIVE_PATH,
+    extract_editorial_apparatus,
+    write_editorial_records,
+)
 from memoria.normalize import normalize_journals, write_normalized_records
 from memoria.validate import NORMALIZED_RELATIVE_PATH, validate
 
@@ -54,9 +59,18 @@ def main(argv=None):
 
     if args.command == "normalize":
         records = normalize_journals(evidence_root())
+        editorial_records = extract_editorial_apparatus(evidence_root(), records)
         output_root = repo_root() / NORMALIZED_RELATIVE_PATH
         written = write_normalized_records(records, output_root)
+        editorial_output_root = repo_root() / EDITORIAL_RELATIVE_PATH
+        editorial_written = write_editorial_records(
+            editorial_records, editorial_output_root
+        )
         print(f"normalize: wrote {len(written)} records to {output_root}")
+        print(
+            f"normalize: wrote {len(editorial_written)} editorial records to "
+            f"{editorial_output_root}"
+        )
         return 0
 
     parser.print_help()
