@@ -1,5 +1,7 @@
 <!-- Part of the Memoria build plan. Index: ./plan-index.md -->
 <!-- Source sections: 25, 26, 27, 28, 29, 30, 32, 33 of the original memoria-plan.md -->
+<!-- §25 revised 2026-08-31: per-type read tools unified into read(ref). -->
+<!-- §33.1 revised 2026-08-31: index recall is gathered-set recall, a set metric. -->
 
 # 25. Retrieval Architecture
 
@@ -13,11 +15,7 @@ Core tools:
 search_text(query, filters)
 search_semantic(query, filters)
 
-read_source(id)
-read_session(id)
-read_change(id)
-read_claim(id)
-read(path)
+read(ref)
 
 expand(chunk_id)
 timeline(range, person?)
@@ -28,6 +26,21 @@ backlinks(ref)
 
 list(path)
 ```
+
+**`read(ref)` is the single read tool.** It accepts any §4 stable reference —
+`SRC-`, `SES-` (with an optional `#T` turn), `CHG-`, `CLM-`, `RES-`, `DEC-`,
+`SUB-x` and `SUB-x/y` — as well as a repository path. The ID scheme already names
+the type, so dispatch is read off the reference. The former per-type list
+(`read_source`, `read_session`, `read_change`, `read_claim`, …) was an enumeration
+of kinds in the §1.10a sense, and it had already drifted — `read_impact` was
+deleted when impact records went away, and `read_entry` existed only in §24.2's
+mirror. It is withdrawn.
+
+What `read` returns is constrained by `poc-plan.md` §7, and the constraint may not
+be weakened: **retrieval is a superset of grep**. An evidence read returns verbatim
+source text — never a summary in its place — decorated with the curated overlay
+(entry links, exclusions, settlements citing the paragraph); a raw undecorated
+full-source read remains available; and every read is ledgered in `events.jsonl`.
 
 Potential filters include:
 

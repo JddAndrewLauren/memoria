@@ -1,5 +1,6 @@
 <!-- Part of the Memoria build plan. Index: ./plan-index.md -->
 <!-- Source sections: 24 of the original memoria-plan.md -->
+<!-- §24.2 revised 2026-08-31: memoria.read() mirrors §25's unified read(ref). -->
 
 # 24. Model Runtime
 
@@ -96,16 +97,17 @@ The preferred arrangement is to expose controlled Memoria tools, for example:
 ```text
 memoria.search()
 memoria.search_semantic()
-memoria.read_source()
+memoria.read()
 memoria.timeline()
 memoria.trace()
 memoria.backlinks()
-memoria.read_entry()
-memoria.read_claim()
 memoria.build_source_packet()
 memoria.propose_manuscript_change()
 memoria.apply_authorized_change()
 ```
+
+`memoria.read()` is §25's `read(ref)`: one read tool over the §4 stable IDs, under
+`poc-plan.md` §7's superset-of-grep constraint. There are no per-type read tools.
 
 Research sessions can operate with canonical writes disabled except for explicit durable research outputs.
 

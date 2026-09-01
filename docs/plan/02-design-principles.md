@@ -218,13 +218,14 @@ Once authorized, the AI should be allowed to perform the work directly rather th
 ## 1.10a Enumerations are withdrawn on contact with use
 
 A recurring failure in this plan has been specifying a **fixed list of kinds** before
-anything was built. Three have now been withdrawn:
+anything was built. Four have now been withdrawn:
 
 | Enumeration | Replaced by |
 |---|---|
 | §18's ten impact categories | a finding is a disagreement set; its shape is read from the set |
 | §19.3's four review verdicts | the same; the design's labels are illustrative only |
 | §17's seven impact questions | each subject declares the questions it asks (part 06 §8.1) |
+| §25's per-type read tools | one `read(ref)`; the type is read off the §4 ID scheme |
 
 The pattern is the same each time. A category list is a schema imposed before the
 material demanded one, it is always slightly wrong, and it hardens into data structures

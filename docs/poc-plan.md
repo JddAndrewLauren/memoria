@@ -283,7 +283,10 @@ interface.
 - Which §25 tools ship, and their exact signatures — constrained 2026-08-31:
   retrieval must be a **superset of grep**: verbatim source text (never
   summarized-only), decorated with the curated overlay, a raw full-source read
-  available, and every read ledgered in `events.jsonl`.
+  available, and every read ledgered in `events.jsonl`. Narrowed further the same
+  day: the per-type read tools unify into one `read(ref)` over the §4 stable IDs
+  (part 11 §25, mirrored in §24.2). Which of the remaining tools ship is still
+  open.
 - Scope and trigger policy for the Curator.
 - Subject and length of the authorship-track piece.
 - Whether and when to acquire *Excursions*, *Cape Cod* and *The Service*.
