@@ -27,8 +27,8 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from memoria import references
-from memoria.repository import Repository
+from memoria import references, subjects
+from memoria.repository import Repository, require_evidence_root
 
 # Where normalized records live inside the book repository. Here rather than
 # in validate.py so that the module owning the record format owns the path to
@@ -47,6 +47,14 @@ class NormalizedRecord:
     contemporaneous: bool
     original_file: str
     original_locator: str
+    # The raw unit's hash, and the converter (name + pinned version) that
+    # produced this body, both as the manifest ledger recorded them at
+    # conversion time (ADR-0006, part 05 §5.4). A normalization run compares
+    # these to the manifest to decide whether to reconvert. Default "" so
+    # every existing construction of a record - most of them predating the
+    # ledger - keeps working; a real normalizer always sets both.
+    raw_sha256: str = ""
+    converter: str = ""
     paragraphs: list[str] = field(default_factory=list)
     # Letter-specific structured fields. None for records that are not
     # letters; always set for letter records.
@@ -104,6 +112,8 @@ def record_to_markdown(record: NormalizedRecord) -> str:
         "contemporaneous": record.contemporaneous,
         "original_file": record.original_file,
         "original_locator": record.original_locator,
+        "raw_sha256": record.raw_sha256,
+        "converter": record.converter,
     }
     # Type-specific fields are included only when set, so a record that is
     # not a letter or a book carries no empty keys for fields that do not
@@ -170,6 +180,8 @@ _REQUIRED_FIELDS = (
     "contemporaneous",
     "original_file",
     "original_locator",
+    "raw_sha256",
+    "converter",
 )
 _OPTIONAL_FIELDS = ("recipient", "dateline", "salutation", "work", "chapter")
 
@@ -358,8 +370,8 @@ def load(repository: Repository, record_id: str) -> NormalizedRecord:
     if not normalized_root.is_dir():
         raise ReadError(
             f"no normalized records in this repository ({normalized_root} does "
-            "not exist), and no normalizer is wired in - no evidence corpus is "
-            "currently chosen (see docs/open-problems.md 2.4)"
+            "not exist) - run `memoria normalize` to produce them, or choose an "
+            "evidence corpus (see docs/open-problems.md 2.4)"
         )
     path = record_path(repository, record_id)
     if not path.is_file():
@@ -383,6 +395,36 @@ def read_all(repository: Repository) -> list[NormalizedRecord]:
     ]
 
 
+def list_sources(
+    repository: Repository,
+    *,
+    source_type: str | None = None,
+    date_confidence: str | None = None,
+    contemporaneous: bool | None = None,
+) -> list[NormalizedRecord]:
+    """Every record on disk, filtered by the §25 list filters (#64).
+
+    Built on ``read_all`` - it inherits the same empty-corpus behaviour, so a
+    fresh clone with no ``sources/normalized/`` renders as no sources rather
+    than an error (ADR-0004). Filtering lives here, next to ``read_all``,
+    rather than in an adapter: it is a rule over the record schema, and
+    §40.1's "one core service layer" is what keeps a filter written once
+    from becoming a filter written differently by the web layer and a future
+    caller.
+
+    All three filters are optional and compose (ANDed together), matching
+    ``index.SearchFilters``'s discipline over the same fields.
+    """
+    records = read_all(repository)
+    if source_type is not None:
+        records = [r for r in records if r.source_type == source_type]
+    if date_confidence is not None:
+        records = [r for r in records if r.date_confidence == date_confidence]
+    if contemporaneous is not None:
+        records = [r for r in records if r.contemporaneous == contemporaneous]
+    return records
+
+
 def _confined(repository: Repository, path: PurePosixPath) -> Path:
     """Resolve a repository-relative path, refusing anything outside the root.
 
@@ -395,11 +437,54 @@ def _confined(repository: Repository, path: PurePosixPath) -> Path:
     root - a worktree reached through one, say - is compared like with like
     rather than being refused wholesale.
     """
-    resolved = (repository.root / path).resolve()
-    root = repository.root.resolve()
+    return _confined_to(repository.root, path)
+
+
+def _confined_to(root: Path, path: PurePosixPath) -> Path:
+    """``_confined``'s check, generalized to an arbitrary root.
+
+    ``read_raw_source`` confines to ``evidence_root`` rather than
+    ``repository.root`` - a different tree, the same escape the check
+    guards against.
+    """
+    resolved = (root / path).resolve()
+    root = root.resolve()
     if resolved != root and root not in resolved.parents:
         raise ReadError(f"path escapes the repository: {path}")
     return resolved
+
+
+@dataclass(frozen=True)
+class RawSource:
+    """The un-normalized file a record was normalized from, verbatim.
+
+    ``memoria.web``'s "Open original" read (#64/#25): the raw bytes at
+    ``original_file``, plus the ``original_locator`` a person follows to
+    find the passage within them. Never parsed, per
+    ``docs/normalized-record-schema.md``.
+    """
+
+    text: str
+    original_locator: str
+
+
+def read_raw_source(repository: Repository, record_id: str) -> RawSource:
+    """Serve the un-normalized file ``record_id`` was normalized from.
+
+    Raises ``ReadError`` for an unknown record or a missing file, and
+    ``NoEvidenceRoot`` (``memoria.repository``) when no evidence corpus is
+    configured - the same refusal every evidence read gives, rather than a
+    guessed default (``Repository.evidence_root``'s own docstring).
+    """
+    record = load(repository, record_id)
+    evidence_root = require_evidence_root(repository)
+    path = _confined_to(evidence_root, PurePosixPath(record.original_file))
+    if not path.is_file():
+        raise ReadError(f"no such original file: {record.original_file}")
+    return RawSource(
+        text=path.read_text(encoding="utf-8"),
+        original_locator=record.original_locator,
+    )
 
 
 @dataclass(frozen=True)
@@ -431,12 +516,14 @@ def read(repository: Repository, ref: str) -> Read:
     path - returns the file exactly as it is on disk, which is what keeps
     reading through the tool from ever being worse than ``cat``.
 
-    Three things this deliberately does not do, so that they are not later
+    Two things this deliberately does not do, so that they are not later
     mistaken for omissions: it does not decorate with the curated overlay
     (#20, which owes a ``raw`` parameter when it does, since undecorated is
-    currently what every read is), it does not ledger (#13), and it resolves
-    no reference kind but ``SRC-`` and repository paths - the rest exist as a
-    named error, not as silence.
+    currently what every read is), and it resolves no reference kind but
+    ``SRC-``, ``SUB-`` and repository paths - the rest exist as a named
+    error, not as silence. Ledgering the served read is the caller's job
+    (``memoria.ledger``, #13): this function has no session to ledger
+    against.
     """
     try:
         reference = references.parse(ref)
@@ -454,6 +541,36 @@ def read(repository: Repository, ref: str) -> Read:
         path = _confined(repository, reference.path)
         if not path.is_file():
             raise ReadError(f"no such file in this repository: {reference.path}")
+        return Read(
+            ref=ref, citation=citation, text=path.read_text(encoding="utf-8")
+        )
+
+    if isinstance(reference, references.SubjectReference):
+        # Bare, undecorated, exactly what's on disk - the same full-source
+        # contract as a bare SRC- read (#11), extended to SUB- and SUB-x/y
+        # (#16).
+        #
+        # One error type crosses this boundary, the same rule already
+        # applied to references.BadReference above: subjects.SubjectError is
+        # an internal exception of a different module, and a stray one must
+        # not reach a caller that catches ReadError alone (mcp/server.py's
+        # ToolError mapping, docs/tool-surface.md's "the adapter maps the
+        # core's one error type onto it").
+        try:
+            if reference.entry_slug is None:
+                path = subjects.subject_path(repository, reference.subject_id)
+                if not path.is_file():
+                    raise ReadError(f"no such subject: {reference.subject_id}")
+            else:
+                path = subjects.find_entry_path(
+                    repository, reference.subject_id, reference.entry_slug
+                )
+                if path is None:
+                    raise ReadError(
+                        f"no such entry: {reference.subject_id}/{reference.entry_slug}"
+                    )
+        except subjects.SubjectError as exc:
+            raise ReadError(str(exc)) from exc
         return Read(
             ref=ref, citation=citation, text=path.read_text(encoding="utf-8")
         )
@@ -490,10 +607,11 @@ def _unknown_kind_message(reference: references.UnknownReference) -> str:
     if reference.known:
         return (
             f"{reference.kind}- references are not resolvable in this build "
-            "yet: read(ref) currently serves SRC- records and repository "
-            "paths (see docs/tool-surface.md)"
+            "yet: read(ref) currently serves SRC- records, SUB- subjects "
+            "and entries, and repository paths (see docs/tool-surface.md)"
         )
     return (
         f"unknown reference kind {reference.kind}-: read(ref) serves SRC- "
-        "records and repository paths (see docs/tool-surface.md)"
+        "records, SUB- subjects and entries, and repository paths (see "
+        "docs/tool-surface.md)"
     )

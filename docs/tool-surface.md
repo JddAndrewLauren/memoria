@@ -12,7 +12,7 @@ a gap nobody noticed.
 | Tool | State |
 |---|---|
 | `read(ref)` | **Forced** — issue #11, below |
-| `search_text(query, filters)` | Open — issue #12 |
+| `search_text(query, filters)` | **Forced** — issue #12, below |
 | `search_global(query, filters, summarize)` | Open — issue #74, scheduled for M2 (ADR-0005). Settled 2026-09-01: `query` optional, a `level` filter, summaries served from the extraction pass and never generated on the call |
 | `search_semantic(query, filters)` | Open — issue #81, scheduled for M2 (ADR-0007): a `sqlite-vec` table in the index file, a local CPU model at rebuild |
 | `expand`, `timeline`, `grep_repo`, `trace`, `backlinks`, `list` | Open; §25 does not commit to shipping them |
@@ -58,6 +58,8 @@ enumeration of kinds, and had already drifted.
 | `#src-000184-p17` | that paragraph | the fragment alone |
 | `src-000184-p17` | that paragraph | `index.SearchResult.anchor`, verbatim |
 | `docs/poc-plan.md` | the file, verbatim | a repository-relative path |
+| `SUB-people` | the subject's prompt, verbatim | part 04 §4, part 06 §8.1 |
+| `SUB-people/bob` | the entry, verbatim | part 04 §4, part 06 §8.2 |
 
 The bare anchor is accepted deliberately. `SearchResult` carries
 `(src_id, anchor, source_type)`, so a search hit feeds straight back into
@@ -78,6 +80,11 @@ the reference is an ordinary relative path and only the target escapes.
 A reference is treated as an ID only when its kind is upper case, as part 04
 §4 writes them. Without that, `open-problems.md` — a file in this repository —
 was answered with "unknown reference kind OPEN-".
+
+`SUB-` subject and entry slugs are lowercase, directory-name shaped
+(`subjects/people/bob.md`, part 04 §2). `SUB-People` or `SUB-people/Bob` is
+refused as a malformed subject reference rather than folded to lowercase, the
+same call made for a malformed `SRC-` ID.
 
 ### What it returns
 
@@ -114,13 +121,19 @@ Two properties of that header are contracts, not styling:
 `original_locator` is printed and never parsed. It is a pointer a person
 follows, not an offset — issue #25 depends on that staying true.
 
+**A `SUB-` read is bare too** — a subject's prompt or an entry's file,
+exactly as it is on disk, with no header and no delimiter, for the same
+reason a full-source `SRC-` read is (issue #16). An entry read resolves by
+its frontmatter `id` rather than by filename, so a renamed entry file still
+answers to the `SUB-x/y` it was created with.
+
 ### What it refuses, and how
 
 Reference kinds part 04 §4 defines but this build does not resolve —
-`SES-` (with or without a `#T` turn), `CHG-`, `CLM-`, `RES-`, `DEC-`,
-`SUB-x`, `SUB-x/y` — return an error **naming the kind**, never a silent empty
-result. A kind that is not part of the scheme at all is named too, and
-distinguished from one that is merely unbuilt.
+`SES-` (with or without a `#T` turn), `CHG-`, `CLM-`, `RES-`, `DEC-` — return
+an error **naming the kind**, never a silent empty result. A kind that is not
+part of the scheme at all is named too, and distinguished from one that is
+merely unbuilt. `SUB-x` and `SUB-x/y` were on this list until issue #16.
 
 Errors reach the model as `ToolError`, which is the SDK's anticipated-failure
 type: the call comes back `is_error` with the message intact. Any other
@@ -130,9 +143,6 @@ the core's one error type onto it.
 
 ### What is deliberately still missing
 
-- **No ledger.** `events.jsonl` is issue #13. Until it lands, a served read
-  is not recorded anywhere, and the §7 constraint is met only in part. The
-  routing hook's message says only what is true today for the same reason.
 - **No overlay.** Decoration with entry links, exclusions and citing
   settlements is issue #20, at M2.
 - **No `raw` parameter.** Every read is undecorated today, so the
@@ -144,6 +154,141 @@ the core's one error type onto it.
   finds it rather than discovering it.
 - **No raw *original*.** Reading the pre-normalization source at
   `original_file` is #64/#25's "Open original", not this.
+
+## `search_text(query, filters)` — forced 2026-09-01, issue #12
+
+```
+search_text(query: str, filters: SearchFilters | None = None) -> str
+```
+
+The retrieval half of the minimum M1 tool surface: full-text search over the
+FTS5 index (`memoria.index`), the other half of what §7's superset-of-grep
+constraint needs alongside `read`.
+
+**FTS5 and nothing else.** ADR-0007 admitted embeddings by choice, but
+`search_semantic` (#81) is a separate tool over a separate `sqlite-vec`
+table, scheduled for M2; ADR-0005's extraction is a candidate engine, not a
+search index (`docs/open-problems.md` §2.2: "`search_text` stays FTS5").
+This tool's result set is FTS5 hits, and cluster summaries are never served
+here as evidence.
+
+### The filters are implemented in the core, not the tool
+
+`memoria.index.search(repository, query, filters)` takes the frozen
+`Repository` value, like every other core read (ADR-0004) — the point at
+which the function's `db_path` parameter was aligned to match, since #74 and
+#81 inherit the shape. `SearchFilters` carries the four filters that have
+something to filter on at M1:
+
+- `event_date` — exact match against the record's verbatim frontmatter
+  string
+- `recorded_date` — exact match, same reason
+- `source_type` — exact match (e.g. `"journal"`, `"editorial"`)
+- `contemporaneous` — `true` excludes retrospective/editorial commentary
+  added over the same ground; this is how §6's temporal discipline is
+  enforced at retrieval time
+
+All four are optional and compose (ANDed together). `record class` is not a
+filter: §26 lists it only as a *potential* one, and nothing defines it in
+`docs/normalized-record-schema.md` or on `NormalizedRecord`. Dates have no
+sortable value in the schema (`date_confidence` runs `exact` … `unresolved`
+with no ordering), so a range filter has nothing ordered to compare against —
+exact/prefix match was the choice available, and exact match is what shipped.
+Subject and entry filters (`person`, `theme`, `arc`, …) wait for M2, since
+entries do not exist yet; they are never filters, because the entry filter
+will cover every subject the author adds.
+
+The filter values live in a plain (non-FTS) table keyed by paragraph anchor —
+`paragraphs(anchor, src_id, source_type, event_date, recorded_date,
+contemporaneous)` — written by `build_index` beside the FTS5 `records`
+virtual table, not as extra `UNINDEXED` FTS5 columns. `memoria.index.
+filter_predicate` is the one predicate builder that turns a `SearchFilters`
+into `(sql, params)` against that table; `search()` joins FTS5 hits to it,
+and #81 (a `sqlite-vec` table) and #74 (the extraction's placements,
+relations, clusters and membership) are expected to join their own
+paragraph-keyed rows to it the same way, rather than each keeping a second
+copy of the metadata (§40.1).
+
+Reachable without the MCP server — `memoria.index.search` is a plain core
+function, exercised directly by `tests/test_index.py`.
+
+### What it returns
+
+Each `SearchResult` carries `(src_id, anchor, source_type)` and **no text**.
+`search_text` renders one line per hit, ranked, giving both the `SRC-` ID and
+the paragraph anchor — the anchor is `SearchResult.anchor` verbatim, which
+`read(ref)` accepts with no reconstruction by the caller (the bare-anchor
+form in the `read(ref)` table above exists specifically for this). No
+snippets or ranked text are served by this tool; wanting them would be a
+change to `memoria.index`, not to the adapter.
+
+No match, and no built index yet — every fresh clone, since `.memoria/` is
+gitignored — both render `"No results."` rather than an empty string or a
+driver exception. The empty index is part of this function's interface: it
+answers "the corpus is not built" rather than raising
+`sqlite3.OperationalError: no such table: records`, and it does not create
+`.memoria/index.db` as a side effect of searching.
+
+### Performance
+
+Search over the full corpus returns in well under a second — a test asserts
+it against a synthetic multi-thousand-paragraph index.
+
+## `events.jsonl` — the read ledger, forced 2026-09-01, issue #13
+
+Every `read(ref)` and `search_text(query, filters)` call this server
+**serves** appends one JSON line to `events.jsonl`, in `memoria.ledger` —
+core, not the adapter, so that any future caller ledgers through the same
+function rather than opening its own file. (#64's web app, which landed
+alongside this, deliberately appends nothing — author reads are out of scope,
+below.) Each line carries the
+reference or query, the filters, the records served (by `SRC-` ID or
+paragraph anchor — the same identifier `read(ref)` accepts verbatim), a
+timestamp, and the session it belongs to. The file is opened in append mode
+and written one line at a time; nothing here ever reads it back to rewrite
+it.
+
+**The path nests by year and month, matching part 04 §2's tree exactly:**
+`sessions/<YYYY>/<MM>/<session_id>/events.jsonl` — the directory #29's
+`context-manifest.json` and M4's `transcript.md` must later land in beside
+this file. Nesting is derived from the session id itself, since the
+documented `SES-YYYYMMDD-HHMM` form (part 04 §4) already carries the date.
+A caller-supplied `MEMORIA_SESSION_ID` that does not carry that form has no
+year/month to nest by; the ledger then falls back to
+`sessions/<session_id>/events.jsonl` directly, flat. That fallback is a
+documented deviation from part 04 §2, not a broken promise — an operator
+who wants the full nested layout sets a session id in the documented form.
+
+**Only what was served is ledgered.** A `ToolError` — an unresolvable kind,
+a missing record, an un-normalized corpus, a bad query — supplies nothing,
+so nothing is appended on that path. `CONTEXT.md`'s *Supplied context* is
+explicit that the account is of what Memoria *supplied*, and that is the
+definition #29's manifest is built on; an account of what was *asked for*
+would be a different, broader ledger than this one is.
+
+**The undecorated path is not an unlogged path.** A bare full-source read is
+ledgered exactly like a paragraph read or a path read — there is no read
+this server serves that skips the ledger.
+
+**Author reads are out of scope.** The ledger records what the tool surface
+served *to a session* (§10.4). The UI (#25) reads through the same core —
+there is no second read path — but it is served to nobody, and passes
+through nothing that appends here: there is no session for an author's own
+click to belong to. Ledgering author browsing would make the supplied-context
+account report the author's own reading as context supplied to a model,
+which is exactly the confident-but-wrong number ADR-0001 exists to prevent.
+
+**Session identity.** The MCP protocol carries no session id, and Claude
+Code's own session id lives in its transcript JSONL path rather than
+anywhere a tool call can read it (`docs/poc-plan.md` §3). Absent
+`MEMORIA_SESSION_ID` in the server's environment, one id is generated for
+the whole life of the server process and held for every call it serves — a
+stdio server is spawned per client, so the process boundary stands in for
+the session boundary until a spawner sets the variable explicitly. The
+generated id is part 04 §4's `SES-YYYYMMDD-HHMM` form plus a random 24-bit
+suffix: the documented form alone is minute granularity, and two servers
+spawned in the same minute with no suffix would generate the identical id
+and silently merge their events into one shared file.
 
 ## Registering the server
 

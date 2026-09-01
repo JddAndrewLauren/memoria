@@ -1,52 +1,84 @@
-from memoria.index import INDEX_RELATIVE_PATH, build_index, rebuild, search
+import sqlite3
+import time
+
+from memoria.index import (
+    INDEX_RELATIVE_PATH,
+    SearchFilters,
+    build_index,
+    filter_predicate,
+    rebuild,
+    search,
+)
 from memoria.repository import Repository
 from memoria.records import NormalizedRecord
 
 
-def _record(record_id, paragraphs, source_type="journal"):
+def _record(
+    record_id,
+    paragraphs,
+    source_type="journal",
+    event_date="Oct. 22.",
+    recorded_date="Oct. 22.",
+    contemporaneous=True,
+):
     return NormalizedRecord(
         id=record_id,
         source_type=source_type,
-        recorded_date="Oct. 22.",
-        event_date="Oct. 22.",
+        recorded_date=recorded_date,
+        event_date=event_date,
         date_confidence="unresolved",
-        contemporaneous=True,
+        contemporaneous=contemporaneous,
         original_file="raw/vol-01/text.txt",
         original_locator="Journal I, entry dated Oct. 22.",
         paragraphs=paragraphs,
     )
 
 
-def test_search_finds_a_record_by_its_paragraph_text(tmp_path):
-    db_path = tmp_path / "index.db"
-    records = [_record("SRC-000001", ["The fox ran through the woods."])]
-
+def _index(tmp_path, records):
+    db_path = tmp_path / INDEX_RELATIVE_PATH
     build_index(db_path, records)
-    results = search(db_path, "fox")
+    return Repository(root=tmp_path)
+
+
+def test_search_finds_a_record_by_its_paragraph_text(tmp_path):
+    records = [_record("SRC-000001", ["The fox ran through the woods."])]
+    repository = _index(tmp_path, records)
+
+    results = search(repository, "fox")
 
     assert len(results) == 1
     assert results[0].src_id == "SRC-000001"
 
 
 def test_search_returns_the_specific_paragraph_anchor_that_matched(tmp_path):
-    db_path = tmp_path / "index.db"
     records = [
         _record(
             "SRC-000002",
             ["First paragraph, no match here.", "Second paragraph mentions a badger."],
         )
     ]
+    repository = _index(tmp_path, records)
 
-    build_index(db_path, records)
-    results = search(db_path, "badger")
+    results = search(repository, "badger")
 
     assert len(results) == 1
     assert results[0].src_id == "SRC-000002"
     assert results[0].anchor == "src-000002-p2"
 
 
-def test_search_can_exclude_editorial_records(tmp_path):
-    db_path = tmp_path / "index.db"
+def test_search_over_a_missing_index_returns_no_results_rather_than_raising(tmp_path):
+    """A fresh clone has no `.memoria/index.db` - `.memoria/` is gitignored.
+
+    That is the state of every fresh clone, not an error: the corpus not
+    being built yet is an answer, not a driver exception.
+    """
+    repository = Repository(root=tmp_path)
+
+    assert search(repository, "fox") == []
+    assert not (tmp_path / INDEX_RELATIVE_PATH).exists()
+
+
+def test_search_filters_by_source_type(tmp_path):
     records = [
         _record("SRC-000003", ["He saw a heron by the pond."], source_type="journal"),
         _record(
@@ -55,15 +87,14 @@ def test_search_can_exclude_editorial_records(tmp_path):
             source_type="editorial",
         ),
     ]
+    repository = _index(tmp_path, records)
 
-    build_index(db_path, records)
-    results = search(db_path, "heron", exclude_editorial=True)
+    results = search(repository, "heron", SearchFilters(source_type="journal"))
 
     assert [r.src_id for r in results] == ["SRC-000003"]
 
 
-def test_search_includes_editorial_records_by_default(tmp_path):
-    db_path = tmp_path / "index.db"
+def test_search_with_no_filters_returns_everything_that_matches(tmp_path):
     records = [
         _record("SRC-000003", ["He saw a heron by the pond."], source_type="journal"),
         _record(
@@ -72,11 +103,132 @@ def test_search_includes_editorial_records_by_default(tmp_path):
             source_type="editorial",
         ),
     ]
+    repository = _index(tmp_path, records)
 
-    build_index(db_path, records)
-    results = search(db_path, "heron")
+    results = search(repository, "heron")
 
     assert {r.src_id for r in results} == {"SRC-000003", "SRC-000004"}
+
+
+def test_a_retrospective_excluded_search_returns_the_evidence_and_not_the_annotation(
+    tmp_path,
+):
+    """§6's temporal discipline enforced at retrieval: `contemporaneous=False`
+    filters out later editorial commentary added over the same ground."""
+    records = [
+        _record(
+            "SRC-000003",
+            ["He saw a heron by the pond."],
+            source_type="journal",
+            contemporaneous=True,
+        ),
+        _record(
+            "SRC-000004",
+            ["The editor notes, years later, that a heron was a common sight."],
+            source_type="editorial",
+            contemporaneous=False,
+        ),
+    ]
+    repository = _index(tmp_path, records)
+
+    results = search(repository, "heron", SearchFilters(contemporaneous=True))
+
+    assert [r.src_id for r in results] == ["SRC-000003"]
+
+
+def test_search_filters_by_event_date(tmp_path):
+    records = [
+        _record("SRC-000005", ["A fox in October."], event_date="Oct. 22., 1845"),
+        _record("SRC-000006", ["A fox in November."], event_date="Nov. 3., 1845"),
+    ]
+    repository = _index(tmp_path, records)
+
+    results = search(repository, "fox", SearchFilters(event_date="Oct. 22., 1845"))
+
+    assert [r.src_id for r in results] == ["SRC-000005"]
+
+
+def test_search_filters_by_recorded_date(tmp_path):
+    records = [
+        _record("SRC-000007", ["A fox recorded in October."], recorded_date="Oct. 22."),
+        _record("SRC-000008", ["A fox recorded in November."], recorded_date="Nov. 3."),
+    ]
+    repository = _index(tmp_path, records)
+
+    results = search(repository, "fox", SearchFilters(recorded_date="Oct. 22."))
+
+    assert [r.src_id for r in results] == ["SRC-000007"]
+
+
+def test_search_filters_compose(tmp_path):
+    records = [
+        _record(
+            "SRC-000009",
+            ["A fox by the journal."],
+            source_type="journal",
+            event_date="Oct. 22., 1845",
+            contemporaneous=True,
+        ),
+        _record(
+            "SRC-000010",
+            ["A fox by the editor."],
+            source_type="editorial",
+            event_date="Oct. 22., 1845",
+            contemporaneous=False,
+        ),
+        _record(
+            "SRC-000011",
+            ["A fox on a different day."],
+            source_type="journal",
+            event_date="Nov. 3., 1845",
+            contemporaneous=True,
+        ),
+    ]
+    repository = _index(tmp_path, records)
+
+    results = search(
+        repository,
+        "fox",
+        SearchFilters(
+            source_type="journal", event_date="Oct. 22., 1845", contemporaneous=True
+        ),
+    )
+
+    assert [r.src_id for r in results] == ["SRC-000009"]
+
+
+def test_filter_predicate_is_reusable_by_a_query_that_is_not_fts5(tmp_path):
+    """#74 joins cluster membership, #81 joins a vector search - neither is
+    an FTS5 query. The same predicate builder must serve a plain SELECT
+    against the ``paragraphs`` table directly."""
+    records = [
+        _record("SRC-000013", ["Evidence."], source_type="journal"),
+        _record("SRC-000014", ["Commentary."], source_type="editorial"),
+    ]
+    repository = _index(tmp_path, records)
+
+    predicate, params = filter_predicate(SearchFilters(source_type="journal"))
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    try:
+        rows = con.execute(
+            f"SELECT src_id FROM paragraphs WHERE {predicate}", params
+        ).fetchall()
+    finally:
+        con.close()
+
+    assert [r[0] for r in rows] == ["SRC-000013"]
+
+
+def test_results_feed_straight_into_read_with_no_reconstruction(tmp_path):
+    from memoria import references
+
+    records = [_record("SRC-000012", ["A fox by the pond."])]
+    repository = _index(tmp_path, records)
+
+    (hit,) = search(repository, "fox")
+
+    reference = references.parse(hit.anchor)
+    assert reference.record_id == hit.src_id
 
 
 def test_rebuild_regenerates_an_index_deleted_from_disk(tmp_path):
@@ -102,18 +254,34 @@ def test_rebuild_regenerates_an_index_deleted_from_disk(tmp_path):
     ]
     write_normalized_records(records, tmp_path / NORMALIZED_RELATIVE_PATH)
 
-    rebuild(Repository(root=tmp_path))
+    repository = Repository(root=tmp_path)
+    rebuild(repository)
     db_path = tmp_path / INDEX_RELATIVE_PATH
-    before = [(r.src_id, r.anchor) for r in search(db_path, "heron")]
+    before = [(r.src_id, r.anchor) for r in search(repository, "heron")]
     assert before
 
     db_path.unlink()
-    rebuild(Repository(root=tmp_path))
+    rebuild(repository)
 
-    assert [(r.src_id, r.anchor) for r in search(db_path, "heron")] == before
+    assert [(r.src_id, r.anchor) for r in search(repository, "heron")] == before
 
 
 def test_rebuild_reports_no_records_when_none_exist(tmp_path):
     """With no corpus chosen there is nothing to index, and that is not an
     error - it is the honest state."""
     assert rebuild(Repository(root=tmp_path)) == []
+
+
+def test_search_over_the_full_corpus_returns_well_under_a_second(tmp_path):
+    records = [
+        _record(f"SRC-{n:06d}", [f"Paragraph {n} mentions a heron by the pond."])
+        for n in range(1, 2001)
+    ]
+    repository = _index(tmp_path, records)
+
+    start = time.monotonic()
+    results = search(repository, "heron")
+    elapsed = time.monotonic() - start
+
+    assert results
+    assert elapsed < 0.5

@@ -11,9 +11,11 @@ and issue #1 for what it cost.
 
 Practically, this means:
 
-- Nothing produces normalized records today. The ingestion layer written for that
-  corpus — the normalizer, editorial segregation, year resolution,
-  cross-reference extraction and the benchmark answer key — was removed with it.
+- `memoria normalize` produces normalized records from any raw unit whose suffix
+  has a registered converter — plain text today, with docx and PDF owed by #77
+  and email by #78. What was removed with that corpus is the rest of its
+  ingestion layer: editorial segregation, year resolution, cross-reference
+  extraction and the benchmark answer key.
 - `docs/normalized-record-schema.md` survives as the **contract** a future
   normalizer must satisfy. It is what `memoria.index` and `memoria validate`
   already read, and it is what to build against.
@@ -29,9 +31,9 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 ```
 
-`[dev]` pulls in the `[mcp]` extra, so the MCP server below is importable and
-its tests run. `pip install memoria` on its own installs the core and the CLI
-only — the MCP SDK brings a web-server stack with it, and the core's own
+`[dev]` pulls in the `[mcp]` and `[web]` extras, so the MCP server and the
+FastAPI app below are both importable and their tests run. `pip install
+memoria` on its own installs the core and the CLI only — the core's own
 runtime dependency is PyYAML alone.
 
 ## Running the tests
@@ -88,11 +90,47 @@ It speaks JSON-RPC over stdio, so it is not interactive — a client drives it.
 them (see *No evidence corpus* above). `read` says so rather than failing
 obscurely.
 
+## The FastAPI app
+
+The third adapter over the core (#64, `docs/adr/0002-ui-is-a-react-client.md`),
+serving JSON under `/api` for the React client at `ui/` (#24). Same rule the
+MCP server keeps: domain logic stays in `memoria.*`, and this app calls it and
+shapes the result — it opens no SQLite database and reads no evidence file
+directly.
+
+```
+.venv/bin/python -m uvicorn memoria.web.app:create_app --factory --reload
+```
+
+Four reads exist today: list sources (`GET /api/sources`, filterable by
+`source_type`, `date_confidence` and `contemporaneous`, paginated), read one
+source (`GET /api/sources/{id}`), the raw un-normalized file behind one
+(`GET /api/sources/{id}/raw`), and search (`GET /api/search`, wrapping
+`memoria.index.search`). See `docs/tool-surface.md` for what each filter
+means and `src/memoria/web/schemas.py` for the response shapes.
+
+No auth, HTTPS or remote-access code exists — localhost, one machine
+(`docs/poc-plan.md` §5).
+
+### Regenerating the TypeScript client types
+
+```
+scripts/generate-web-types.sh
+```
+
+Writes `ui/src/api/schema.d.ts` from the app's OpenAPI schema. Run it after
+changing a route or a response model in `src/memoria/web/`, and commit the
+result — `tests/test_web_types.py` fails the suite when the committed file
+goes stale against the schema, which is the mitigation the ADR names for a
+two-language stack in a repo with no CI: a backend field rename becomes a
+compile error in `ui/`, not a runtime surprise nobody sees.
+
 ## CLI
 
 ```
 .venv/bin/memoria --help
 .venv/bin/memoria validate
+.venv/bin/memoria normalize
 .venv/bin/memoria rebuild
 ```
 
@@ -107,10 +145,16 @@ records under `sources/normalized/` and the SQLite FTS5 full-text search index a
 `.memoria/index.db` (both gitignored) — from evidence, losing nothing (§42:
 derived state carries no authority and can always be thrown away).
 
-**`rebuild` has no normalizer to call.** With the corpus retired it regenerates
-the index from whatever records are already on disk and reports that no producer
-is wired in. Restoring it is part of choosing a corpus, not a gap to patch.
+**`rebuild` does not normalize.** It regenerates the index from whatever records
+are already on disk; producing those records is `memoria normalize`'s job, and
+the two stay separate so a reindex never rewrites evidence-derived records. On
+an empty corpus `rebuild` indexes nothing and says so — choosing a corpus is
+what fills it, not a gap to patch.
 
-Use `memoria.index.search(db_path, query)` to query the index; pass
-`exclude_editorial=True` to search evidence records only, excluding editorial
-voice.
+Use `memoria.index.search(repository, query, filters)` to query the index —
+it takes the frozen `Repository` value, like every other core read (ADR-0004).
+Pass `SearchFilters(contemporaneous=True)` to search evidence records only,
+excluding retrospective editorial commentary; `SearchFilters.source_type` is
+an exact match with no negation, so narrowing to one type (not "everything
+except editorial") is what a `source_type` filter alone can express. See
+`docs/tool-surface.md`'s `search_text` section for the full filter set.
