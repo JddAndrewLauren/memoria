@@ -78,10 +78,10 @@ class RawSourceResponse(BaseModel):
 
 class SearchResultOut(BaseModel):
     """One search hit: the ``SRC-`` ID and paragraph anchor, and nothing
-    else. ``memoria.index.SearchResult`` carries no text; this tool serves
+    else. ``memoria.index.SearchResult`` carries no text; this route serves
     none either, for the same reason ``search_text`` (#12) does not - see
-    ``docs/tool-surface.md``'s note on the amendment resolving #64 against
-    #12's actual, current return shape.
+    ``docs/tool-surface.md``'s "search_text(query, filters)" section,
+    "What it returns", which is where that constraint is actually recorded.
     """
 
     src_id: str
