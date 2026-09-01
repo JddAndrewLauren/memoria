@@ -221,6 +221,9 @@ failure is recognised as evidence rather than as a surprise.
 | The extraction and `search_global`'s summary mode ship without an observed failure | ADR-0005 — chosen against §1.11 and §45 | Clusters the author never promotes, or summaries the agent quotes in place of evidence |
 | Placement recall is unreported, like gathered-set recall | ADR-0005 — unplaced surface forms stay enumerable | A person the author knows is in the archive with placements missing where the name is plain |
 | A fresh archive shows no candidates until the author runs the extraction | ADR-0005 — one engine, author-launched | The first extraction of a real archive being unaffordably long in one session |
+| Quoted replies are dropped from email records, not kept unindexed | part 05 §5.4 — one body per record, the quote is in the raw file and usually the parent record | A quoted message whose original was never exported (a sent-folder-only export) that the author needs to find by search |
+| docx and pdf are one record per file until a real file breaks it | part 05 §5.2 — start simple; the split rule is the amendment path | A journal-style file whose every paragraph carries one date, polluting Timeline candidates |
+| The ingest is planned against an unconfirmed format list | part 05 §5.2 — docx, pdf, email exports assumed | The real archive's bulk turning out to be something else (chat exports, scans) and the normalizer covering none of it |
 
 ---
 
@@ -228,7 +231,14 @@ failure is recognised as evidence rather than as a surprise.
 
 Build detail rather than open decisions, from `poc-plan.md` §7:
 
-- the normalized record schema, and how editorial apparatus is represented;
+- ~~the normalized record schema~~ — settled 2026-09-01 for docx, pdf and email
+  (part 05 §5.1-5.4, `normalized-record-schema.md`, ADR-0006); how editorial apparatus
+  is represented is still open, and so is whether the extraction (ADR-0005) is handed a
+  record's frontmatter — sender, recipient, date — alongside each paragraph, which
+  email paragraphs need to be placeable;
+- how images, charts and spreadsheets are handled — written down, not built: a deep
+  read of a spreadsheet is unlikely to be worth it, surfacing that one was attached to
+  a message may be (part 05 §5.4);
 - which §25 tools ship, and their exact signatures — `read(ref)` forced
   2026-09-01 (issue #11, [`tool-surface.md`](tool-surface.md)); the rest open;
 - the Curator's scope and trigger policy;

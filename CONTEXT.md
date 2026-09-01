@@ -222,6 +222,14 @@ Arcs that cannot. It carries no pin or exclude overlay, because an author act ag
 one passage would be a durable pointer into mutable prose.
 _Avoid_: Affected passages, backlinks, manuscript matches, edges
 
+### Evidence
+
+**Raw unit**:
+The thing that receives a `SRC-` ID and becomes one normalized record — a file, or one
+message inside an email export. Numbered once by the manifest ledger on first sight and
+never renumbered.
+_Avoid_: Source file, document, input, item
+
 ### Writing to the repository
 
 **Write path**:
