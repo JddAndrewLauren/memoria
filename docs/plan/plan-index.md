@@ -10,9 +10,9 @@ original plan.
 **Revised since:** §8 (rewritten as the subject system), §16-§18 and §39 (rewritten
 for the manuscript layer), §14 (rewritten as ownership by badge), §18's category list
 and §17's question list (both withdrawn),
-§1.5, §1.10a (new), §2, §2.1 (new), §3, §4, §4.1 (new), §7, §8.1, §8.2, §8.5, §8.6, §8.11,
+§1.5, §1.10a (new), §2, §2.1 (new), §3, §4, §4.1 (new), §7, §8.1, §8.2, §8.3, §8.4, §8.5, §8.6, §8.11,
 §8.12 (new), §9.5, §12, §12.1, §13, §13.4, §15, §19, §20, §21, §23, §24.2, §25, §32, §33, §36-§38, §42,
-§43.2, §47, §52.2, and Invariants 8 and 9.
+§43.2, §43.14 (new), §47, §52.2, and Invariants 8 and 9.
 
 Five parts — 06, 08, 11, 14, 18 — end in an appended
 `## Editorial note — the desktop design`, recording where that design confirms,
@@ -177,7 +177,8 @@ Review inbox as resolved or superseded.
 
 **15** is active because the benchmark is now the instrument that decides whether
 embeddings get built. §45's "observe failure, then adopt" only works if the
-measurement exists.
+measurement exists. The harness reports three numbers (§43.14): retrieval
+recall@10, gathered-set recall, and the promotion miss rate.
 **16 must be rewritten before it is followed.** M0 and M1 as written assume the
 web service, ModelBackend and capacity machinery that parts 13 and 14 removed.
 Re-slicing was deliberately not done in this session.

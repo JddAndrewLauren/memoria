@@ -28,7 +28,7 @@ One corpus, two uses, deliberately kept separate.
 | **Instrument** | 364 resolvable cross-references | A real short piece of prose |
 | **Author needed?** | No — runs unattended | Yes — must be genuine |
 | **Tests** | Retrieval, provenance, temporal discipline (§43.1, §43.7, §43.11) | Ownership, curator restraint, authorization (§1.7, §13.4, §14, §15, §19-21) |
-| **Output** | recall@10 / precision@10 | Observed failures |
+| **Output** | Three numbers: retrieval recall@10 / precision@10, gathered-set recall, promotion miss rate (§3) | Observed failures |
 
 **Why separate.** A benchmark that can be scored automatically loses most of its
 value if it is entangled with prose being judged subjectively. And the ownership
@@ -179,6 +179,22 @@ are already proven in a separate project.
 
 **This only works if the benchmark harness is built early.** FTS5-first without
 measurement is just under-building.
+
+**The harness reports three numbers, not one** (2026-08-31):
+
+1. **Retrieval recall@10** over the 364 resolvable cross-references — the number
+   that decides whether embeddings get built (§45 discipline).
+2. **Gathered-set recall** — a set metric, not @k: of the cross-referenced
+   journal passages belonging to an entry, the fraction actually present in that
+   entry's gathered set. A writing agent reads the gathered set *instead of*
+   searching, so set completeness — not rank quality — is what decides whether
+   the index is safe to write from (part 06 §8.3, part 11 §33.1).
+3. **Promotion miss rate** — the promoted set scored against `RECON.md`'s ground
+   truth of 43 distinct letter recipients. The ≥5-recurrence filter admits at
+   most 9 / 18 / 36 candidates per volume, so the filter that makes promotion
+   tractable is a guaranteed miss generator; this number says how bad the misses
+   are, rather than assuming the dozens it keeps are the right dozens (part 06
+   §8.4).
 
 ### Rejection ledger
 Not treated as an architecture decision. The only requirement: **dismissals get
@@ -332,7 +348,8 @@ Vocabulary: [`../CONTEXT.md`](../CONTEXT.md).
   also measure **index recall** — whether an entry's gathered set is complete enough
   to write a chapter from. That is the central and otherwise-silent risk of the
   design (part 06 §8.3, part 11 §33.1). §3's "this only works if the benchmark
-  harness is built early" becomes more load-bearing, not less.
+  harness is built early" becomes more load-bearing, not less. Scored as
+  **gathered-set recall**, the second of §3's three harness numbers.
 - **The alias material stops being a side test.** `RECON.md`'s Emerson-under-four-forms
   and four-Thoreaus-sharing-a-surname are now the worked example of a subject's
   **matching hazards** (part 06 §8.1), which is a required field on every subject
@@ -340,7 +357,9 @@ Vocabulary: [`../CONTEXT.md`](../CONTEXT.md).
 - **Entry population is measurable here.** Recurrence collapses the candidate space
   hard on this corpus — 516 / 638 / 1,066 distinct capitalized-name candidates per
   volume, but only 9 / 18 / 36 appearing five or more times, against `RECON.md`'s
-  ground truth of 43 distinct letter recipients. The promotable set is dozens.
+  ground truth of 43 distinct letter recipients. The promotable set is dozens — and
+  a filter admitting at most 36 candidates cannot reach all 43, which is why the
+  **promotion miss rate** is §3's third harness number.
 - **The authorship track gains a specific thing to observe.** Author testimony
   outranks documentary evidence (part 06 §8.6), which means the audit can report
   author misremembering but never flag it as an error. Whether that feels right in

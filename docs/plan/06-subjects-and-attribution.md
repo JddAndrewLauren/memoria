@@ -4,6 +4,8 @@
 <!-- longer verbatim. The original five-object-type §8 is in _original-memoria-plan.md. -->
 <!-- §8.2, §8.6, §8.12 and §9.5 revised 2026-08-31: ownership by badge. See part 08 §14. -->
 <!-- §8.2 revised again 2026-08-31: match terms are the only alias store (part 05 §7). -->
+<!-- §8.3 and §8.4 revised 2026-08-31: gathered-set recall and the promotion miss -->
+<!-- rate are harness numbers (poc-plan §3, part 15 §43.14). -->
 
 # 8. The Subject System
 
@@ -136,8 +138,11 @@ the first Curator pass.
 entry's gathered set is invisible to a writing agent, which cannot know it is
 missing. This is worse than search under §33: a search reports its query; an index
 reports nothing about its own completeness. The PoC's 364 resolvable
-cross-references measure it directly — recall@10 over those links *is* the measure
-of whether the index is complete enough to write from.
+cross-references measure it directly — **gathered-set recall** over those links, a
+set metric asking whether the passage is in the set at all rather than where it
+ranks, *is* the measure of whether the index is complete enough to write from. It
+is the second of the benchmark harness's three numbers (`poc-plan.md` §3, part 15
+§43.14).
 
 ---
 
@@ -165,6 +170,12 @@ Recurrence is a strong filter. On the PoC corpus, distinct capitalized-name
 candidates run 516 / 638 / 1,066 per volume; those appearing five or more times run
 9 / 18 / 36, against `RECON.md`'s ground truth of 43 distinct letter recipients.
 The promotable set is dozens, not hundreds.
+
+The same numbers face the other way: a filter admitting at most 36 candidates
+cannot reach all 43 known recipients, so the filter that makes promotion tractable
+is a guaranteed miss generator. The benchmark's **promotion miss rate**
+(`poc-plan.md` §3, part 15 §43.14) scores the promoted set against that ground
+truth rather than letting the encouraging collapse hide the misses.
 
 The author may also **create an entry manually**, on any subject, at any time. A
 manually created entry has no matched history, so it needs its own match terms

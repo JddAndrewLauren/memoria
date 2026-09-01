@@ -357,8 +357,9 @@ Two obligations follow:
   which fell back to unpromoted candidates, and that the gathered sets are indexes
   rather than exhaustive searches.
 - **Recall must be measured, not assumed.** The PoC's 364 resolvable
-  cross-references are the instrument; recall@10 over those links is the measure of
-  whether the index is complete enough to write from. See `poc-plan.md` §3.
+  cross-references are the instrument; **gathered-set recall** over those links —
+  a set metric, not recall@10 — is the measure of whether the index is complete
+  enough to write from. See `poc-plan.md` §3 and part 15 §43.14.
 
 This is the central risk of the subject system and it is silent by nature. Part 06
 §8.3 states it; §15's evaluation suite is where it is caught.

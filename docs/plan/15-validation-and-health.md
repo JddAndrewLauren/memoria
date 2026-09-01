@@ -1,5 +1,6 @@
 <!-- Part of the Memoria build plan. Index: ./plan-index.md -->
 <!-- Source sections: 23, 43, 47 of the original memoria-plan.md -->
+<!-- §43.14 added 2026-08-31: the benchmark harness's three numbers. -->
 
 # 23. Provenance Validation
 
@@ -105,6 +106,20 @@ Can Memoria propose a manuscript rewrite autonomously while refusing to apply it
 ## 43.13 Scope test
 
 If the author authorizes one paragraph, does Memoria leave unrelated manuscript prose untouched?
+
+## 43.14 Benchmark harness — three numbers
+
+The machine-scored track's harness is built early (`poc-plan.md` §3) and reports
+three numbers:
+
+- **retrieval recall@10** over the 364 resolvable cross-references — the number
+  that decides whether embeddings get built (§45);
+- **gathered-set recall** — a set metric: whether an entry's gathered set is
+  complete enough to write from, the silent recall risk of part 06 §8.3 and part
+  11 §33.1;
+- **promotion miss rate** — the promoted set scored against `RECON.md`'s 43 known
+  letter recipients, since the ≥5-recurrence filter admits at most 36 candidates
+  (part 06 §8.4).
 
 Every consequential real-world failure becomes a regression test.
 
