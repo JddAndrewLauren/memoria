@@ -96,6 +96,29 @@ straight ASCII) so a search phrase matches regardless of which volume's
 convention produced it (RECON.md §6.1: J01/Familiar Letters use straight
 quotes, J02 uses curly).
 
+## Whitespace policy
+
+`normalize_journals` never reflows a paragraph's whitespace — a paragraph
+is `.strip()`ped at its ends and otherwise kept exactly as the raw source's
+line breaks and indentation produced it (`_paragraphs` in normalize.py).
+Evidence text is sacred: nothing here rewrites it, so a quoted verse's own
+line structure (e.g. SRC-000003's stanza from *Ibid.*) survives into the
+normalized record unchanged.
+
+The later editorial-extraction step (`extract_editorial_apparatus`,
+issue #5, `src/memoria/editorial.py`) *does* reflow whitespace to single
+spaces, but **only for a paragraph an editorial span (a footnote marker,
+a standalone bracketed aside, or a sentence-completing interpolation) was
+actually excised from** — closing up the artifact that excision itself
+leaves behind (a doubled space, a stray space before punctuation, e.g.
+"Walked to Concord , 10 miles." → "Walked to Concord N. H., 10 miles."). A
+paragraph containing no bracketed span at all is left byte-identical to
+what `normalize_journals` produced, mid-paragraph newlines included — this
+was a defect (issue #55) where the reflow ran unconditionally on every
+evidence paragraph regardless of whether anything was actually excised
+from it, and a pre-existing space before punctuation in the raw text
+itself (not an excision artifact) was wrongly closed up along with it.
+
 ## J02's undated opening fragments
 
 Everything before a volume's **first chapter heading** is discarded by

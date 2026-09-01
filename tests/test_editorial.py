@@ -1,11 +1,13 @@
 import os
 import re
+from collections import Counter
 from pathlib import Path
 
 import pytest
 import yaml
 
 from memoria.editorial import (
+    _BRACKET_RE,
     EditorialRecord,
     extract_editorial_apparatus,
     write_editorial_records,
@@ -44,6 +46,10 @@ _FAKE_JOURNAL_WITH_APPARATUS = (
     "[The editor inserts a whole aside here, never Thoreau's words.]\r\n"
     "\r\n"
     "_Oct. 24._ Every part of nature teaches something.\r\n"
+    "\r\n"
+    '"He seems to avoid—even to flee from us,—\r\n'
+    "     To seek something which we know not,\r\n"
+    '     And perhaps he himself after all knows not."—_Ibid._\r\n'
     "\r\n"
     "END OF VOLUME 99\r\n"
     "\r\n"
@@ -148,6 +154,27 @@ def test_footnote_with_no_marker_in_entry_text_is_still_extracted_unlinked(tmp_p
     assert "Torrey's footnote" in footnote_1.text
     assert footnote_1.linked_record_id is None
     assert footnote_1.linked_anchor is None
+
+
+def test_paragraph_with_no_bracket_is_untouched_and_keeps_verse_line_structure(
+    tmp_path,
+):
+    # Issue #55: _clean_ws used to run unconditionally on every paragraph,
+    # collapsing a quoted verse's line breaks to single spaces even though
+    # nothing was excised from it. A paragraph with no bracket at all must
+    # come out byte-identical to what normalize_journals produced.
+    evidence_root = tmp_path / "thoreau-evidence"
+    _write_fake_corpus(evidence_root)
+
+    records, _ = _extract(evidence_root)
+
+    entry = next(r for r in records if r.recorded_date == "Oct. 24.")
+    verse = next(p for p in entry.paragraphs if "avoid" in p)
+    assert verse == (
+        '"He seems to avoid—even to flee from us,—\n'
+        "     To seek something which we know not,\n"
+        '     And perhaps he himself after all knows not."—_Ibid._'
+    )
 
 
 def test_bracketed_editorial_span_is_extracted_and_removed_from_evidence(tmp_path):
@@ -398,11 +425,23 @@ class TestAgainstTheRealEvidenceCorpus:
     def test_no_evidence_paragraph_has_a_space_before_punctuation(self, extracted):
         # Regression test for PR #51 review round 1, BLOCKING 2's "41
         # space-before-punctuation artifacts" - the leftover of excising a
-        # bracket next to a comma or period without closing the gap.
+        # bracket next to a comma or period without closing the gap. Only
+        # applies to paragraphs an editorial span was actually excised
+        # from (issue #55): an untouched paragraph's own pre-existing
+        # space before punctuation - e.g. SRC-000400's quoted verse " ..."
+        # - is the source text, not an excision artifact, and must survive.
         records, _ = extracted
+        evidence_root = Path(os.environ[EVIDENCE_ROOT_ENV_VAR])
+        raw_paragraphs_by_id = {
+            r.id: Counter(r.paragraphs) for r in normalize_journals(evidence_root)
+        }
         space_before_punct = re.compile(r"\s[,.;:!?]")
         for record in records:
+            raw_paragraphs = raw_paragraphs_by_id.get(record.id, Counter())
             for paragraph in record.paragraphs:
+                if raw_paragraphs[paragraph] > 0:
+                    raw_paragraphs[paragraph] -= 1
+                    continue
                 assert not space_before_punct.search(paragraph), (
                     record.id,
                     paragraph,
@@ -432,6 +471,39 @@ class TestAgainstTheRealEvidenceCorpus:
         for record in editorial:
             assert record.retrospective is True
             assert record.recorded_date == "1906"
+
+    def test_a_real_verse_bearing_record_retains_its_line_structure(self, extracted):
+        # SRC-000003's quoted stanza from *Ibid.* has no bracket anywhere
+        # in it, so the whitespace policy must leave its line breaks and
+        # indentation exactly as normalize_journals produced them.
+        records, _ = extracted
+        record = next(r for r in records if r.id == "SRC-000003")
+        verse = next(p for p in record.paragraphs if "flee from us" in p)
+        assert verse == (
+            '"He seems to avoid—even to flee from us,—\n'
+            "     To seek something which we know not,\n"
+            '     And perhaps he himself after all knows not."—_Ibid._'
+        )
+
+    def test_records_with_no_excised_span_are_unchanged_from_raw_derived_text(self):
+        # Issue #55's own guard: regenerate the corpus and check that a
+        # record none of whose paragraphs contained a bracket comes out of
+        # extract_editorial_apparatus byte-identical to what
+        # normalize_journals produced - this must fail if the old
+        # unconditional _clean_ws reflow is restored.
+        evidence_root = Path(os.environ[EVIDENCE_ROOT_ENV_VAR])
+        records = normalize_journals(evidence_root)
+        original_paragraphs = {r.id: list(r.paragraphs) for r in records}
+        extract_editorial_apparatus(evidence_root, records)
+
+        untouched_records_checked = 0
+        for record in records:
+            original = original_paragraphs[record.id]
+            if any(_BRACKET_RE.search(p) for p in original):
+                continue
+            assert record.paragraphs == original, record.id
+            untouched_records_checked += 1
+        assert untouched_records_checked > 0
 
     def test_nothing_is_deleted_every_footnote_and_span_remains_readable(
         self, extracted
