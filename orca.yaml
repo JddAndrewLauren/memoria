@@ -1,0 +1,84 @@
+# The Orca setup hook for a new memoria worktree.
+#
+# Orca runs `scripts.setup` with `/bin/bash` and `set -e`, working directory
+# = the newly created worktree. Every line below is therefore a gate: the
+# first non-zero exit stops the hook and the workspace reports failed setup.
+#
+# Requires Orca's Windows default shell to be **WSL** (Settings > Terminal).
+# `uv` and the evidence corpus are both reached here by POSIX paths, and
+# there is no native Windows install of either.
+#
+# What is *not* here is deliberate. Derived state -- the normalized records
+# under `sources/normalized/`, the editorial records beside them, and the
+# FTS5 index at `.memoria/index.db` -- is left ungenerated: `memoria rebuild`
+# costs ~20s, the test suite writes its own copies regardless, and a
+# workspace created to edit `docs/plan/` never needs it. Run
+# `.venv/bin/memoria rebuild` when you do. There is no `archive` hook because
+# removing a worktree removes its directory, `.venv` and all.
+scripts:
+  setup: |
+    # Load-bearing, not boilerplate. `uv` installs to ~/.local/bin, which the
+    # stock Ubuntu non-interactive guard at ~/.bashrc:6-9 keeps out of a plain
+    # `bash -c` PATH. Probed rather than hardcoded so the same file works on
+    # the Mac.
+    for d in "$HOME/.local/bin" /opt/homebrew/bin; do
+      [ -d "$d" ] && PATH="$d:$PATH"
+    done
+    export PATH
+
+    # The uv cache lives on ext4 under $HOME while an orca worktree lives on
+    # the drvfs /mnt/c mount, so uv cannot hardlink between them and warns
+    # about it, three lines at a time, on every workspace create.
+    export UV_LINK_MODE=copy
+
+    # Named up front so a missing tool reads as one line in Orca's setup log
+    # rather than as a 127 from somewhere inside venv creation.
+    #
+    # `uv`, and not the README's `python3 -m venv`, because this machine's
+    # Python 3.14 ships no `ensurepip` and the documented plain-venv form
+    # therefore fails here. The README is correct for a normal machine; this
+    # is the environment fix, not a repo change.
+    command -v uv >/dev/null || {
+      echo "setup: uv is not on PATH -- install it with: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+      exit 1
+    }
+
+    # No `--python` pin: uv honours `requires-python = ">=3.10"` from
+    # pyproject.toml and prints the interpreter it picked into the setup log.
+    # Pinning /usr/bin/python3 would break the Mac, where it is 3.9.
+    uv venv .venv
+    uv pip install --python .venv/bin/python -e ".[dev]"
+
+    # The read-only evidence corpus is a sibling of the *primary* checkout, so
+    # the README's `../thoreau-evidence` default -- correct when running from
+    # that checkout -- does not resolve from `workspaces/<project>/<name>/`,
+    # two levels deeper. $ORCA_ROOT_PATH is tried first and the git common dir
+    # second, which both keeps this runnable by hand outside Orca and means a
+    # surprise in what Orca calls "root" degrades into the fallback rather
+    # than into a silently wrong path.
+    evidence=""
+    for root in "${ORCA_ROOT_PATH:-.}" "$(dirname "$(git rev-parse --git-common-dir)")"; do
+      if [ -d "$root/../thoreau-evidence" ]; then
+        evidence=$(cd "$root/../thoreau-evidence" && pwd)
+        break
+      fi
+    done
+    [ -n "$evidence" ] || {
+      echo "setup: no thoreau-evidence corpus beside the primary checkout -- clone it there" >&2
+      exit 1
+    }
+
+    # A setup hook cannot export into the sessions that follow it, so the
+    # absolute path is written where Claude Code will read it: `env` in
+    # settings.local.json is applied to every Bash call, including calls made
+    # from a `.claude/worktrees/issue-<n>` sub-worktree, where a relative
+    # default would not resolve either. Gitignored, and a freshly created
+    # worktree has none to clobber.
+    mkdir -p .claude
+    printf '{\n  "env": {\n    "MEMORIA_EVIDENCE_ROOT": "%s"\n  }\n}\n' "$evidence" \
+      > .claude/settings.local.json
+
+    # One end-to-end gate: hashing every raw file against the corpus manifest
+    # is only reachable if the venv, the editable install and the evidence
+    # path above are all correct. Costs under a second.
+    MEMORIA_EVIDENCE_ROOT="$evidence" .venv/bin/memoria validate
