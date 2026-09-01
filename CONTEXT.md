@@ -77,6 +77,20 @@ nothing, needs no model, and is known across the whole manuscript at all times e
 though evaluation never runs unasked. It is what the manuscript view tints.
 _Avoid_: Stale, unaudited, dirty, pending
 
+### The Curator's two halves
+
+**Index maintainer**:
+The Curator half that writes derived state only — ingest matching, candidates,
+gathered sets, appearances, invalidation, the staleness map. Everything it writes
+is rebuildable and asserts nothing, so no restraint rule binds it.
+_Avoid_: Indexer, librarian, gatherer, background pass
+
+**Record extractor**:
+The Curator half that writes durable records — post-session decisions, questions,
+and badged entry statements. The only half the curation restraint rules and the
+entry write matrix constrain; testimony is never its to write.
+_Avoid_: Scribe, harvester, note-taker, summarizer
+
 ### Author knowledge
 
 **Author testimony**:

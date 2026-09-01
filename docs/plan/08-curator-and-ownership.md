@@ -1,5 +1,6 @@
 <!-- Part of the Memoria build plan. Index: ./plan-index.md -->
 <!-- Source sections: 12, 13, 14, 15 of the original memoria-plan.md -->
+<!-- §12, §12.1 and §13 revised 2026-08-31: the Curator's two halves named. -->
 
 # 12. The Curator
 
@@ -13,20 +14,37 @@ It may propose manuscript changes autonomously.
 
 It may only modify canonical manuscript prose when the author has explicitly authorized that write.
 
+**One name, two halves**, split by what they write, because the two carry
+different risk profiles:
+
+- The **index maintainer** writes derived state only — ingest matching,
+  candidates, gathered sets, appearances, invalidation and the staleness map.
+  Everything it writes is rebuildable (§42) and asserts nothing, so no restraint
+  rule binds it: there is no belief it could misattribute.
+- The **record extractor** writes durable records — post-session decisions,
+  questions, and badged entry statements. It is the only half that §13's restraint
+  and part 06 §8.2's write matrix constrain, and the only half ownership by badge
+  (§14) exists to govern.
+
+The split is vocabulary, not architecture: one agent, one pass. It exists so that a
+rule like "the Curator never writes unbadged text" is read at the right scope —
+every such rule binds the record extractor, and none of them slows the index
+maintainer down.
+
 ---
 
 ## 12.1 Curator triggers
 
 The Curator runs after events such as:
 
-| Event | Response |
-|---|---|
-| AI session ends | Post-session curation |
-| Human edits an entry | Propagate to derived non-manuscript material; invalidate that entry's cached judgements — **no manuscript pass runs** |
-| **New or edited manuscript prose exists** | Mark it **not current**. The audit itself runs only when the author asks |
-| Research memo completes | Append supported findings to entry bodies as badged `[source]`/`[inferred]` statements; testimony is never machine-written (part 06 §8.2) |
-| New evidence ingested | Index, match against every subject, refresh candidates and gathered sets; audit verdicts of entries whose gathered set changed become **not current** (part 06 §8.12) |
-| **A subject is added or its prompt changes** | **Re-match that subject across the corpus; refresh its candidates** |
+| Event | Half | Response |
+|---|---|---|
+| AI session ends | extractor | Post-session curation |
+| Human edits an entry | maintainer | Propagate to derived non-manuscript material; invalidate that entry's cached judgements — **no manuscript pass runs** |
+| **New or edited manuscript prose exists** | maintainer | Mark it **not current**. The audit itself runs only when the author asks |
+| Research memo completes | extractor | Append supported findings to entry bodies as badged `[source]`/`[inferred]` statements; testimony is never machine-written (part 06 §8.2) |
+| New evidence ingested | maintainer | Index, match against every subject, refresh candidates and gathered sets; audit verdicts of entries whose gathered set changed become **not current** (part 06 §8.12) |
+| **A subject is added or its prompt changes** | maintainer | **Re-match that subject across the corpus; refresh its candidates** |
 
 Passes are debounced and materiality-gated.
 
@@ -50,7 +68,8 @@ Three rules govern the audit, and they exist to make its coverage inspectable:
 
 # 13. Post-Session Curation
 
-After a session, the Curator reads the transcript.
+After a session, the record extractor — the Curator's constrained half (§12) —
+reads the transcript.
 
 It extracts only what actually occurred.
 

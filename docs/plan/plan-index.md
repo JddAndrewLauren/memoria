@@ -11,7 +11,7 @@ original plan.
 for the manuscript layer), §14 (rewritten as ownership by badge), §18's category list
 and §17's question list (both withdrawn),
 §1.5, §1.10a (new), §2, §2.1 (new), §3, §4, §4.1 (new), §7, §8.1, §8.2, §8.5, §8.6, §8.11,
-§8.12 (new), §9.5, §12.1, §13.4, §15, §19, §20, §21, §23, §24.2, §25, §32, §33, §36-§38, §42,
+§8.12 (new), §9.5, §12, §12.1, §13, §13.4, §15, §19, §20, §21, §23, §24.2, §25, §32, §33, §36-§38, §42,
 §43.2, §47, §52.2, and Invariants 8 and 9.
 
 Five parts — 06, 08, 11, 14, 18 — end in an appended
@@ -102,7 +102,9 @@ badge**. The entry body is shared territory, the §9 badge is the ownership mark
 testimony is never machine-written, and a monotonic human-touched flag plus the
 dirty-tree rule backstop in-place author edits. Git-blame inference is retired.
 §12.1's trigger table carries the audit pass; §13.4 forbids harvesting manuscript
-prose into an entry without a settlement.
+prose into an entry without a settlement. §12 names the Curator's two halves: the
+**index maintainer** (derived state only; no restraint rules) and the **record
+extractor** (durable records; the only half §13 and the write matrix constrain).
 
 ### The manuscript — impact, authorship, authorization
 
