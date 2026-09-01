@@ -14,40 +14,24 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from memoria.answer_key import (
-    ANSWER_KEY_RELATIVE_PATH,
-    build_answer_key,
-    write_answer_key,
-)
-from memoria.cross_references import (
-    CROSS_REFERENCES_RELATIVE_PATH,
-    extract_cross_references,
-    write_cross_references_table,
-)
-from memoria.editorial import (
-    EDITORIAL_RELATIVE_PATH,
-    EditorialRecord,
-    extract_editorial_apparatus,
-    write_editorial_records,
-)
-from memoria.normalize import (
+import yaml
+
+from memoria.records import (
+    NORMALIZED_RELATIVE_PATH,
     NormalizedRecord,
-    normalize_journals,
-    normalize_letters,
-    normalize_targets,
-    recipients_table,
-    write_normalized_records,
-    write_recipients_table,
 )
-from memoria.validate import NORMALIZED_RELATIVE_PATH
-from memoria.year_resolution import resolve_years
 
 INDEX_RELATIVE_PATH = ".memoria/index.db"
 
-# Editorial records (issue #5's EditorialRecord - footnotes, bracketed
-# asides, interpolations, introductions) are indexed under this
-# source_type, distinct from any NormalizedRecord's own source_type
-# ("journal" or "letter"), so exclude_editorial actually excludes them.
+# Editorial records - footnotes, bracketed asides, interpolations, editors'
+# introductions - carry this source_type, distinct from the evidence rows
+# they annotate, so exclude_editorial actually excludes them.
+#
+# Nothing produces editorial records today: the extractor was written for the
+# retired Thoreau corpus (docs/open-problems.md §2.4). The source_type and the
+# filter survive it deliberately - the contemporaneous/retrospective split is
+# how §6's temporal discipline reaches retrieval (#12), and it is part of the
+# record schema rather than of any one corpus.
 EDITORIAL_SOURCE_TYPES = frozenset({"editorial"})
 
 
@@ -58,15 +42,15 @@ class SearchResult:
     source_type: str
 
 
-def build_index(
-    db_path: Path,
-    records: list[NormalizedRecord],
-    editorial_records: list[EditorialRecord] | None = None,
-) -> None:
-    """(Re)build the FTS5 index at ``db_path`` from ``records`` and,
-    optionally, ``editorial_records`` (issue #5) - indexed under
-    ``source_type: "editorial"`` so ``exclude_editorial`` actually
-    excludes them, rather than the evidence rows they annotate.
+def build_index(db_path: Path, records: list[NormalizedRecord]) -> None:
+    """(Re)build the FTS5 index at ``db_path`` from ``records``.
+
+    Each record is indexed under its own ``source_type``, which is what
+    ``exclude_editorial`` filters on - an editorial record is a record whose
+    source_type says so, not a separate kind of argument. (It used to be a
+    second parameter, taking the extractor's own record type; that type was
+    Thoreau-specific and went with the corpus, and the schema's discriminator
+    was always the better seam.)
 
     Deletes any existing database file first, so the index is always a
     clean regeneration rather than an incremental update - derived state
@@ -96,17 +80,6 @@ def build_index(
                         paragraph,
                     ),
                 )
-        for editorial in editorial_records or []:
-            con.execute(
-                "INSERT INTO records (src_id, anchor, source_type, text) "
-                "VALUES (?, ?, ?, ?)",
-                (
-                    editorial.id,
-                    editorial.linked_anchor or "",
-                    "editorial",
-                    editorial.text,
-                ),
-            )
         con.commit()
     finally:
         con.close()
@@ -140,88 +113,72 @@ def search(
     return [SearchResult(src_id=r[0], anchor=r[1], source_type=r[2]) for r in rows]
 
 
-def rebuild(evidence_root: Path, repo_root: Path) -> list[NormalizedRecord]:
-    """Delete and regenerate all derived state - the normalized records,
-    the recipients table, the cross-reference table, the editorial
-    records, and the FTS5 index - from evidence, losing nothing (§42).
+def rebuild(repo_root: Path) -> list[NormalizedRecord]:
+    """Delete and regenerate all derived state from evidence, losing nothing.
 
-    Normalized records are themselves rebuildable derived state (see
-    ``docs/normalized-record-schema.md``): this re-derives them from
-    evidence before indexing, rather than trusting whatever is already on
-    disk under ``sources/normalized/``, so rebuild is correct whether that
-    directory is absent, stale, or up to date. Editorial apparatus
-    (issue #5, extended to the letters volume by issue #56) is extracted
-    out of the journal and letter records - and the editorial records it
-    produces written and indexed - in the same pass, so a plain
-    ``rebuild()`` never regresses back to unstripped, unsearchable-
-    exclusion evidence the way calling ``normalize_journals`` +
-    ``build_index`` directly would. Must also produce exactly what
-    ``memoria normalize`` produces for the letters (issue #6 review round
-    1: rebuild used to call ``normalize_journals`` alone, silently
-    deleting every letter record on a rebuild and leaving a stale
-    ``recipients.yaml`` behind) - ``tests/test_cli.py``'s
-    ``test_rebuild_produces_byte_identical_output_to_normalize`` is the
-    regression test for the whole class of defect, not just this instance.
+    §42's contract: derived state carries no authority and can always be
+    thrown away. That contract is the point of this function and it is
+    unchanged.
 
-    ``resolve_years`` does not run over letters: it filters by
-    ``original_file`` against ``JOURNAL_VOLUMES`` and leaves letter
-    records untouched here and in ``memoria normalize`` alike - the
-    journals' chapter-inference/weekday-checksum machinery has no letters
-    analogue to run. A letter's ``date_confidence`` is instead resolved
-    directly inside ``normalize_letters`` itself (issue #57): its dateline
-    already states its own year as plain text, so parsing it needs no
-    second pass over the raw file the way the journals' does. Editorial
-    extraction, like year resolution, does cover letters as of issue #56 -
-    see ``extract_editorial_apparatus``.
+    **There is no normalizer to call.** The one that existed was written for
+    the Thoreau proof-of-concept corpus, which was retired 2026-09-01
+    (``docs/open-problems.md`` §2.4); it was removed with the corpus, and no
+    replacement is chosen. So this rebuilds the index from the records
+    already on disk and reports that no producer is wired in.
+
+    That is deliberately not a seam. Inventing a normalizer signature for a
+    corpus nobody has chosen would be exactly the speculative abstraction the
+    retirement removed - the shape of that interface is a decision for
+    whoever chooses the corpus, made against a real one.
+
+    Returns the records it indexed, which is an empty list when none exist.
     """
-    evidence_root = Path(evidence_root)
     repo_root = Path(repo_root)
 
-    journal_records = normalize_journals(evidence_root)
-    # Order matters (see cli.py's matching comment on `memoria normalize`,
-    # which this function must stay in lockstep with): resolve_years()
-    # reads only recorded_date and the raw file, never record.paragraphs,
-    # so it is unaffected by extract_editorial_apparatus()'s paragraph
-    # rewrite either way - run first anyway as the narrower, read-mostly
-    # mutation before the more invasive one. extract_editorial_apparatus()
-    # now covers letters too (issue #56), so letter_records must exist
-    # first.
-    resolve_years(journal_records, evidence_root)
-    letter_records = normalize_letters(
-        evidence_root, start_id=len(journal_records) + 1
-    )
-    editorial_records = extract_editorial_apparatus(
-        evidence_root, journal_records + letter_records
-    )
-    target_records = normalize_targets(
-        evidence_root, start_id=len(journal_records) + len(letter_records) + 1
-    )
-    records = journal_records + letter_records + target_records
+    records = read_normalized_records(repo_root / NORMALIZED_RELATIVE_PATH)
+    build_index(repo_root / INDEX_RELATIVE_PATH, records)
+    return records
 
-    output_root = repo_root / NORMALIZED_RELATIVE_PATH
-    write_normalized_records(records, output_root)
-    write_recipients_table(
-        recipients_table(letter_records), output_root / "recipients.yaml"
-    )
-    cross_references = extract_cross_references(editorial_records)
-    write_cross_references_table(
-        cross_references, repo_root / CROSS_REFERENCES_RELATIVE_PATH
-    )
-    write_answer_key(
-        *build_answer_key(evidence_root, cross_references, records),
-        repo_root / ANSWER_KEY_RELATIVE_PATH,
-    )
-    write_editorial_records(editorial_records, repo_root / EDITORIAL_RELATIVE_PATH)
-    # The audit targets are deliberately **not** indexed. The index is the
-    # evidence retrieval surface; the books are the query side of the
-    # benchmark (a probe is a book paragraph, part 06 §8.3). Indexing them
-    # would let a search for a book paragraph return that same paragraph as
-    # its own top hit, which is the self-agreement failure the answer key
-    # exists to prevent. Appearances over the audit targets (part 06 §8.11)
-    # are M2's, and get their own structure.
-    build_index(
-        repo_root / INDEX_RELATIVE_PATH,
-        journal_records + letter_records,
-        editorial_records,
-    )
+
+def read_normalized_records(normalized_root: Path) -> list[NormalizedRecord]:
+    """Load the records already on disk.
+
+    A placeholder for the read direction proper, which #11 owns
+    (``memoria.records``, per ADR-0004). It exists so that ``rebuild`` can
+    honour §42 - throw the index away and regenerate it - rather than being
+    left unable to do anything at all. It reads only what the index needs:
+    the ID, the source type and the paragraphs.
+    """
+    normalized_root = Path(normalized_root)
+    if not normalized_root.is_dir():
+        return []
+
+    records = []
+    for path in sorted(normalized_root.glob("SRC-*.md")):
+        text = path.read_text(encoding="utf-8")
+        if not text.startswith("---\n"):
+            continue
+        end = text.find("\n---\n", 3)
+        if end == -1:
+            continue
+        frontmatter = yaml.safe_load(text[4:end]) or {}
+        body = text[end + 5 :]
+        paragraphs = [
+            segment.split("</a>", 1)[1].strip()
+            for segment in body.split('<a id="')[1:]
+            if "</a>" in segment
+        ]
+        records.append(
+            NormalizedRecord(
+                id=frontmatter.get("id", path.stem),
+                source_type=frontmatter.get("source_type", ""),
+                recorded_date=frontmatter.get("recorded_date", ""),
+                event_date=frontmatter.get("event_date", ""),
+                date_confidence=frontmatter.get("date_confidence", ""),
+                contemporaneous=bool(frontmatter.get("contemporaneous", False)),
+                original_file=frontmatter.get("original_file", ""),
+                original_locator=frontmatter.get("original_locator", ""),
+                paragraphs=paragraphs,
+            )
+        )
     return records
