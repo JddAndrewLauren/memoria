@@ -164,6 +164,22 @@ def resolve_years(records, evidence_root) -> list[str]:
         ]
         chapters = _find_chapters(body_lines)
 
+        assert len(volume_records) == len(heading_positions), (
+            f"{volume['raw_path']}: normalize_journals produced "
+            f"{len(volume_records)} records but {len(heading_positions)} "
+            "date headings were found on this pass - they must zip 1:1, "
+            "in order, or entries and their chapter positions would "
+            "silently drift apart."
+        )
+
+        # current_year/current_month carry forward across chapter
+        # boundaries (reset only per volume, not per chapter) so a
+        # position-resolved entry can use the immediately preceding
+        # entry's date as its starting point even at a chapter's own
+        # first entry - e.g. the real corpus's J01 "1845-1847" chapter
+        # has exactly one entry ("Feb. 22", no year, no weekday); the
+        # month-rollover check below carries March 1846 forward from the
+        # previous chapter, sees Feb < March, and rolls it to 1847.
         current_year = None
         current_month = None
         for record, position in zip(volume_records, heading_positions):
@@ -183,7 +199,7 @@ def resolve_years(records, evidence_root) -> list[str]:
                 year = explicit_year
             elif len(chapter_years) == 1:
                 year = chapter_years[0]
-            elif weekday and day:
+            elif weekday and day and month:
                 matches = [
                     y
                     for y in chapter_years
@@ -223,7 +239,7 @@ def resolve_years(records, evidence_root) -> list[str]:
                     current_year += 1
                 year = current_year
 
-            if weekday and day and not confirmed_by_weekday:
+            if weekday and day and month and not confirmed_by_weekday:
                 if _weekday_matches(month, day, year, weekday):
                     confirmed_by_weekday = True
                 else:

@@ -142,3 +142,32 @@ matched heading is preceded by a blank line, no line-initial
 `^_<Month>`-prefixed line in the raw body is left unmatched (the recall
 check that would have caught the regex bug above automatically), and no
 entry carries back-matter markers — rather than a count in isolation.
+
+## Weekday checksum: reconciled against RECON.md (issue #4)
+
+RECON.md §3 estimates "roughly 100 headings carry a weekday." Mechanically
+counting weekday-bearing headings against the raw corpus finds more:
+**152**, of which **150 confirm** against a real calendar the year
+resolution otherwise assigns from the chapter and position (giving
+`date_confidence: exact` for those 150). The remaining 2 are genuine
+editorial/transcription
+discrepancies in the source, not parsing bugs — verified by hand against
+the raw text and a real calendar:
+
+- `SRC-000332`, `raw/gutenberg/57393-journal-01/pg57393.txt:10062` —
+  `"_Sept. 5. Saturday._"`; the source text does read "Saturday", but
+  Sept. 5, 1841 (the chapter's single candidate year) was actually a
+  Sunday.
+- `SRC-000464`, `raw/gutenberg/59031-journal-02/pg59031.txt:5746` —
+  `"_May 6. Monday._"`, under the `MAY, 1851` chapter; May 6, 1851 was
+  actually a Tuesday.
+
+Both are surfaced as warnings by `resolve_years()` (printed by `memoria
+normalize`) rather than silently accepted as `exact` — RECON.md §3's own
+prediction: "where it does not [match], it flags a genuine editorial
+problem worth surfacing rather than guessing."
+
+Final counts across all 558 records: **exact=150, inferred=408,
+chapter-only=0** (`tests/test_year_resolution.py`'s
+`TestAgainstTheRealEvidenceCorpus` asserts this distribution, alongside the
+invariant that no record is `exact` without a weekday in its heading).

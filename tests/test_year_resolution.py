@@ -175,6 +175,49 @@ def test_resolve_years_surfaces_a_weekday_checksum_mismatch_as_a_warning(tmp_pat
     assert any("SRC-000001" in w and "not a Sunday" in w for w in warnings)
 
 
+def test_resolve_years_carries_the_running_year_across_a_chapter_boundary(tmp_path):
+    # current_year/current_month are reset only per volume, not per
+    # chapter, so a multi-year chapter's very first entry can still be
+    # position-resolved from the previous chapter's last known date. This
+    # is the real corpus's J01 "1845-1847" chapter: its lone entry ("Feb.
+    # 22", no year, no weekday) rolls forward from the preceding chapter's
+    # "March 27, 1846" to land on 1847 (Feb < March signals a year
+    # rollover).
+    evidence_root = tmp_path / "thoreau-evidence"
+    two_chapter_volume = (
+        "The Project Gutenberg eBook of Journal 96\r\n"
+        "\r\n"
+        "*** START OF THE PROJECT GUTENBERG EBOOK JOURNAL 96 ***\r\n"
+        "\r\n"
+        "VII\r\n"
+        "\r\n"
+        "1845-1846\r\n"
+        "\r\n"
+        "_March 26, 1846._ The change from foul weather to fair.\r\n"
+        "\r\n"
+        "_March 27._ This morning I saw the geese.\r\n"
+        "\r\n"
+        "VIII\r\n"
+        "\r\n"
+        "1845-1847\r\n"
+        "\r\n"
+        "_Feb. 22_ Jean Lapin sat at my door to-day.\r\n"
+        "\r\n"
+        "END OF VOLUME 96\r\n"
+        "\r\n"
+        "*** END OF THE PROJECT GUTENBERG EBOOK JOURNAL 96 ***\r\n"
+    )
+    _write_fake_volumes(evidence_root, [two_chapter_volume, _EMPTY_SECOND_VOLUME])
+    records = normalize_journals(evidence_root)
+
+    resolve_years(records, evidence_root)
+
+    feb_entry = records[2]
+    assert feb_entry.recorded_date == "Feb. 22"
+    assert feb_entry.date_confidence == "inferred"
+    assert feb_entry.event_date == "Feb. 22, 1847"
+
+
 def test_resolve_years_leaves_an_entry_with_no_governing_chapter_chapter_only(tmp_path):
     # An entry preceding any chapter marker has no year context at all -
     # RECON.md §3's description of J02 Chapter I's undated fragments. Must
