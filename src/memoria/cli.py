@@ -3,11 +3,13 @@
 import argparse
 import os
 import sys
+from collections import Counter
 from pathlib import Path
 
 from memoria.index import INDEX_RELATIVE_PATH, rebuild
 from memoria.normalize import normalize_journals, write_normalized_records
 from memoria.validate import NORMALIZED_RELATIVE_PATH, validate
+from memoria.year_resolution import resolve_years
 
 EVIDENCE_ROOT_ENV_VAR = "MEMORIA_EVIDENCE_ROOT"
 DEFAULT_EVIDENCE_ROOT = "../thoreau-evidence"
@@ -59,9 +61,16 @@ def main(argv=None):
 
     if args.command == "normalize":
         records = normalize_journals(evidence_root())
+        warnings = resolve_years(records, evidence_root())
+        for warning in warnings:
+            print(f"normalize: {warning}")
         output_root = repo_root() / NORMALIZED_RELATIVE_PATH
         written = write_normalized_records(records, output_root)
-        print(f"normalize: wrote {len(written)} records to {output_root}")
+        counts = Counter(record.date_confidence for record in records)
+        counts_text = ", ".join(
+            f"{level}={counts[level]}" for level in ("exact", "inferred", "chapter-only")
+        )
+        print(f"normalize: wrote {len(written)} records to {output_root} ({counts_text})")
         return 0
 
     if args.command == "rebuild":
