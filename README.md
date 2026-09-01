@@ -44,16 +44,22 @@ the offending file, if a raw file has been modified or is missing. It also
 checks every normalized record under `sources/normalized/` for a `SRC-` ID
 reference that does not resolve to an actual record.
 
-`memoria normalize` reads the journal volumes (J01, J02) from the evidence
-corpus and writes one normalized Markdown record per dated entry to
-`sources/normalized/` (gitignored — regenerate on demand; see
-`docs/normalized-record-schema.md` for the schema and the `SRC-` ID /
-paragraph-anchor conventions).
+`memoria normalize` reads the journal volumes (J01, J02) and the letters
+volume from the evidence corpus and writes one normalized Markdown record
+per dated entry or letter to `sources/normalized/` (gitignored — regenerate
+on demand; see `docs/normalized-record-schema.md` for the schema and the
+`SRC-` ID / paragraph-anchor conventions), plus `sources/normalized/recipients.yaml`
+(the letters' recipients) and `sources/normalized/cross-references.yaml`
+(cross-references extracted from editorial apparatus). Editorial apparatus
+(footnotes, front/back matter, and other non-evidence text) is segregated
+into its own Markdown records under `sources/editorial/` (also gitignored).
 
 `memoria rebuild` deletes and regenerates all derived state — the normalized
-records under `sources/normalized/` and the SQLite FTS5 full-text search
-index at `.memoria/index.db` (both gitignored) — from evidence, losing
-nothing (§42: derived state carries no authority and can always be thrown
-away). Use `memoria.index.search(db_path, query)` to query the index; pass
-`exclude_editorial=True` to search evidence records only, excluding editorial
-voice.
+records under `sources/normalized/`, the editorial records under
+`sources/editorial/`, and the SQLite FTS5 full-text search index at
+`.memoria/index.db` (all gitignored) — from evidence, losing nothing (§42:
+derived state carries no authority and can always be thrown away).
+`sources/normalized/` and `sources/editorial/` come out byte-identical to
+what `memoria normalize` produces. Use `memoria.index.search(db_path, query)`
+to query the index; pass `exclude_editorial=True` to search evidence records
+only, excluding editorial voice.
