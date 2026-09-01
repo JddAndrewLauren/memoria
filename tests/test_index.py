@@ -146,3 +146,35 @@ def test_rebuild_resolves_years_and_never_leaves_a_record_unresolved(tmp_path):
 
     assert all(r.date_confidence != "unresolved" for r in records)
     assert {r.date_confidence for r in records} <= {"exact", "inferred", "chapter-only"}
+
+
+@pytest.mark.skipif(
+    EVIDENCE_ROOT_ENV_VAR not in os.environ,
+    reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
+)
+def test_rebuild_strips_editorial_apparatus_and_exclude_editorial_excludes_it(
+    tmp_path,
+):
+    # Regression test for PR #51 review round 1, BLOCKING 1: a plain
+    # `rebuild()` used to index unstripped paragraphs (never calling
+    # extract_editorial_apparatus) and never index EditorialRecords at
+    # all, so exclude_editorial excluded nothing. A query that only
+    # matches editorial apparatus text must find real matches by default
+    # and none once excluded, and every remaining match must be tagged
+    # source_type "editorial".
+    evidence_root = os.environ[EVIDENCE_ROOT_ENV_VAR]
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    rebuild(evidence_root, repo_root)
+    db_path = repo_root / ".memoria" / "index.db"
+
+    with_editorial = search(db_path, "sic")
+    without_editorial = search(db_path, "sic", exclude_editorial=True)
+
+    assert len(with_editorial) > 0
+    assert len(without_editorial) == 0
+    assert {r.source_type for r in with_editorial} == {"editorial"}
+
+    editorial_written = list((repo_root / "sources" / "editorial").glob("ED-*.md"))
+    assert len(editorial_written) == 1114

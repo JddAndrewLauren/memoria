@@ -14,6 +14,12 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from memoria.editorial import (
+    EDITORIAL_RELATIVE_PATH,
+    EditorialRecord,
+    extract_editorial_apparatus,
+    write_editorial_records,
+)
 from memoria.normalize import (
     NormalizedRecord,
     normalize_journals,
@@ -24,11 +30,10 @@ from memoria.year_resolution import resolve_years
 
 INDEX_RELATIVE_PATH = ".memoria/index.db"
 
-# Source types that carry editorial voice rather than evidence - Torrey's
-# apparatus, footnotes, introductions. Segregating these into their own
-# records is issue #5's job; this is the forward-looking hook that lets a
-# query exclude them by source_type once it does. Empty for now: this
-# slice's normalizer only ever produces source_type "journal".
+# Editorial records (issue #5's EditorialRecord - footnotes, bracketed
+# asides, interpolations, introductions) are indexed under this
+# source_type, distinct from any NormalizedRecord's own source_type
+# ("journal" for this slice), so exclude_editorial actually excludes them.
 EDITORIAL_SOURCE_TYPES = frozenset({"editorial"})
 
 
@@ -39,8 +44,15 @@ class SearchResult:
     source_type: str
 
 
-def build_index(db_path: Path, records: list[NormalizedRecord]) -> None:
-    """(Re)build the FTS5 index at ``db_path`` from ``records``.
+def build_index(
+    db_path: Path,
+    records: list[NormalizedRecord],
+    editorial_records: list[EditorialRecord] | None = None,
+) -> None:
+    """(Re)build the FTS5 index at ``db_path`` from ``records`` and,
+    optionally, ``editorial_records`` (issue #5) - indexed under
+    ``source_type: "editorial"`` so ``exclude_editorial`` actually
+    excludes them, rather than the evidence rows they annotate.
 
     Deletes any existing database file first, so the index is always a
     clean regeneration rather than an incremental update - derived state
@@ -70,6 +82,17 @@ def build_index(db_path: Path, records: list[NormalizedRecord]) -> None:
                         paragraph,
                     ),
                 )
+        for editorial in editorial_records or []:
+            con.execute(
+                "INSERT INTO records (src_id, anchor, source_type, text) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    editorial.id,
+                    editorial.linked_anchor or "",
+                    "editorial",
+                    editorial.text,
+                ),
+            )
         con.commit()
     finally:
         con.close()
@@ -104,20 +127,28 @@ def search(
 
 
 def rebuild(evidence_root: Path, repo_root: Path) -> list[NormalizedRecord]:
-    """Delete and regenerate all derived state - the normalized records and
-    the FTS5 index - from evidence, losing nothing (§42).
+    """Delete and regenerate all derived state - the normalized records,
+    the editorial records, and the FTS5 index - from evidence, losing
+    nothing (§42).
 
     Normalized records are themselves rebuildable derived state (see
     ``docs/normalized-record-schema.md``): this re-derives them from
     evidence before indexing, rather than trusting whatever is already on
     disk under ``sources/normalized/``, so rebuild is correct whether that
-    directory is absent, stale, or up to date.
+    directory is absent, stale, or up to date. Editorial apparatus
+    (issue #5) is extracted out of those records - and the editorial
+    records it produces written and indexed - in the same pass, so a
+    plain ``rebuild()`` never regresses back to unstripped, unsearchable-
+    exclusion evidence the way calling ``normalize_journals`` +
+    ``build_index`` directly would.
     """
     evidence_root = Path(evidence_root)
     repo_root = Path(repo_root)
 
     records = normalize_journals(evidence_root)
     resolve_years(records, evidence_root)
+    editorial_records = extract_editorial_apparatus(evidence_root, records)
     write_normalized_records(records, repo_root / NORMALIZED_RELATIVE_PATH)
-    build_index(repo_root / INDEX_RELATIVE_PATH, records)
+    write_editorial_records(editorial_records, repo_root / EDITORIAL_RELATIVE_PATH)
+    build_index(repo_root / INDEX_RELATIVE_PATH, records, editorial_records)
     return records

@@ -6,6 +6,11 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from memoria.editorial import (
+    EDITORIAL_RELATIVE_PATH,
+    extract_editorial_apparatus,
+    write_editorial_records,
+)
 from memoria.index import INDEX_RELATIVE_PATH, rebuild
 from memoria.normalize import normalize_journals, write_normalized_records
 from memoria.validate import NORMALIZED_RELATIVE_PATH, validate
@@ -64,13 +69,22 @@ def main(argv=None):
         warnings = resolve_years(records, evidence_root())
         for warning in warnings:
             print(f"normalize: {warning}")
+        editorial_records = extract_editorial_apparatus(evidence_root(), records)
         output_root = repo_root() / NORMALIZED_RELATIVE_PATH
         written = write_normalized_records(records, output_root)
+        editorial_output_root = repo_root() / EDITORIAL_RELATIVE_PATH
+        editorial_written = write_editorial_records(
+            editorial_records, editorial_output_root
+        )
         counts = Counter(record.date_confidence for record in records)
         counts_text = ", ".join(
             f"{level}={counts[level]}" for level in ("exact", "inferred", "chapter-only")
         )
         print(f"normalize: wrote {len(written)} records to {output_root} ({counts_text})")
+        print(
+            f"normalize: wrote {len(editorial_written)} editorial records to "
+            f"{editorial_output_root}"
+        )
         return 0
 
     if args.command == "rebuild":
