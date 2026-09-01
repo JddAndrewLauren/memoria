@@ -107,7 +107,7 @@ def test_normalize_letters_splits_on_letter_headings(tmp_path):
     assert len(records) == 3
     assert [r.recipient for r in records] == [
         "HELEN THOREAU (AT TAUNTON).",
-        "JOHN THOREAU[7] (AT TAUNTON).",
+        "JOHN THOREAU (AT TAUNTON).",
         "R. W. EMERSON (AT CONCORD).",
     ]
 
@@ -144,6 +144,45 @@ def test_normalize_letters_with_no_dateline_gets_an_empty_dateline_not_a_signatu
 
     assert records[2].dateline == ""
     assert records[2].recorded_date == ""
+
+
+def test_normalize_letters_with_no_salutation_gets_an_empty_salutation_not_prose(
+    tmp_path,
+):
+    # A letter that continues without a fresh greeting (SRC-000045,
+    # SRC-000049, SRC-000050, SRC-000129 in the real corpus) must not have
+    # its opening body prose picked up as `salutation` - an empty
+    # salutation is correct when a letter has none, per the issue #58
+    # brief.
+    evidence_root = tmp_path / "thoreau-evidence"
+    text = _FAKE_LETTERS_TEXT.replace(
+        "DEAR FRIEND,--I write to you now about the pond.\r\n",
+        "I write to you now about the pond, with no salutation at all.\r\n",
+    )
+    _write_fake_letters_volume(evidence_root, text)
+
+    records = normalize_letters(evidence_root)
+
+    assert records[2].salutation == ""
+    assert "pond" in "\n".join(records[2].paragraphs)
+
+
+def test_normalize_letters_recognises_a_salutation_with_a_footnote_marker(
+    tmp_path,
+):
+    # SRC-000092 in the real corpus: "MR. WILEY,[75]--" carries a footnote
+    # marker between the comma and the dashes, so the plain ",--" pattern
+    # missed it and fell through to the (now-removed) prose fallback.
+    evidence_root = tmp_path / "thoreau-evidence"
+    text = _FAKE_LETTERS_TEXT.replace(
+        "DEAR FRIEND,--I write to you now about the pond.\r\n",
+        "MR. WILEY,[75]--I write to you now about the pond.\r\n",
+    )
+    _write_fake_letters_volume(evidence_root, text)
+
+    records = normalize_letters(evidence_root)
+
+    assert records[2].salutation == "MR. WILEY,[75]--"
 
 
 def test_normalize_letters_skips_a_leading_editorial_annotation_for_dateline(
@@ -206,6 +245,52 @@ def test_normalize_letters_excludes_trailing_footnotes_and_general_index(tmp_pat
     assert "titles of the volumes" not in full_text
 
 
+def test_normalize_letters_keeps_the_text_after_a_midvolume_footnote_block(
+    tmp_path,
+):
+    # The FOOTNOTES: blocks scattered through this volume are followed by
+    # ordinary body text - a chapter heading, connective narrative, a
+    # letter written *to* Thoreau. Cutting a letter's lines at the marker
+    # dropped all of it, so text that exists in the source reached no
+    # record at all; only the block itself may be excised.
+    evidence_root = tmp_path / "thoreau-evidence"
+    _write_fake_letters_volume(
+        evidence_root,
+        _FAKE_LETTERS_TEXT.replace(
+            "TO R. W. EMERSON (AT CONCORD).\r\n",
+            "FOOTNOTES:\r\n"
+            "\r\n"
+            "[6] A mid-volume footnote that must never appear in any record.\r\n"
+            "\r\n"
+            "\r\n"
+            "II\r\n"
+            "\r\n"
+            "GOLDEN AGE OF ACHIEVEMENT\r\n"
+            "\r\n"
+            "This chapter narrative follows a footnote block and must survive.\r\n"
+            "\r\n"
+            "\r\n"
+            "ELLERY CHANNING TO THOREAU (AT CONCORD).\r\n"
+            "\r\n"
+            "     March 5, 1845.\r\n"
+            "\r\n"
+            "MY DEAR THOREAU,--you are the same old sixpence.\r\n"
+            "\r\n"
+            "\r\n"
+            "TO R. W. EMERSON (AT CONCORD).\r\n",
+        ),
+    )
+
+    records = normalize_letters(evidence_root)
+
+    john = next(r for r in records if r.recipient.startswith("JOHN THOREAU"))
+    body = "\n".join(john.paragraphs)
+    assert "must never appear in any record" not in body
+    assert "This chapter narrative follows a footnote block" in body
+    assert "ELLERY CHANNING TO THOREAU (AT CONCORD)." in body
+    assert "same old sixpence" in body
+
+
 def test_normalize_letters_handles_crlf_line_endings(tmp_path):
     evidence_root = tmp_path / "thoreau-evidence"
     _write_fake_letters_volume(evidence_root)
@@ -226,15 +311,62 @@ def test_normalize_letters_source_type_is_letter(tmp_path):
     assert all(r.source_type == "letter" for r in records)
 
 
-def test_normalize_letters_date_confidence_is_unresolved(tmp_path):
-    # Same scale as the journals (docs/normalized-record-schema.md):
-    # unresolved for every record this slice produces.
+def test_normalize_letters_date_confidence_is_inferred_for_an_explicit_year(
+    tmp_path,
+):
+    # Issue #57: a dateline's year is stated in plain text, no chapter
+    # inference or weekday checksum needed or possible - same value the
+    # journals give a heading that already states its own year
+    # (docs/normalized-record-schema.md's `date_confidence` row), since
+    # there is nothing here to independently confirm it against either.
     evidence_root = tmp_path / "thoreau-evidence"
     _write_fake_letters_volume(evidence_root)
 
     records = normalize_letters(evidence_root)
 
-    assert all(r.date_confidence == "unresolved" for r in records)
+    assert all(r.date_confidence == "inferred" for r in records)
+    assert all(r.event_date == r.dateline for r in records)
+
+
+def test_normalize_letters_with_no_dateline_is_unresolved(tmp_path):
+    # A letter with no dateline at all (SRC-000002/SRC-000129 in the real
+    # corpus) has no year to parse - `date_confidence` stays `unresolved`,
+    # never invented.
+    evidence_root = tmp_path / "thoreau-evidence"
+    text = _FAKE_LETTERS_TEXT.replace(
+        "     CONCORD, March 11, 1842.\r\n"
+        "\r\n"
+        "DEAR FRIEND,--I write to you now about the pond.\r\n",
+        "DEAR FRIEND,--I write to you now about the pond, with no dateline\r\n"
+        "at all this time.\r\n",
+    )
+    _write_fake_letters_volume(evidence_root, text)
+
+    records = normalize_letters(evidence_root)
+
+    assert records[2].dateline == ""
+    assert records[2].date_confidence == "unresolved"
+    assert records[2].event_date == ""
+
+
+def test_normalize_letters_with_no_year_in_dateline_is_unresolved(tmp_path):
+    # A dateline can be present but carry no year at all (SRC-000024 in the
+    # real corpus, "CASTLETON, STATEN ISLAND, May 23.") or spell it in
+    # Roman numerals rather than digits (SRC-000007, "A. D. MDCCCXL.") -
+    # both unparseable by a plain year scan, so both stay `unresolved`
+    # rather than guessing.
+    evidence_root = tmp_path / "thoreau-evidence"
+    text = _FAKE_LETTERS_TEXT.replace(
+        "     CONCORD, March 11, 1842.\r\n",
+        "     CONCORD, March 11.\r\n",
+    )
+    _write_fake_letters_volume(evidence_root, text)
+
+    records = normalize_letters(evidence_root)
+
+    assert records[2].dateline == "CONCORD, March 11."
+    assert records[2].date_confidence == "unresolved"
+    assert records[2].event_date == "CONCORD, March 11."
 
 
 def test_normalize_letters_assigns_stable_src_ids_continuing_from_start_id(tmp_path):
@@ -265,7 +397,7 @@ def test_recipients_table_groups_letters_by_verbatim_recipient_string(tmp_path):
 
     assert table == {
         "HELEN THOREAU (AT TAUNTON).": ["SRC-000001"],
-        "JOHN THOREAU[7] (AT TAUNTON).": ["SRC-000002"],
+        "JOHN THOREAU (AT TAUNTON).": ["SRC-000002"],
         "R. W. EMERSON (AT CONCORD).": ["SRC-000003"],
     }
 
@@ -316,27 +448,50 @@ class TestAgainstTheRealEvidenceCorpus:
         assert len(records) == 130
 
     def test_recipient_count_matches_recon(self, records):
-        # RECON.md §5 / §7: 43 distinct recipients.
+        # RECON.md §5 / §7 counts 43 distinct recipients - 43 distinct
+        # *heading strings*, three of which carry a footnote marker. The
+        # marker is apparatus, not part of the recipient, so it is
+        # stripped: two of the three then collapse onto a heading already
+        # in the table ("MRS. LUCY BROWN[15] (AT PLYMOUTH)." and "R. W.
+        # EMERSON[42] (AT CONCORD)."), leaving 41.
         table = recipients_table(records)
-        assert len(table) == 43
+        assert len(table) == 41
+        assert not [k for k in table if "[" in k], sorted(table)
 
     def test_emersons_four_location_forms_are_distinct_recipients(self, records):
         # RECON.md §5/§6: R. W. Emerson appears under four location forms -
         # AT CONCORD, AT NEW YORK, IN ENGLAND, and one bare "TO R. W.
-        # EMERSON." (no location). Verbatim preservation also keeps the two
-        # footnote-marked variants of these headings as distinct strings
-        # (issue #6: "Recipient strings are preserved verbatim"), so the
-        # full R. W. Emerson group in the table is larger than 4; this
-        # asserts the four location forms specifically are present and
-        # distinct, not merged.
+        # EMERSON." (no location). Location forms are never merged (issue
+        # #6's alias-resolution hazard material); only the apparatus
+        # footnote marker is stripped, which is what makes the bare form
+        # read "R. W. EMERSON." rather than "R. W. EMERSON.[41]".
         table = recipients_table(records)
         location_forms = {
             "R. W. EMERSON (AT CONCORD).",
             "R. W. EMERSON (AT NEW YORK).",
             "R. W. EMERSON (IN ENGLAND).",
-            "R. W. EMERSON.[41]",
+            "R. W. EMERSON.",
         }
         assert location_forms <= table.keys()
+
+    def test_a_heading_footnote_marker_is_not_part_of_the_recipient(self, records):
+        # Three headings carry an inline footnote marker (footnotes 15,
+        # 41, 42 - "TO MRS. LUCY BROWN[15] (AT PLYMOUTH)."). The marker is
+        # Sanborn's apparatus, not the recipient, and used to be carried
+        # verbatim into `recipient`, splitting two correspondents into
+        # spurious extra rows of the recipients table. Pinned per source
+        # id so a regression cannot hide behind the count alone.
+        by_id = {r.id: r for r in records}
+        assert by_id["SRC-000009"].recipient == "MRS. LUCY BROWN (AT PLYMOUTH)."
+        assert by_id["SRC-000048"].recipient == "R. W. EMERSON."
+        assert by_id["SRC-000056"].recipient == "R. W. EMERSON (AT CONCORD)."
+        # The stripped marker is not left behind in the locator either.
+        assert by_id["SRC-000009"].original_locator == (
+            "Familiar Letters, letter to MRS. LUCY BROWN (AT PLYMOUTH)."
+        )
+        # No letter's recipient carries a bracket anywhere.
+        for record in records:
+            assert "[" not in record.recipient, (record.id, record.recipient)
 
     def test_every_letters_dateline_is_plausibly_shaped_or_empty(self, records):
         # Recall/shape check (review round 1 on PR #52's blocking defect
@@ -373,9 +528,32 @@ class TestAgainstTheRealEvidenceCorpus:
         empty_ids = {r.id for r in records if not r.dateline}
         assert empty_ids == {"SRC-000002", "SRC-000129"}, empty_ids
 
-    def test_every_letter_has_a_nonempty_salutation(self, records):
+    def test_every_letters_salutation_is_plausibly_shaped_or_empty(self, records):
+        # Recall/shape check (issue #58): a presence-only check cannot
+        # fail on the defect where `_extract_salutation` fell back to the
+        # body's opening prose - `salutation` was never empty, just wrong
+        # (SRC-000045, SRC-000049, SRC-000050, SRC-000129 each got a
+        # sentence of body text). This checks the shape of what was
+        # extracted (short, ends in the address's trailing "--") and,
+        # independently, exactly which letters have no salutation in the
+        # raw text at all - a regression that made `_extract_salutation`
+        # timid (returning "" for a letter that does have one) would
+        # silently grow that set without this failing. Restoring the old
+        # prose fallback fails this test: the fallback text does not end
+        # in "--".
         for record in records:
-            assert record.salutation, record.id
+            if not record.salutation:
+                continue
+            assert record.salutation.endswith("--"), (record.id, record.salutation)
+            assert len(record.salutation) <= 60, (record.id, record.salutation)
+        empty_ids = {r.id for r in records if not r.salutation}
+        assert empty_ids == {
+            "SRC-000002",
+            "SRC-000045",
+            "SRC-000049",
+            "SRC-000050",
+            "SRC-000129",
+        }, empty_ids
 
     def test_no_salutation_is_an_editorial_annotation(self, records):
         # Non-blocking finding, review round 1 on PR #52: SRC-000049 fell
@@ -412,6 +590,63 @@ class TestAgainstTheRealEvidenceCorpus:
         for record in records:
             for paragraph in record.paragraphs:
                 assert paragraph.strip() != ""
+
+    def test_date_confidence_split_across_all_130_letters(self, records):
+        # Acceptance criterion (issue #57): a real split, not a bare count -
+        # this would fail if a dateline's year were silently dropped
+        # (every `inferred` record would slide to `unresolved`) or if a
+        # record without a parseable year were wrongly promoted. The four
+        # `unresolved` records are the two known empty datelines
+        # (SRC-000002, SRC-000129) plus two with a dateline but no
+        # parseable year: SRC-000007 ("A. D. MDCCCXL.", a Roman-numeral
+        # year) and SRC-000024 ("CASTLETON, STATEN ISLAND, May 23.", no
+        # year at all).
+        unresolved_ids = {
+            r.id for r in records if r.date_confidence == "unresolved"
+        }
+        assert unresolved_ids == {
+            "SRC-000002",
+            "SRC-000007",
+            "SRC-000024",
+            "SRC-000129",
+        }
+        inferred_ids = {r.id for r in records if r.date_confidence == "inferred"}
+        assert len(inferred_ids) == 126
+        assert inferred_ids | unresolved_ids == {r.id for r in records}
+        for record in records:
+            if record.date_confidence == "inferred":
+                assert record.event_date == record.dateline, record.id
+
+    def test_every_letter_to_thoreau_reaches_a_record(self, records):
+        # Six letters in this volume are headed by a correspondent's name
+        # rather than Thoreau's "TO ...", so none of them starts a record
+        # of its own; each is carried inline in the record it sits in, the
+        # same way Sanborn's connective narrative is
+        # (docs/normalized-record-schema.md). Two of them - Channing's and
+        # Lane's (three letters under the one heading) - used to reach no
+        # record at all, because they follow a "FOOTNOTES:" block and the
+        # whole tail was cut. A regression here means real source text is
+        # silently absent from the archive again, in either direction.
+        body = "\n".join(p for r in records for p in r.paragraphs)
+        for heading in (
+            "ELLERY CHANNING TO THOREAU (AT CONCORD).",
+            "CHARLES LANE TO THOREAU (AT CONCORD).",
+            "AGASSIZ TO THOREAU (AT CONCORD).",
+            "T. CHOLMONDELEY TO THOREAU (IN MINNESOTA).",
+            "SOPHIA THOREAU TO DANIEL RICKETSON (AT NEW BEDFORD).",
+            "BRONSON ALCOTT TO DANIEL RICKETSON (AT NEW BEDFORD).",
+        ):
+            assert heading in body, heading
+
+    def test_no_footnote_block_text_reaches_a_letter_record(self, records):
+        # The other direction of the same boundary: excising only the block
+        # must not let Sanborn's endnotes back into the evidence. Each of
+        # the volume's four blocks opens with a bracketed number at the
+        # start of a paragraph, which no letter's own prose ever does.
+        for record in records:
+            for paragraph in record.paragraphs:
+                assert "FOOTNOTES:" not in paragraph, record.id
+                assert not re.match(r"^\[\d+\] ", paragraph), record.id
 
     def test_letter_ids_do_not_collide_with_journal_ids(self, records):
         from memoria.normalize import normalize_journals

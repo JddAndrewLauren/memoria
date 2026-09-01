@@ -34,7 +34,7 @@ original_locator: "Journal I, entry dated Oct. 22."
 | `source_type` | `journal`, `letter` (the 130 *Familiar Letters*, issue #6), or `book` (the two audit targets, issue #9 — see "The audit targets" below). Other source types (email, ...) are later slices. |
 | `recorded_date` | The date heading text, verbatim, exactly as it appears in the source — never rewritten by year resolution. Empty for the 29 undated opening fragments of J02's Chapter I (`date_confidence: chapter-only`), which have no date heading to quote; see "J02's undated opening fragments" below. |
 | `event_date` | `recorded_date` with its resolved year appended (`"Oct. 22., 1845"`), or unchanged from `recorded_date` where the heading already states its own year, or where no year could be resolved at all (`date_confidence: unresolved` — no invented date). Empty for the `chapter-only` fragments: their chapter scopes them to 1850, but `event_date` is a date and they have no day, so the field is left empty rather than filled with a year pretending to be one. The chapter's year stays recoverable from `original_locator`. Journals have no retrospective/contemporaneous date split within one entry, so before year resolution `recorded_date` and `event_date` were identical; year resolution (`src/memoria/year_resolution.py`, issue #4) is what makes them diverge. |
-| `date_confidence` | `exact` only where a weekday in the heading confirmed the resolved year against a real calendar; `inferred` where the year came from an unambiguous chapter heading, an explicit year in the entry heading itself, or position within a multi-year chapter, without a weekday to confirm it; `chapter-only` where the record has **no date heading of its own**, so its enclosing chapter is the only date context there is — RECON.md §3's reading of the value exactly ("scoped to 1850, no day"), and the 29 undated opening fragments of J02's Chapter I are the records that carry it (see below); `unresolved` where a resolution was attempted and produced nothing — a dated entry with no chapter marker before it anywhere (no record in the corpus: both volumes open with a chapter heading), and all 130 letters: their datelines do carry an explicit year (see the `dateline` row below), but year resolution is a separate M0 step from letters parsing, so that year is left unparsed rather than absent. A weekday that does not match any candidate year is never silently accepted as `exact`; `memoria normalize` prints it as a warning instead. `published` is the audit targets' value: a book's date is its year of publication — a documentary fact about the volume, not a year resolved out of the text — so none of the four resolution outcomes describes it honestly. |
+| `date_confidence` | `exact` only where a weekday in the heading confirmed the resolved year against a real calendar; `inferred` where the year came from an unambiguous chapter heading, an explicit year in the entry heading itself, or position within a multi-year chapter, without a weekday to confirm it — a letter's dateline (issue #57) gets `inferred` the same way, since it too states its own year in plain text with nothing to independently confirm it against (no weekday, no chapter); `chapter-only` where the record has **no date heading of its own**, so its enclosing chapter is the only date context there is — RECON.md §3's reading of the value exactly ("scoped to 1850, no day"), and the 29 undated opening fragments of J02's Chapter I are the records that carry it (see below); `unresolved` where a resolution was attempted and produced nothing — a dated entry with no chapter marker before it anywhere (no record in the corpus: both volumes open with a chapter heading), and the 4 of 130 letters whose dateline is empty (`SRC-000002`, `SRC-000129`) or carries no parseable 4-digit year (`SRC-000007`'s Roman-numeral "MDCCCXL.", `SRC-000024`'s "May 23." with no year at all) — no date is ever invented for these. A weekday that does not match any candidate year is never silently accepted as `exact`; `memoria normalize` prints it as a warning instead. `published` is the audit targets' value: a book's date is its year of publication — a documentary fact about the volume, not a year resolved out of the text — so none of the four resolution outcomes describes it honestly. |
 | `contemporaneous` | `true` for journal entries — a diary entry is contemporaneous evidence by definition (part 05 §6). |
 | `original_file` | Path to the raw source, relative to the evidence root (`MEMORIA_EVIDENCE_ROOT`) — the same convention `manifest.yaml` and `memoria validate` use, e.g. `raw/gutenberg/57393-journal-01/pg57393.txt`. |
 | `original_locator` | Human-readable pointer into the original, e.g. `"Journal I, entry dated Oct. 22."`; for an undated fragment, the chapter and its position within the chapter's opening run, e.g. `"Journal II, Chapter I, undated fragment 3 of 29"`. |
@@ -95,6 +95,29 @@ step (part 16), not this one. Quote characters are normalized (curly →
 straight ASCII) so a search phrase matches regardless of which volume's
 convention produced it (RECON.md §6.1: J01/Familiar Letters use straight
 quotes, J02 uses curly).
+
+## Whitespace policy
+
+`normalize_journals` never reflows a paragraph's whitespace — a paragraph
+is `.strip()`ped at its ends and otherwise kept exactly as the raw source's
+line breaks and indentation produced it (`_paragraphs` in normalize.py).
+Evidence text is sacred: nothing here rewrites it, so a quoted verse's own
+line structure (e.g. SRC-000003's stanza from *Ibid.*) survives into the
+normalized record unchanged.
+
+The later editorial-extraction step (`extract_editorial_apparatus`,
+issue #5, `src/memoria/editorial.py`) *does* reflow whitespace to single
+spaces, but **only for a paragraph an editorial span (a footnote marker,
+a standalone bracketed aside, or a sentence-completing interpolation) was
+actually excised from** — closing up the artifact that excision itself
+leaves behind (a doubled space, a stray space before punctuation, e.g.
+"Walked to Concord , 10 miles." → "Walked to Concord N. H., 10 miles."). A
+paragraph containing no bracketed span at all is left byte-identical to
+what `normalize_journals` produced, mid-paragraph newlines included — this
+was a defect (issue #55) where the reflow ran unconditionally on every
+evidence paragraph regardless of whether anything was actually excised
+from it, and a pre-existing space before punctuation in the raw text
+itself (not an excision artifact) was wrongly closed up along with it.
 
 ## J02's undated opening fragments
 
@@ -181,9 +204,10 @@ The second source type: the 130 letters of *Familiar Letters*
 `normalize_letters` splits on the line-initial `TO <recipient>.` heading
 RECON.md §5 documents — re-verified directly against the raw corpus: exactly
 130 headings, 43 distinct verbatim strings, matching RECON's own counts
-exactly. IDs continue the journals' `SRC-` sequence (`start_id`, default
-`len(journal_records) + 1` when the CLI combines both source types — part
-04 §4's "volume order, then entry order").
+exactly (41 once each heading's footnote marker is stripped as apparatus —
+see "Recipients table" below). IDs continue the journals' `SRC-` sequence
+(`start_id`, default `len(journal_records) + 1` when the CLI combines both
+source types — part 04 §4's "volume order, then entry order").
 
 ### Letter-specific frontmatter fields
 
@@ -195,18 +219,24 @@ journal records:
 
 | Field | Meaning |
 |---|---|
-| `recipient` | The heading text after `TO `, preserved **verbatim** — no stripping, no merging. This is deliberate: R. W. Emerson's four location forms (`(AT CONCORD)`, `(AT NEW YORK)`, `(IN ENGLAND)`, no location) and the Thoreau family's shared surname are the corpus's alias-resolution hazard material (§7), and merging them here would destroy it before M2 ever sees it. |
-| `dateline` | The letter's indented dateline paragraph (e.g. `CONCORD, October 27, 1837.`) — the first substantive paragraph after the heading (skipping a leading editorial annotation like `[The first of many letters.]`), if and only if it is indented; empty when the letter has none, rather than scanning further and risking its closing signature block instead (review round 1 on PR #52's blocking defect 1: `SRC-000002`/`SRC-000129` used to get `"TAHATAWAN."`/`"Yrs. in great haste, HENRY D. THOREAU."`). Unlike the journals, letter datelines already carry an explicit year — still landing here verbatim rather than parsed, since year resolution is a separate M0 step (part 16) from letters parsing. |
-| `salutation` | The opening address (`DEAR HELEN,--`, `MR. BLAKE,--`), extracted non-destructively from the body's first paragraph — the body keeps that paragraph in full, so nothing is lost by also exposing this field. |
+| `recipient` | The heading text after `TO `, preserved **verbatim** apart from an inline footnote marker (`TO MRS. LUCY BROWN[15] (AT PLYMOUTH).` → `MRS. LUCY BROWN (AT PLYMOUTH).`, 3 headings: footnotes 15, 41, 42) — that marker is Sanborn's apparatus, not the recipient, and the footnote it points at is still extracted in full by the editorial slice (`docs/editorial-record-schema.md`, "Known gaps"). Nothing else is stripped and nothing is merged. This is deliberate: R. W. Emerson's four location forms (`(AT CONCORD)`, `(AT NEW YORK)`, `(IN ENGLAND)`, no location) and the Thoreau family's shared surname are the corpus's alias-resolution hazard material (§7), and merging them here would destroy it before M2 ever sees it. |
+| `dateline` | The letter's indented dateline paragraph (e.g. `CONCORD, October 27, 1837.`) — the first substantive paragraph after the heading (skipping a leading editorial annotation like `[The first of many letters.]`), if and only if it is indented; empty when the letter has none, rather than scanning further and risking its closing signature block instead (review round 1 on PR #52's blocking defect 1: `SRC-000002`/`SRC-000129` used to get `"TAHATAWAN."`/`"Yrs. in great haste, HENRY D. THOREAU."`). Unlike the journals, letter datelines already carry an explicit year, stated in plain text — landing here verbatim, same as always; `date_confidence` (below) is what turns that stated year into a real value (issue #57). |
+| `salutation` | The opening address (`DEAR HELEN,--`, `MR. BLAKE,--`), extracted non-destructively from the body's first paragraph — the body keeps that paragraph in full, so nothing is lost by also exposing this field; empty when the letter has none, rather than falling back to that paragraph's opening prose and passing Thoreau's own words off as a greeting (issue #58, the same shape-not-presence remedy #52 applied to `dateline` above: `SRC-000002`, `SRC-000045`, `SRC-000049`, `SRC-000050` and `SRC-000129` used to get a sentence of body text). |
 
 `recorded_date` / `event_date` land as the dateline text, same as `dateline`
-(the journals' pattern of landing the heading text verbatim). `contemporaneous`
-is `true` — a letter, like a diary entry, is evidence contemporaneous with
-when it was written. `date_confidence` is `unresolved` for every letter
-record this slice produces, the same value the journals slice produces and
-for the same reason: parsing the dateline's already-explicit year into a
-resolved date is year-resolution work, scoped to a later M0 step (part 16),
-not this one.
+(the journals' pattern of landing the heading text verbatim) — a letter's
+dateline already states its own year, so unlike the journals there is no
+separate resolved value for `event_date` to append; the two fields stay
+identical. `contemporaneous` is `true` — a letter, like a diary entry, is
+evidence contemporaneous with when it was written. `date_confidence` is
+`inferred` for the 126 of 130 letters whose dateline carries a plain,
+unambiguous 4-digit year — no chapter to infer from and no weekday to run
+as a checksum, so `inferred` is the same value the journals use for a
+heading that already states its own year with nothing to confirm it
+against. The remaining 4 letters — an empty dateline (`SRC-000002`,
+`SRC-000129`) or one with no parseable year (`SRC-000007`'s Roman-numeral
+"MDCCCXL.", `SRC-000024`'s "May 23." with no year at all) — stay
+`unresolved`, never invented.
 
 ### Scope: editorial narrative between letters is left inline
 
@@ -221,6 +251,25 @@ separate retrospective-editorial records is part 16's dedicated
 construction: everything before the first `TO ` heading is discarded, the
 same way the journals discard everything before their first date heading.
 
+Issue #56 is that "editorial-voice segregation" step for the letters -
+but scoped, like #5 was for the journals, to *bracket-delimited* apparatus
+(footnote markers and bodies, bracketed asides, interpolations - see
+`docs/editorial-record-schema.md`). Sanborn's unbracketed connective
+prose between letters, described above, is a different shape of
+editorial voice and stays inline; #56 did not extend to it.
+
+**Letters addressed *to* Thoreau follow from this and get no records of
+their own.** Six letters in the volume are headed by a correspondent's name
+(`ELLERY CHANNING TO THOREAU (AT CONCORD).`,
+`BRONSON ALCOTT TO DANIEL RICKETSON (AT NEW BEDFORD).`) rather than
+Thoreau's own `TO ...`, so `_LETTER_HEADING_RE` does not open a record at
+them and each is carried inline in the record it falls in — exactly the
+treatment Sanborn's connective narrative gets, and what three of the six
+already got. Doing anything else here would insert records into the letters
+range and renumber every `SRC-` after the insertion point, for a question
+part 16 has to answer for the whole archive at once: whose voice a record
+carries. The volume stays at 130 records.
+
 ### Back matter: the General Index and trailing footnotes
 
 The volume's General Index (`GENERAL INDEX`, after the last letter) is cut
@@ -230,19 +279,32 @@ volumes share the same START/END-marker-and-cut logic. A `FOOTNOTES:`
 block — Sanborn's endnotes for the preceding stretch of letters — can land
 inside an entry's own lines the same way the journals' back matter used to
 land inside their last entry (PR #48 review round 1); `_split_letters`
-trims every letter's lines at a trailing `FOOTNOTES:` marker, not just the
-last letter's, since a footnote block is never part of the letter itself
-wherever it lands.
+excises every `FOOTNOTES:` block from a letter's lines, not just a trailing
+one, since a footnote block is never part of the letter itself wherever it
+lands.
 
-**"Editorial narrative is left inline" is not uniformly true**, and #5
-should not assume it is (review round 1 on PR #52): `_trim_trailing_footnotes`
-cuts a letter's lines at its first `FOOTNOTES:` marker, so any connective
-narrative that happens to fall *after* a `FOOTNOTES:` block within that
-same span is silently dropped along with the footnotes, while narrative
-falling *before* one (the ordinary case — narrative between two letters
-elsewhere in the volume) is kept. This is a side effect of trimming at the
-first marker found, not a deliberate distinction between two kinds of
-narrative.
+**Only the block is cut, not the rest of the letter's lines.**
+`_excise_footnote_blocks` runs from a `FOOTNOTES:` marker to the line that
+closes the block — `LETTERS_FOOTNOTE_BLOCK_END_RE`, a bare unindented line
+with no lowercase letter anywhere on it — and then keeps going. That
+boundary rule is `editorial.py`'s, verified there against all four of the
+volume's real blocks; it lives in `normalize.py` and `editorial.py` imports
+it, so the two passes cannot disagree about where a block ends.
+
+An earlier pass cut the whole tail instead, at the first marker found
+(review round 1 on PR #52 flagged this as a side effect of trimming, not a
+deliberate distinction). "Editorial narrative is left inline" was then not
+uniformly true: narrative falling *before* a block was kept, narrative
+falling *after* one was dropped along with the footnotes — a distinction
+the source text never makes. Four real stretches were lost that way and
+reached no normalized record at all: chapter II's heading and opening
+narrative, chapter III's heading, the whole `APPENDIX` preamble, and —
+inside chapter II's stretch — Ellery Channing's letter to Thoreau of
+March 5, 1845 and Charles Lane's three, along with the
+`[Illustration: _Walden Woods_]` caption, which consequently never became a
+`bracketed-span` editorial record (the loose end issue #56 left).
+`tests/test_letters.py` now pins both directions against the real corpus:
+every letter to Thoreau reaches a record, and no footnote body reaches one.
 
 ## Recipients table (issue #6)
 
@@ -250,17 +312,20 @@ narrative.
 `SRC-` IDs of the letters naming them — "a real, checkable table ... not a
 list in a comment" (issue #6). `memoria normalize` writes it as YAML to
 `sources/normalized/recipients.yaml` via `write_recipients_table`. It has
-43 entries against the real corpus, matching RECON.md §5's "43 distinct
-recipients" exactly.
+**41** entries against the real corpus. RECON.md §5 counts "43 distinct
+recipients" — the same set of headings, counting the 3 that carry a
+footnote marker as strings of their own; with the marker stripped as
+apparatus, `MRS. LUCY BROWN[15] (AT PLYMOUTH).` and `R. W. EMERSON[42]
+(AT CONCORD).` collapse onto headings already in the table, and `R. W.
+EMERSON.[41]` becomes the bare `R. W. EMERSON.` form.
 
-**Not person-level ground truth on its own.** The 43 rows are 43 distinct
-verbatim *strings*, over roughly 25 actual people — they include artefacts
-of the source text alongside genuine location-form variants: a stray-comma
-duplicate (`DANIEL RICKETSON, (AT NEW BEDFORD).` vs `DANIEL RICKETSON (AT
-NEW BEDFORD).`), an `(AT MILTON)` / `(IN MILTON)` preposition variant, and
-two footnote-marked Emerson headings alongside his three genuine location
-forms. This is correct as issue #6 specifies it (verbatim, unmerged — the
-alias-resolution hazard material §7 wants intact), but M2's
+**Not person-level ground truth on its own.** The 41 rows are 41 distinct
+verbatim *strings*, over roughly 25 actual people — they still include
+artefacts of the source text alongside genuine location-form variants: a
+stray-comma duplicate (`DANIEL RICKETSON, (AT NEW BEDFORD).` vs `DANIEL
+RICKETSON (AT NEW BEDFORD).`) and an `(AT MILTON)` / `(IN MILTON)`
+preposition variant. This is correct as issue #6 specifies it (verbatim,
+unmerged — the alias-resolution hazard material §7 wants intact), but M2's
 promotion-miss-rate scoring will need an alias layer on top of this table
 before it is ground truth at the level of a *person*, not a heading string.
 
@@ -293,7 +358,12 @@ chapter-only=29** (`tests/test_year_resolution.py`'s
 `TestAgainstTheRealEvidenceCorpus` asserts this distribution, alongside the
 invariant that no record is `exact` without a weekday in its heading, and
 that a `chapter-only` record carries neither a `recorded_date` nor an
-`event_date`). The 130 letters are `unresolved`, for 717 records in all.
+`event_date`). Of the 130 letters (issue #57), **126 are `inferred`** (a
+plain, unambiguous year in the dateline) and **4 are `unresolved`**
+(`SRC-000002`/`SRC-000129`'s empty datelines, `SRC-000007`'s Roman-numeral
+year, `SRC-000024`'s dateline with no year at all) —
+`tests/test_letters.py`'s `TestAgainstTheRealEvidenceCorpus` asserts this
+split by ID, for 717 records in all.
 
 
 ## The audit targets

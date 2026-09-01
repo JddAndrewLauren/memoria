@@ -1,14 +1,17 @@
-"""Segregate 1906 editorial apparatus out of 1837-46 journal evidence.
+"""Segregate 1906 editorial apparatus out of 1837-46 journal and letters
+evidence.
 
-Scope of this module (issue #5): footnote markers and their footnote
-bodies, bracketed editorial spans embedded in entry text, and the two
-volume-level editor introductions (Bradford Torrey's in J01, F. B.
-Sanborn's in Familiar Letters) are extracted into ``EditorialRecord``
-objects, each linked back to the evidence record and paragraph anchor it
-annotates. ``normalize_journals`` (issue #3) deliberately left this
-apparatus inline - "segregating it into separate retrospective-editorial
-records is a later M0 step" (normalize.py's module docstring); this
-module is that later step.
+Scope of this module (issue #5, extended to the letters volume by issue
+#56): footnote markers and their footnote bodies, bracketed editorial
+spans embedded in entry text, and the two volume-level editor
+introductions (Bradford Torrey's in J01, F. B. Sanborn's in Familiar
+Letters) are extracted into ``EditorialRecord`` objects, each linked back
+to the evidence record and paragraph anchor it annotates. ``normalize_journals``
+(issue #3) deliberately left this apparatus inline - "segregating it into
+separate retrospective-editorial records is a later M0 step"
+(normalize.py's module docstring); this module is that later step.
+``normalize_letters`` (issue #6) made the same deliberate call for the
+letters volume; issue #56 is that step for letters.
 
 Under docs/open-problems.md §6 an editorial record is retrospective
 commentary *about* the evidence (what a 1906 editor knew), never itself
@@ -25,7 +28,12 @@ from pathlib import Path
 
 import yaml
 
-from memoria.normalize import JOURNAL_VOLUMES, NormalizedRecord
+from memoria.normalize import (
+    JOURNAL_VOLUMES,
+    LETTERS_FOOTNOTE_BLOCK_END_RE,
+    LETTERS_VOLUME,
+    NormalizedRecord,
+)
 
 # Both journal volumes and Familiar Letters are the same 1906 Houghton
 # Mifflin "Writings" edition (RECON.md's corpus table) - the date an
@@ -171,6 +179,82 @@ def _parse_footnote_bodies(raw_text: str) -> dict[int, str]:
     return bodies
 
 
+# Familiar Letters (issue #56) scatters its footnotes across several
+# "FOOTNOTES:" blocks through the body - one per stretch of letters,
+# right after the letters it annotates - rather than the journals' single
+# volume-level back-matter section (RECON.md §5). Distinguished from the
+# journals' own bare "FOOTNOTES" heading (no colon) by the trailing colon.
+_LETTERS_FOOTNOTES_HEADING_RE = re.compile(r"^FOOTNOTES:\s*$", re.M)
+
+# What closes a Familiar Letters footnote block: never the Gutenberg END
+# marker the way the journals' one back-matter section is, since ordinary
+# letter and chapter text follows each block rather than the end of the
+# file. Body text resumes in one of several shapes - the next such block,
+# the next letter Thoreau wrote ("TO ..."), a letter TO Thoreau from
+# another correspondent ("ELLERY CHANNING TO THOREAU (AT CONCORD)."), a
+# two-line chapter heading (a bare roman numeral, e.g. "II", followed by
+# an all-caps title, e.g. "GOLDEN AGE OF ACHIEVEMENT"), "APPENDIX", or the
+# volume's "GENERAL INDEX" - an open-ended list of heading shapes that
+# real-corpus inspection keeps finding new members of (see PR #63 review
+# round 1: the original blacklist missed all but the first and last).
+# Rather than keep enumerating shapes, this matches what every one of them
+# has in common and a footnote body never does: a bare, unindented line
+# made up entirely of uppercase letters/digits and light punctuation, with
+# no lowercase letter anywhere on it. Verified against the real corpus
+# (docs/editorial-record-schema.md): no footnote body in any of its four
+# blocks contains such a line - even a footnote that quotes a whole letter
+# keeps every line of that quote indented or mixed-case.
+#
+# Defined in normalize.py, which needs the same boundary to excise a block
+# from a letter's own lines without taking the text after it: one rule, so
+# the two passes cannot disagree about where a block ends.
+_LETTERS_FOOTNOTE_BLOCK_END_RE = LETTERS_FOOTNOTE_BLOCK_END_RE
+
+
+def _parse_letters_footnote_bodies(raw_text: str) -> dict[int, str]:
+    """Parse every "FOOTNOTES:" block in the Familiar Letters volume into
+    {number: body}.
+
+    Footnote numbers run in one strict sequence across the *whole* volume
+    (1..111 in the real corpus), not restarting per block - footnote 1
+    itself sits in Sanborn's Introduction (outside every letter, so
+    extracted separately as unlinked; see docs/editorial-record-schema.md).
+    Each block is parsed with the same "next paragraph starts a new
+    footnote only if it opens with the next expected number" discipline
+    ``_parse_footnote_bodies`` uses, so a footnote's own continuation text
+    that happens to start a line with a bracketed number is never
+    misidentified as a new footnote.
+    """
+    bodies: dict[int, str] = {}
+    # None until the first footnote of the whole volume is seen (footnote
+    # 1 itself lives in Sanborn's Introduction, outside every block this
+    # function scans - see the docstring), so the first match found here
+    # seeds the sequence rather than being required to equal 1.
+    expected: int | None = None
+    for heading in _LETTERS_FOOTNOTES_HEADING_RE.finditer(raw_text):
+        block_end = _LETTERS_FOOTNOTE_BLOCK_END_RE.search(raw_text, heading.end())
+        section = raw_text[heading.end() : block_end.start() if block_end else len(raw_text)]
+
+        current_number: int | None = None
+        current_parts: list[str] = []
+        for para in re.split(r"\n\s*\n", section):
+            para = para.strip()
+            if not para:
+                continue
+            match = re.match(r"^\[(\d+)\]\s*(.*)", para, re.S)
+            if match and (expected is None or int(match.group(1)) == expected):
+                if current_number is not None:
+                    bodies[current_number] = _clean_ws("\n\n".join(current_parts))
+                current_number = int(match.group(1))
+                current_parts = [match.group(2)]
+                expected = current_number + 1
+            else:
+                current_parts.append(para)
+        if current_number is not None:
+            bodies[current_number] = _clean_ws("\n\n".join(current_parts))
+    return bodies
+
+
 def _extract_introduction_text(
     raw_text: str, start_heading: re.Pattern, end_heading: re.Pattern
 ) -> str:
@@ -239,7 +323,17 @@ def _strip_editorial_apparatus_from_record(
             interpolation_hits.append((original_index, inner))
             return inner
 
-        stripped = _clean_ws(_BRACKET_RE.sub(_replace, paragraph))
+        substituted = _BRACKET_RE.sub(_replace, paragraph)
+        # Whitespace normalization is lossy (it collapses a quoted verse's
+        # line breaks to single spaces) and evidence text is sacred - only
+        # apply it to a paragraph an editorial span was actually excised
+        # from, where it closes up the excision's own artifacts (a
+        # doubled space, a stray space before punctuation). A paragraph
+        # with no bracket at all passes through untouched, byte-identical
+        # to what normalize_journals produced from the raw source.
+        stripped = (
+            _clean_ws(substituted) if _BRACKET_RE.search(paragraph) else paragraph
+        )
         if stripped:
             cleaned.append(stripped)
             survives_at[original_index] = len(cleaned)
@@ -272,7 +366,8 @@ def extract_editorial_apparatus(
     evidence_root: Path, records: list[NormalizedRecord]
 ) -> list[EditorialRecord]:
     """Extract editorial apparatus out of ``records`` (from
-    ``normalize_journals``) plus the volume-level introductions.
+    ``normalize_journals`` and/or ``normalize_letters``) plus the
+    volume-level introductions.
 
     Mutates each record's ``paragraphs`` in place, stripping every
     footnote marker and standalone bracketed aside so the evidence text
@@ -284,9 +379,13 @@ def extract_editorial_apparatus(
     bracketed aside, one per interpolation, and one per introduction -
     each linked back to the evidence record and paragraph anchor it
     annotates (or, for a footnote whose marker fell in text this slice
-    does not cover - Torrey's Introduction, or J02's Chapter I heading
-    line - left unlinked rather than dropped, per "nothing in this slice
-    deletes anything").
+    does not cover - Torrey's Introduction, Sanborn's Introduction, J02's
+    Chapter I heading line, or a letter's own recipient heading - left
+    unlinked rather than dropped, per "nothing in this slice deletes
+    anything"). ``records`` may hold journal records, letter records, or
+    both mixed together - each volume's records are found by matching
+    ``original_file``, so passing only journal records (or only letter
+    records) processes just that volume, same as before issue #56.
     """
     evidence_root = Path(evidence_root)
     editorial: list[EditorialRecord] = []
@@ -323,12 +422,21 @@ def extract_editorial_apparatus(
     for record in records:
         records_by_file.setdefault(record.original_file, []).append(record)
 
-    for volume in JOURNAL_VOLUMES:
+    # Letters (issue #56) join the journals here: same per-record
+    # paragraph stripping and footnote/aside/interpolation bookkeeping
+    # below, just a different footnote-body parser - the letters scatter
+    # their footnotes across several body blocks (RECON.md §5) rather than
+    # one volume-level back-matter section.
+    for volume in [*JOURNAL_VOLUMES, LETTERS_VOLUME]:
         volume_records = records_by_file.get(volume["raw_path"], [])
         if not volume_records:
             continue
         raw_text = (evidence_root / volume["raw_path"]).read_text(encoding="utf-8")
-        footnote_bodies = _parse_footnote_bodies(raw_text)
+        footnote_bodies = (
+            _parse_letters_footnote_bodies(raw_text)
+            if volume is LETTERS_VOLUME
+            else _parse_footnote_bodies(raw_text)
+        )
 
         marker_links: dict[int, tuple[str, str | None]] = {}
         pending_asides: list[tuple[NormalizedRecord, str | None, str]] = []

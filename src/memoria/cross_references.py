@@ -27,6 +27,17 @@ from pathlib import Path
 import yaml
 
 from memoria.editorial import EditorialRecord
+from memoria.normalize import JOURNAL_VOLUMES
+
+# The raw-file paths this module draws cross-references from - the
+# journal volumes only. Issue #56 extended extract_editorial_apparatus()
+# to also produce footnote-type EditorialRecords for the letters volume;
+# this module's own scope (see the module docstring) was always "the
+# journal-side anchor only", so a letters footnote that happens to cite a
+# published work with a page number is not a cross-reference this table
+# tracks - filtered out here rather than left to fall out incidentally of
+# whatever extract_editorial_apparatus happens to be called with.
+_JOURNAL_RAW_PATHS = frozenset(v["raw_path"] for v in JOURNAL_VOLUMES)
 
 CROSS_REFERENCES_RELATIVE_PATH = "sources/normalized/cross-references.yaml"
 
@@ -85,6 +96,8 @@ def extract_cross_references(
     cross_references: list[CrossReference] = []
     for record in editorial_records:
         if record.editorial_type != "footnote":
+            continue
+        if record.original_file not in _JOURNAL_RAW_PATHS:
             continue
         if not _CITATION_GATE_RE.search(record.text):
             continue

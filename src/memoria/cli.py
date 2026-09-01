@@ -101,19 +101,25 @@ def main(argv=None):
         # change that starts reading paragraph text landing after its
         # apparatus has already been stripped out from under it.
         #
-        # Both operate on journal_records only, before letter_records
-        # exist - each filters internally by JOURNAL_VOLUMES /
+        # resolve_years() operates on journal_records only, before
+        # letter_records exist - it filters internally by JOURNAL_VOLUMES /
         # original_file and would leave letter records untouched even
-        # called on the combined list, but keeping letters out of both
-        # calls entirely is one fewer thing to reason about.
+        # called on the combined list, but keeping letters out of it
+        # entirely is one fewer thing to reason about.
+        #
+        # extract_editorial_apparatus() (issue #56) now covers both source
+        # types, so letter_records must exist first - it filters
+        # internally by original_file too, and processing only
+        # journal_records here would silently leave the letters'
+        # apparatus inline, undoing #56.
         warnings = resolve_years(journal_records, evidence_root())
         for warning in warnings:
             print(f"normalize: {warning}")
-        editorial_records = extract_editorial_apparatus(
-            evidence_root(), journal_records
-        )
         letter_records = normalize_letters(
             evidence_root(), start_id=len(journal_records) + 1
+        )
+        editorial_records = extract_editorial_apparatus(
+            evidence_root(), journal_records + letter_records
         )
         # The audit targets (issue #9) come last in the SRC- sequence, so
         # adding them moves no existing ID.

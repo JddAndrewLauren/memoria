@@ -150,11 +150,12 @@ def rebuild(evidence_root: Path, repo_root: Path) -> list[NormalizedRecord]:
     evidence before indexing, rather than trusting whatever is already on
     disk under ``sources/normalized/``, so rebuild is correct whether that
     directory is absent, stale, or up to date. Editorial apparatus
-    (issue #5) is extracted out of the journal records - and the
-    editorial records it produces written and indexed - in the same pass,
-    so a plain ``rebuild()`` never regresses back to unstripped,
-    unsearchable-exclusion evidence the way calling ``normalize_journals``
-    + ``build_index`` directly would. Must also produce exactly what
+    (issue #5, extended to the letters volume by issue #56) is extracted
+    out of the journal and letter records - and the editorial records it
+    produces written and indexed - in the same pass, so a plain
+    ``rebuild()`` never regresses back to unstripped, unsearchable-
+    exclusion evidence the way calling ``normalize_journals`` +
+    ``build_index`` directly would. Must also produce exactly what
     ``memoria normalize`` produces for the letters (issue #6 review round
     1: rebuild used to call ``normalize_journals`` alone, silently
     deleting every letter record on a rebuild and leaving a stale
@@ -162,17 +163,16 @@ def rebuild(evidence_root: Path, repo_root: Path) -> list[NormalizedRecord]:
     ``test_rebuild_produces_byte_identical_output_to_normalize`` is the
     regression test for the whole class of defect, not just this instance.
 
-    Letters do not get year resolution or editorial extraction here:
-    ``resolve_years`` and ``extract_editorial_apparatus`` both filter by
-    ``original_file`` against ``JOURNAL_VOLUMES`` and leave letter records
-    untouched, so every letter keeps ``date_confidence: unresolved`` after
-    both ``memoria normalize`` and ``memoria rebuild`` - deliberately, not
-    a gap this function is meant to close. A letter's dateline already
-    carries an explicit year as text (unlike a journal heading), but
-    turning that into a resolved ``event_date``/``date_confidence`` is
-    letters-specific year-resolution work issue #6 scoped out (part 16:
-    "year resolution" and "letters parsing" are separate M0 build steps),
-    not something to grow inside ``rebuild()`` unasked.
+    ``resolve_years`` does not run over letters: it filters by
+    ``original_file`` against ``JOURNAL_VOLUMES`` and leaves letter
+    records untouched here and in ``memoria normalize`` alike - the
+    journals' chapter-inference/weekday-checksum machinery has no letters
+    analogue to run. A letter's ``date_confidence`` is instead resolved
+    directly inside ``normalize_letters`` itself (issue #57): its dateline
+    already states its own year as plain text, so parsing it needs no
+    second pass over the raw file the way the journals' does. Editorial
+    extraction, like year resolution, does cover letters as of issue #56 -
+    see ``extract_editorial_apparatus``.
     """
     evidence_root = Path(evidence_root)
     repo_root = Path(repo_root)
@@ -183,11 +183,15 @@ def rebuild(evidence_root: Path, repo_root: Path) -> list[NormalizedRecord]:
     # reads only recorded_date and the raw file, never record.paragraphs,
     # so it is unaffected by extract_editorial_apparatus()'s paragraph
     # rewrite either way - run first anyway as the narrower, read-mostly
-    # mutation before the more invasive one.
+    # mutation before the more invasive one. extract_editorial_apparatus()
+    # now covers letters too (issue #56), so letter_records must exist
+    # first.
     resolve_years(journal_records, evidence_root)
-    editorial_records = extract_editorial_apparatus(evidence_root, journal_records)
     letter_records = normalize_letters(
         evidence_root, start_id=len(journal_records) + 1
+    )
+    editorial_records = extract_editorial_apparatus(
+        evidence_root, journal_records + letter_records
     )
     target_records = normalize_targets(
         evidence_root, start_id=len(journal_records) + len(letter_records) + 1
