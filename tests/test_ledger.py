@@ -136,7 +136,7 @@ def test_session_id_from_env_generates_one_when_unset(monkeypatch):
 
     session_id = ledger.session_id_from_env()
 
-    assert re.fullmatch(r"SES-\d{8}-\d{4}-[0-9a-f]{6}", session_id)
+    assert re.fullmatch(r"SES-\d{8}-\d{4}-[0-9a-f]{12}", session_id)
 
 
 def test_generated_session_ids_do_not_collide_within_the_same_minute(monkeypatch):

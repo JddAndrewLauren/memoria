@@ -63,13 +63,14 @@ def _generate_session_id() -> str:
     ``SES-20260912-1432`` is minute granularity, not second: two servers
     spawned in the same minute with no suffix would generate the *same* id
     and silently append to one shared ``events.jsonl``, merging two
-    sessions' reads into one. The random suffix - 24 bits, checked
+    sessions' reads into one. The random suffix - 48 bits, checked
     collision-free across 200 ids in the same minute by a test - is what
     keeps the id unique while the documented prefix stays intact and
-    parseable.
+    parseable. 24 bits would pass that test only about 839 times in 840,
+    which is a flaky test, not a passing one.
     """
     now = datetime.now(timezone.utc)
-    suffix = secrets.token_hex(3)
+    suffix = secrets.token_hex(6)
     return f"SES-{now:%Y%m%d-%H%M}-{suffix}"
 
 
