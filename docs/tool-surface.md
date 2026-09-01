@@ -4,7 +4,7 @@ What Memoria exposes to a session model, and what is settled about it.
 Implemented by `src/memoria/mcp/`, over the core read side that
 `docs/adr/0004-the-read-side-is-functions-over-a-repository-value.md` places.
 
-Part 11 §25 lists ten candidate tools. This document records the ones whose
+Part 11 §25 lists eleven candidate tools. This document records the ones whose
 signatures are **forced** — closed, with a reason — and leaves the rest
 explicitly open, so that "still open" is a statement someone made rather than
 a gap nobody noticed.
@@ -13,6 +13,7 @@ a gap nobody noticed.
 |---|---|
 | `read(ref)` | **Forced** — issue #11, below |
 | `search_text(query, filters)` | Open — issue #12 |
+| `search_global(query, filters, summarize)` | Open — issue #74, scheduled for M2 (ADR-0005) |
 | `search_semantic`, `expand`, `timeline`, `grep_repo`, `trace`, `backlinks`, `list` | Open; §25 does not commit to shipping them |
 
 ## The constraint that binds all of it
