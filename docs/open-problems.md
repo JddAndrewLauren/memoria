@@ -45,7 +45,20 @@ or delete them outright is unspecified.
 
 Where: `poc-plan.md` §9.
 
-### 1.4 Whether a late-added subject backfills over existing prose
+### 1.4 Whether the real book repo holds its sources inside
+
+The PoC corpus lives in a sibling evidence repo so that evidence reads route through
+the tool surface (`poc-plan.md` §3). §2's canonical book repository keeps `sources/`
+inside — which §1.2's repository-is-the-system, §4.1's ordinary relative links and
+§42's one-tree rebuild all assume. When the real archive arrives, decide: sources
+inside (then per-repo routing rules do the work of the layout) or a sibling evidence
+repo (then §2 and §4.1's link examples change, and Obsidian will not resolve
+sibling-relative links from a book-repo vault).
+
+**Safe default:** inside, per §2. Revisit at archive time; the PoC layout proves the
+routing either way.
+
+### 1.5 Whether a late-added subject backfills over existing prose
 
 Adding a subject after a hundred thousand words exist: does it evaluate what is already
 written, or only what comes next? Under part 06 §8.12 this is now a cost question with a

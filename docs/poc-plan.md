@@ -46,8 +46,10 @@ corpus supplies the evidence for it directly.
 
 ## 2. Corpus — acquired
 
-10 files under `sources/raw/gutenberg/`, hashed in `manifest.yaml`, analysed in
-`RECON.md`. **661,946 words.** Nothing failed verification.
+10 files under `raw/gutenberg/` in the **sibling evidence repo**
+`../thoreau-evidence/` (moved out of this repo 2026-08-31 — see §3), hashed in its
+`manifest.yaml`, analysed in its `RECON.md`. **661,946 words.** Nothing failed
+verification, including the post-move hash check.
 
 | ID | Role | Work | Words |
 |---|---|---|---|
@@ -125,6 +127,17 @@ per-session JSONL under `~/.claude/projects/<slug>/<session-id>.jsonl` with
 `sessionId`, `parentUuid` chains and a uuid per message, so
 `sessions/**/transcript.md` with stable `#T017` anchors can be **derived** as a
 post-session pass — which is the §13 curation step regardless.
+
+**Evidence lives in a sibling repo, and direct reads are routed, not forbidden**
+(2026-08-31). The corpus moved to `../thoreau-evidence/`, whose own git history is
+Invariant 3's tamper-evidence. In this repo a PreToolUse hook
+(`.claude/hooks/route-evidence-reads.sh`) denies Read/Grep/Glob against the evidence
+path with a message pointing at the Memoria tools. The framing matters: the hook is a
+**router, not a wall** — the tools return the same verbatim text plus the curated
+overlay (entry links, exclusions, settlements citing the paragraph), and every served
+read lands in `events.jsonl`, which is what makes §33's manifest a record rather than
+a request. Bash can still reach the files; accepted — the goal is that the logged
+path is the path of least resistance.
 
 Verified present: Claude Code 2.1.252, Python 3.14.4, Node 26.3, SQLite 3.46.1
 with FTS5, no MCP servers configured.
@@ -267,7 +280,10 @@ interface.
 
 - Build sequencing and milestone structure — **deliberately not addressed.**
 - Normalized record schema and the editorial-apparatus representation.
-- Which §25 tools ship, and their exact signatures.
+- Which §25 tools ship, and their exact signatures — constrained 2026-08-31:
+  retrieval must be a **superset of grep**: verbatim source text (never
+  summarized-only), decorated with the curated overlay, a raw full-source read
+  available, and every read ledgered in `events.jsonl`.
 - Scope and trigger policy for the Curator.
 - Subject and length of the authorship-track piece.
 - Whether and when to acquire *Excursions*, *Cape Cod* and *The Service*.

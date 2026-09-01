@@ -44,9 +44,9 @@ Match aliases, initials, honorifics, married names and location forms.
 Do not merge people sharing a surname without corroboration.
 ```
 
-§7's alias discipline and the hazards catalogued in
-`sources/raw/gutenberg/RECON.md` — Emerson under four location forms, four Thoreaus
-sharing a surname — are what this exists to carry.
+§7's alias discipline and the hazards catalogued in the evidence repo's `RECON.md`
+(`../thoreau-evidence/raw/gutenberg/`) — Emerson under four location forms, four
+Thoreaus sharing a surname — are what this exists to carry.
 
 **Three — the audit questions this subject asks of manuscript prose.**
 

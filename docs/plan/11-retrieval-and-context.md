@@ -306,6 +306,14 @@ Every session records exactly what initial context was supplied.
 
 This is a key accuracy mechanism, not merely an audit feature.
 
+The manifest's completeness claim is conditioned on the runtime layout: evidence
+lives outside the session's working repo, direct reads are routed to the tool
+surface, and the server-side ledger (`events.jsonl`, §10.4) records every evidence
+read as it is served. Within that layout the manifest bounds model knowledge of the
+archive. For a session run outside it — a development session in the memoria repo
+itself — the manifest records tool-mediated retrieval only, and claims nothing about
+direct reads.
+
 The model is explicitly told that material outside its context has not necessarily been examined. It must use retrieval when a conclusion depends on evidence outside the loaded working set.
 
 Research responses must describe their search scope so that a fluent answer cannot masquerade as a corpus-wide conclusion.

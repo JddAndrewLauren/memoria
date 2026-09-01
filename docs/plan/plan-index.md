@@ -75,8 +75,8 @@ for briefs summarized from existing prose. New **§4.1** closes the anchoring qu
 **nothing durable points at a manuscript passage.** `state.md`, `outline.md` and
 `impacts/` are gone from §2's tree; §3 puts briefs in the Manuscript class and adds
 appearances and memoized judgements to Derived.
-**05 is where the current risk concentrates.** The Thoreau recon
-(`../../sources/raw/gutenberg/RECON.md`) shows normalization is the hard part —
+**05 is where the current risk concentrates.** The Thoreau recon (`RECON.md` in the
+sibling evidence repo `../thoreau-evidence/raw/gutenberg/`) shows normalization is the hard part —
 1906 editorial voice sits inside 1837 evidence, and year resolution depends on
 chapter headings plus a weekday checksum. If this is wrong, everything
 downstream is quietly wrong with no failing test.
@@ -203,6 +203,8 @@ independent requirements.
 ## Files
 
 ```
+../thoreau-evidence/                sibling evidence repo: the PoC corpus
+                                    (raw/, manifest.yaml, RECON.md)
 CONTEXT.md                          settled domain vocabulary
 docs/
 ├── poc-plan.md                     decisions from the grilling sessions

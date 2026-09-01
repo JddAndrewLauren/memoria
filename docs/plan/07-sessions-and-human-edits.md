@@ -14,6 +14,11 @@ context-manifest.json
 events.jsonl
 ```
 
+Transcripts are derived post-session from the runtime's own session log
+(`poc-plan.md` §3), which the runtime prunes on a retention window. The derivation
+pass must therefore run promptly — a session-end hook, not a someday batch — or the
+record is silently lost.
+
 ## 10.1 transcript.md
 
 Contains the human-readable conversation.
@@ -113,6 +118,10 @@ It may contain:
 The Markdown transcript remains the human interface.
 
 The event log exists when deeper reconstruction is required.
+
+`events.jsonl` is written server-side by the Memoria MCP server as it serves tool
+calls, so it is complete for the tool path independent of client behavior — this is
+the ledger §33's manifest conditioning leans on.
 
 ---
 

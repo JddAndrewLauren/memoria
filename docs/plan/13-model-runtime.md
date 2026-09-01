@@ -106,6 +106,10 @@ Interpretation changes pass through Curator ownership and provenance rules.
 
 Canonical manuscript writes pass through the explicit authorization model defined in this plan.
 
+Read-side, the same surface is the sole evidence path: the corpus lives outside the
+session's working repo and direct reads are routed back to the tools by hook
+(`poc-plan.md` §3), with every served read ledgered in `events.jsonl` (§10.4).
+
 This allows Memoria to benefit from a powerful agent runtime without weakening its invariants.
 
 ---
