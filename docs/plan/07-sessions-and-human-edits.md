@@ -188,7 +188,6 @@ authorized-by:
 
 triggered-by:
   CHG-20261103-1024
-  IMP-20261103-004
 
 evidence:
   SRC-0184

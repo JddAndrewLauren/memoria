@@ -179,34 +179,23 @@ things have been dismissed. §15 and §38 both depend on it.
 Both were deferred under §45 discipline — observe real failure before choosing a
 mechanism. Each carries a safe default that keeps the deferral cheap.
 
-### Manuscript passage anchoring
-**The question.** §17, §20, §16 and §38 all store pointers like
-`chapters/02/draft.md#p7`, but nothing makes `#p7` stable. Insert one paragraph
-while editing in Obsidian and every stored pointer shifts — silently, since
-nothing errors.
+### Manuscript passage anchoring — CLOSED 2026-08-31
 
-Options weighed: Obsidian-native block IDs (`^a1b2c3`, lazily assigned), HTML
-comment anchors, content-hash with fuzzy re-anchoring, positional anchors.
+**Was:** §17, §20, §16 and §38 all stored pointers like `chapters/02/draft.md#p7`, and
+nothing made `#p7` stable. Four mechanisms were weighed — Obsidian block IDs, HTML
+comment anchors, content-hash with fuzzy re-anchoring, positional anchors. A fifth,
+"store no pointers and recompute everything", was ruled out **on principle**, because
+§38's dismissal memory was thought to need stable passage identity.
 
-One option was ruled out on principle: "store no pointers, recompute impacts
-every pass" eliminates drift, but §38 requires remembering that you *rejected* a
-suggestion about a specific passage, and dismissal memory needs stable passage
-identity. Pure recomputation would re-propose everything already turned down.
+**Resolved:** the fifth option, on the ground that its ruling-out was wrong. Dismissal
+memory does not need passage identity — a decline worth remembering is craft direction,
+and craft direction lives in the section's brief. With that removed, nothing durable
+needs to point at a paragraph: findings recompute, entry-to-passage edges became
+`appearances` in the index, settlements live on the entry, and write-time provenance is
+composed from `git blame` plus the session's context manifest.
 
-**Safe default while deferred:** keep anchor resolution behind a single seam so
-swapping it is one change, and do not accumulate a large body of stored impact
-records before deciding.
-
-**Narrowed 2026-08-31 by the subject system.** Impact records are no longer
-accumulated at all — a finding is a disagreement set that recomputes each pass
-(part 06 §8.10, part 09 §17). What still needs durable passage identity is only:
-
-- **settlements** — "chosen over SRC-0184, at this passage, on this date";
-- **write-time provenance** — what a passage was written from, a fact about the past.
-
-Both are rare, deliberate, author-triggered acts rather than bulk machine output.
-The safe default is now free to keep, and the reduced requirement may change which of
-the four options above is right. **The decision itself remains open.**
+Full reasoning: part 04 §4.1. This also unblocks the desktop UI, which part 04
+previously said could not be built past mock data until this was settled.
 
 ### Human-edit supremacy / Curator ownership
 **The question.** §1.7 is stated as an invariant but §14 implements it as a
@@ -257,8 +246,12 @@ interface.
 4. **Paraphrase matching may be hard enough to swamp the signal.** Thoreau rewrote
    heavily; if even embeddings score poorly on the 364 links, the benchmark
    measures the difficulty of the task rather than the quality of Memoria.
-5. **Two open architectural questions** (anchoring, ownership) sit under §16-22.
-   Their safe defaults hold only while the Curator stays conservative.
+5. **One open architectural question** — ownership — sits under §12-15. Its safe
+   default holds only while the Curator stays conservative. Anchoring is closed (§4).
+6. **The manuscript layer has no test corpus.** Thoreau supplies evidence and audit
+   targets, but nothing with a brief, a declared scope, or a passage written from
+   something. §43.2's resumption test is now the manuscript layer's central claim and
+   can only be exercised on the authorship track's own piece.
 6. **§1.12 remains the governing risk.** The failure condition is Memoria
    advancing while no book does. The authorship track exists partly to keep that
    honest during development.
@@ -332,7 +325,47 @@ Vocabulary: [`../CONTEXT.md`](../CONTEXT.md).
   Curator design; it adds no runtime and no interface requirement beyond what §3
   already scoped.
 
-**Still not decided.** Whether hard-coded subjects can be edited or removed; whether
-adding a subject late backfills over existing prose; and where §17's
-premature-revelation check lives, since it is the one impact question with no natural
-subject. Manuscript durable state and its storage were deferred to their own session.
+**Still not decided.** Whether hard-coded subjects can be edited or removed, and
+whether adding a subject late backfills over existing prose. §17's premature-revelation
+check was **removed entirely** on 2026-08-31 rather than rehomed. Manuscript durable
+state and its storage were settled in a third session; see §10.
+
+
+---
+
+## 10. Addendum — the manuscript layer, 2026-08-31
+
+A third grilling session settled what durable state the manuscript carries. Full model:
+[`plan/04-repository-and-identity.md`](plan/04-repository-and-identity.md) §2.1 and
+§4.1, [`plan/06-subjects-and-attribution.md`](plan/06-subjects-and-attribution.md)
+§8.11-§8.12, [`plan/09-dependency-and-impact.md`](plan/09-dependency-and-impact.md),
+[`plan/12-research-and-resumability.md`](plan/12-research-and-resumability.md) §39.
+Vocabulary: [`../CONTEXT.md`](../CONTEXT.md).
+
+**The manuscript's whole durable footprint** is the prose plus one editable prose field
+per level — the **brief** — in `book.md`, `chapter.md` and `section.md`. `state.md`,
+`outline.md`, the checkpoint, §39's seventeen fields, impact records and passage anchors
+are all gone.
+
+**What this changes for this PoC.**
+
+- **Anchoring is closed** (§4 above), which removes one of the two deferred
+  architectural questions and unblocks the interface.
+- **Nothing analyzes prose unasked.** Audits run from a button on a section, a chapter
+  or a highlighted passage. Invariant 8 is amended. This makes importing a legacy
+  manuscript cheap — a cold cache produces a tinted chapter and a count, not ten
+  thousand model calls — which matters because the authorship track starts from real
+  prose.
+- **Staleness is free and always known.** Judgements are memoized on
+  `hash(paragraph) + hash(entry) + hash(subject prompt)`, so what is **not current** is
+  a hash comparison. §47's health report survives autonomy on exactly this ground: it
+  needs no model.
+- **§17's fixed question list moved onto the subjects.** Each subject prompt now
+  declares the audit questions it asks, which makes the subject prompt the third place
+  the PoC's alias and hazard material has to be right — and makes a new subject
+  incomplete until its questions are written.
+- **The benchmark gains no new reading, but the corpus gap widens.** Nothing in Thoreau
+  exercises briefs, resumption, or write-time provenance. This is now risk 6 in §6.
+- **Nothing in §5's reductions is affected**, and §3's "Obsidian is the editor" is
+  untouched: whether the in-app paragraph editor is built remains open, and the reduced
+  §40.6 stale-revision check is still what holds two write paths apart.

@@ -68,7 +68,7 @@ Claude Code already supplies much of the generic agent runtime Memoria would oth
 - interpretation state;
 - research procedures;
 - manuscript authorization;
-- manuscript-impact analysis;
+- the audit, when the author asks for one;
 - Git history;
 - resumability;
 - and the user interface.

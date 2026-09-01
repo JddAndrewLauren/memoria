@@ -7,19 +7,26 @@ revised since then are marked in the part's own header comment. Part 19 is the
 exception: it records the desktop UI as designed, and has no counterpart in the
 original plan.
 
-**Revised since:** §8 (rewritten as the subject system), §18's category list
-(withdrawn), §1.5, §3, §4, §12.1, §13.4, §15, §17, §25, §32, §33, §42.
+**Revised since:** §8 (rewritten as the subject system), §16-§18 and §39 (rewritten
+for the manuscript layer), §18's category list and §17's question list (both withdrawn),
+§1.5, §1.10a (new), §2, §2.1 (new), §3, §4, §4.1 (new), §8.1, §8.5, §8.11, §8.12 (new),
+§12.1, §13.4, §15, §19, §20, §21, §23, §25, §32, §33, §36-§38, §42, §43.2, §47, and
+Invariants 8 and 9.
 
-Nine parts — 04, 06, 08, 09, 10, 11, 12, 14, 18 — end in an appended
+Five parts — 06, 08, 11, 14, 18 — end in an appended
 `## Editorial note — the desktop design`, recording where that design confirms,
 extends or collides with the section above it. The notes sit below the section text
-and never alter it.
+and never alter it. The notes on 04, 09, 10 and 12 were **resolved into the section
+text** on 2026-08-31 rather than left appended.
 
 - **These parts are canonical.** `_original-memoria-plan.md` is an archived copy
   of the single-file plan as of 2026-08-31, kept for reference only. Do not edit it.
-- **Decisions from the 2026-08-31 grilling session** live in
+- **Decisions from the 2026-08-31 grilling sessions** live in
   [`../poc-plan.md`](../poc-plan.md). Where a part has been narrowed or has an
   open question, the status column says so and the reasoning is there, not here.
+- **Everything still unsettled** is collected in
+  [`../open-problems.md`](../open-problems.md) — open decisions, deferrals with their
+  safe defaults, documents needing rewrite, and the accepted costs worth watching.
 
 ---
 
@@ -56,15 +63,17 @@ promise is not falsifiable there.
 
 | # | Part | Original §§ | Status |
 |---|---|---|---|
-| 04 | [Repository, State Classes, Identity, Rebuildability](04-repository-and-identity.md) | 2, 3, 4, 42 | open |
+| 04 | [Repository, State Classes, Identity, Rebuildability](04-repository-and-identity.md) | 2, 3, 4, 42 | **active** |
 | 05 | [Source Ingestion, Temporal Discipline, Aliases](05-evidence-and-ingestion.md) | 5, 6, 7 | **active** |
 | 06 | [The Subject System and Attribution](06-subjects-and-attribution.md) | 8, 9 | **active** |
 
-**04** still carries the unresolved anchoring question, but it is **narrower than it
-was**: under part 06 §8.11 impact edges recompute every pass, so only **settlements**
-and **write-time provenance** need durable passage identity. See the editorial note
-at the foot of the part. §2's tree now has `subjects/`; §3 splits the old
-Interpretation class into Subjects and Claims.
+**04 carries the manuscript layer.** New **§2.1** defines the **brief** — the one
+editable prose field each of `book.md`, `chapter.md` and `section.md` holds, covering
+declared scope and craft direction, with three write paths and an *unconfirmed* state
+for briefs summarized from existing prose. New **§4.1** closes the anchoring question:
+**nothing durable points at a manuscript passage.** `state.md`, `outline.md` and
+`impacts/` are gone from §2's tree; §3 puts briefs in the Manuscript class and adds
+appearances and memoized judgements to Derived.
 **05 is where the current risk concentrates.** The Thoreau recon
 (`../../sources/raw/gutenberg/RECON.md`) shows normalization is the hard part —
 1906 editorial voice sits inside 1837 evidence, and year resolution depends on
@@ -97,15 +106,19 @@ entry without a settlement.
 
 | # | Part | Original §§ | Status |
 |---|---|---|---|
-| 09 | [Dependency, Propagation, Manuscript Impact](09-dependency-and-impact.md) | 16, 17, 18, 22 | open |
+| 09 | [Dependency, Propagation, Manuscript Impact](09-dependency-and-impact.md) | 16, 17, 18, 22 | stable |
 | 10 | [Manuscript Rules, Authorship, Authorization](10-manuscript-authorship.md) | 19, 20, 21, 36, 37, 38 | stable |
 
-**09** is **no longer blocked** behind the anchoring decision. Findings are derived
-and recomputed rather than stored; a finding is a **disagreement set plus prose**,
-with no category, and the set is its own identity for §38's dismissal memory. §18's
-ten-category list is withdrawn.
-**10** is the plan's strongest material: autonomy in observation, reasoning and
-recommendation; authorization at the point of canonical authorship.
+**09 was rewritten 2026-08-31 and is now short.** Impact analysis is not a separate
+mechanism — it is the audit fired from the other end, and both are the same memoized
+judgement (part 06 §8.12). §17's seven-question list is withdrawn onto the subjects and
+its premature-revelation question is removed outright; §18's ten categories were
+already withdrawn. What remains is the finding, its disagreement set, and the
+resolutions the set admits.
+**10** is the plan's strongest material, now with one restriction added: authorization
+covers **briefs** as well as prose, and a brief is never written from a finding card or
+a batch. §20's provenance is composed from git and the session records rather than
+stored.
 
 ### Working — retrieval, context, research
 
@@ -119,8 +132,10 @@ number from the cross-reference benchmark. §32's Tier 2 is now the **declared s
 which is what bounds the working context. New **§33.1** states the sharper version of
 the search-scope problem: an index reports nothing about its own recall, and that is
 the central risk of the subject system.
-**12** — §39's resumption test ("leave a section for weeks, return, continue
-without a recap") is the plan's own stated bar for whether the rest is premature.
+**12** — §39 was rewritten 2026-08-31. The seventeen-field state record and the
+checkpoint are **withdrawn**; resumption is carried by the brief, the draft and an audit
+on request. The test itself stands and is now harder, and **nothing in the Thoreau
+corpus exercises it.**
 
 ### Runtime and interface
 
@@ -142,8 +157,9 @@ It is the designed desktop UI, recorded as it stands — six screens, the
 slide-over citation panel, cross-layer search, and the vocabulary the interface
 puts on screen. It reads as an acceptance description of §40.3 with navigation
 added. It is **open** because the design leads with "Ask Memoria", which the PoC
-defers, and because every locator it shows assumes the part 04 anchoring
-decision. Those conflicts are listed in §19.11 and left unresolved.
+defers. The anchoring blocker is **gone** (part 04 §4.1), and §19.11 now records
+`LEGACY DRAFT`, drag-to-reorder, the Curator status line, the `CHECKPOINT` card and the
+Review inbox as resolved or superseded.
 
 ### Checking and sequencing
 
@@ -178,7 +194,8 @@ independent requirements.
 - **Orienting from scratch:** 01 → 02 → 03 → 18
 - **The subject system:** 06 → 11 (§32, §33.1) → 09 → 08, then 04's anchoring note
 - **Working on ingest now:** 05 → 04 → 06, with `RECON.md` alongside
-- **Resolving the open decisions:** 04 (anchoring) and 08 (ownership), then 09
+- **Resolving the open decisions:** 08 (ownership) — the last one; 04's anchoring is closed
+- **The manuscript layer:** 04 (§2.1, §4.1) → 06 (§8.11, §8.12) → 09 → 12 (§39)
 - **Re-planning the build:** 13 → 14 → 19 → 15 → 16
 
 ## Files
@@ -186,7 +203,8 @@ independent requirements.
 ```
 CONTEXT.md                          settled domain vocabulary
 docs/
-├── poc-plan.md                     decisions from the grilling session
+├── poc-plan.md                     decisions from the grilling sessions
+├── open-problems.md                everything still unsettled
 ├── design/
 │   └── memoria-desktop.dc.html     the design canvas source, as incorporated
 └── plan/

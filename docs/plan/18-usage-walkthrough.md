@@ -56,13 +56,10 @@ The initial goal is a trustworthy, attributable evidence substrate.
 
 The author also creates minimal project framing:
 
-- `book.md`;
-- an initial `outline.md`;
-- broad date range;
-- purpose;
-- audience;
-- voice notes;
-- known structural ideas.
+- `book.md` — the book's brief: broad date range, purpose, audience, voice notes,
+  known structural ideas, written as prose rather than fields;
+- the first chapters and sections, each with a brief of its own. The ordered tree of
+  those briefs is the outline; there is no `outline.md`.
 
 The outline may be skeletal.
 
@@ -200,9 +197,14 @@ subjects/themes/control.md
 
 Now the intent is explicit.
 
-Memoria preserves the human diff and performs dependency analysis.
+Memoria preserves the human diff and invalidates every cached judgement that depended
+on the edited entry. **It does not read the manuscript.** What it reports is a count:
 
-It may discover:
+```text
+23 paragraphs not current since you revised Control     Audit
+```
+
+The author presses `Audit`, and only then:
 
 ```text
 Chapter 2 ¶7 — direct contradiction
@@ -216,7 +218,8 @@ The manuscript remains untouched.
 
 ## 52.7 AI-assisted propagation
 
-Memoria creates manuscript-impact suggestions and may prepare candidate patches.
+Within that requested audit, Memoria produces findings and may prepare candidate
+patches.
 
 The author might say:
 
@@ -229,7 +232,7 @@ It directly rewrites the authorized canonical passages, commits them, and record
 ```text
 author correction
     ↓
-manuscript impact
+finding
     ↓
 supporting evidence
     ↓

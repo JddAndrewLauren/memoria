@@ -90,14 +90,14 @@ might show:
 
 ```text
 CLM-0041
-THEME-control
-ARC-bob-relationship
+SUB-themes/control
+SUB-arcs/bob-relationship
 RES-20261018-003
-IMP-20261103-004
 chapter 8 source packet
+chapters/02 ¶14–17        (appearance, from the index)
 ```
 
-This makes source corrections, reinterpretation, contradiction analysis, and manuscript-impact analysis much easier.
+This makes source corrections, reinterpretation, contradiction analysis, and impact analysis much easier.
 
 It also provides much of the useful graph behavior without requiring a dedicated graph database.
 
@@ -220,10 +220,10 @@ For a section session:
 
 ```text
 Tier 1 — always
-    book.md
-    chapter.md
-    section state.md          including its declared scope
-    section draft.md
+    book.md                   the book's brief
+    chapter.md                the chapter's brief
+    section.md                the section's brief, including its declared scope
+    draft.md                  the prose
 
 Tier 2 — the declared scope, resolved
     the named entries' author text
@@ -246,8 +246,8 @@ Tier 4 — on demand
     additional digests
 ```
 
-**Tier 2 is declared, not inferred.** A section states its own scope, in the author's
-terms:
+**Tier 2 is declared, not inferred.** A section states its own scope in the author's
+terms, as part of its brief (§2.1) rather than as a field of its own:
 
 ```text
 Covers June 1839 to October 1841, and my interactions with Bob about
@@ -266,11 +266,32 @@ still names a handful. The only thing that would break this is automatic inclusi
 transitive expansion from a named entry to its neighbours, or loading a whole
 subject. Neither is done; §28's loop retrieves instead.
 
-The declared scope is **durable on the section**, which makes assembly reproducible
-and gives §39's resumption test something to resume from. It is also the section's
-contract: prose that drifts from it produces a finding whose disagreement set is
-`{passage, declared scope}`, resolvable by rewriting the prose or updating the
-declaration. Neither is an error.
+The declared scope is **durable on the section**, as prose and only as prose. It is
+never parsed into a structured field, and the resolution is never written back onto the
+section: what a scope resolved to is recorded in that session's context manifest (§33),
+against the subjects **as they stood that day**. Assembly is therefore reproducible
+per session rather than globally deterministic, which is the honest form — what
+satisfies a scope should move as the subjects learn.
+
+The brief is also the section's contract. Prose that drifts from it produces a finding
+whose disagreement set is `{passage, brief}`, resolvable by rewriting the prose or by
+opening a conversation about the brief — never by editing the brief from the finding
+card (part 09 §18).
+
+**Drift is a set difference, not a check.** Assembly already resolves the brief to a
+set of entries, and `appearances` (part 06 §8.11) already knows which entries a
+section's prose touches. Prose appearing under `SUB-events/acquisition` in a section
+whose brief never names it is drift, detected by subtracting two sets that exist for
+other reasons — no model call, no bespoke question. Every audit question in the system
+belongs to a subject (part 06 §8.1), and this is the one manuscript-layer check, which
+turns out not to need to be one.
+
+Drift is **not** evaluated against an *unconfirmed* brief: a brief summarized from the
+prose agrees with the prose by construction, and the comparison would be circular.
+
+A brief that is deliberately loose — "the middle of the book, roughly" — resolves to
+few entries and will report drift constantly. The remedy is a tighter brief, which is
+the intended pressure, though it is irritating early in a section's life.
 
 A declared scope that names something with no entry does not fail. Assembly falls
 back to the unpromoted candidate and reports that it did.

@@ -25,28 +25,48 @@ On screen the repository's three divisions are `MANUSCRIPT` / `SUBJECTS` /
 
 ## 8.1 The subject prompt
 
-Each subject carries a prompt with exactly one job: **define what counts as a match
-on this subject.**
+Each subject carries a prompt holding three things.
+
+**One — what counts as a match.**
 
 ```text
 An entry under People represents a person.
 ```
 
-Discovery, gathering, assembly and audit all fall out of matching. There is no
-separate check instruction, because the audit compares new prose against what an
-entry actually contains.
+Discovery, gathering and assembly all fall out of matching.
 
-The prompt should also state the subject's **matching hazards**, because they are
-corpus-specific and a model will not guess them:
+**Two — the subject's matching hazards**, because they are corpus-specific and a model
+will not guess them:
 
 ```text
 Match aliases, initials, honorifics, married names and location forms.
 Do not merge people sharing a surname without corroboration.
 ```
 
-This is one or two lines per subject, not a schema. §7's alias discipline and the
-hazards catalogued in `sources/raw/gutenberg/RECON.md` — Emerson under four location
-forms, four Thoreaus sharing a surname — are what it exists to carry.
+§7's alias discipline and the hazards catalogued in
+`sources/raw/gutenberg/RECON.md` — Emerson under four location forms, four Thoreaus
+sharing a surname — are what this exists to carry.
+
+**Three — the audit questions this subject asks of manuscript prose.**
+
+```text
+Does the passage contradict a settled fact about this person?
+Does it mischaracterize them under the current reading?
+```
+
+**Every audit question in the system belongs to a subject. There is no central list.**
+§17's fixed list of impact questions is withdrawn; each question moved onto the subject
+that can answer it. A subject the author adds is not finished until it says what it
+asks, which is §1.11 applied to checks as well as to structure — the check earns its
+existence where the dimension does.
+
+This matters most for the subjects whose entries hold a reading rather than facts.
+"Compare the prose against what the entry contains" is a workable instruction for
+People and Events and an empty one for Themes, where the entry holds an interpretation
+and the question that matters is §22's: *is the framing still in step?* No amount of
+matching produces that question, which is why it had to be stated.
+
+The whole prompt is a few lines per subject, not a schema.
 
 ---
 
@@ -145,20 +165,20 @@ rather than inferred.
 
 Assembly is not curation. It happens at write time, in service of a session.
 
-**Audit** — check-side. New manuscript prose, hand-written or AI-written, is
-evaluated against the entries, bounded by the subjects that exist.
+**Audit** — check-side. Manuscript prose, hand-written or AI-written, is evaluated
+against the entries, asking the audit questions each subject declares (§8.1). Its
+scope is the entries the section's brief resolves to, which makes the brief the
+audit's contract as well as assembly's.
 
-The audit evaluates **only new text**. Its scope is inspectable and is reported in
-terms of entries, not abstract check types:
+Scope is inspectable and is reported in terms of entries, not abstract check types:
 
 > Compared against Bob, the acquisition, and the 1837–1846 timeline.
 > Themes did not run.
 
 That is Invariant 10 applied to curation, which the plan does not otherwise do.
 
-One consequence to accept: the audit only checks what a subject covers. Of §17's
-seven impact questions, six map onto subjects; *"does it reveal information earlier
-than the narrative plan permits?"* does not, and has no home. See §9 of part 09.
+**The audit runs only on demand.** A button on a section or a chapter, or on a
+highlighted passage. Nothing evaluates prose unasked — see §8.12.
 
 ---
 
@@ -187,7 +207,10 @@ when and where that divergence is shown.
 
 One boundary: **craft direction is not testimony.** "Bob should read as unreliable
 early on" is not a claim about the world, must never be checked against evidence, and
-must never reach a writing agent as fact. It belongs in section state, not an entry.
+must never reach a writing agent as fact. It belongs in the section's **brief**
+(§2.1), not an entry — and so does a dismissal worth remembering, since "the narrator
+overstates Bob's age in the opening scene on purpose" is craft direction rather than a
+fact about the world.
 
 ---
 
@@ -202,7 +225,9 @@ against what, and when:
 birth year 1962 — chosen over SRC-0184 ¶12, 2026-08-31
 ```
 
-Downstream passages relying on a settlement inherit it and stay silent. §15's
+A settlement is stored **on the entry** and silences every downstream passage that
+relies on it, so it needs no manuscript anchor: the passage where the conflict
+surfaced is provenance of the act, recorded as the session it happened in. §15's
 dismissal memory is the mechanism.
 
 Resolving toward the manuscript updates the entry. That is a Curator write into
@@ -318,29 +343,82 @@ banner at the head of part 19.
 
 ---
 
-## 8.11 Entries and manuscript passages
+## 8.11 Appearances
 
-The edge between an entry and a passage is drawn twice, capturing two different
-facts.
+**Appearances** are the manuscript passages an entry turns out to touch, with a short
+note on how. §19.6's `AFFECTED PASSAGES` card and §27's `backlinks()` both render them.
 
-**Derived, by the audit.** Evaluating new prose determines which entries it touches.
-This is a free byproduct of a pass that must run anyway, it works for all prose
-regardless of authorship, and it records what a passage *turns out to be about*.
+They are derived, rebuildable, held only in the index, and never authoritative. They
+are kept separate from the gathered set on purpose, and the reason is §8.8's: a
+gathered set is **evidence you write from**, while appearances are **prose you have
+already written**. Merging them would put manuscript text into the structure a writing
+agent reads as material, and the book deliberately says things the author does not
+believe. Two names keep that door shut.
 
-**Recorded, by assembly.** Where a writing agent worked from a declared scope, the
-entries and sources it actually drew on are recorded. This is genuine write-time
-provenance — what the passage was *written from* — and it is a fact about the past.
+Appearances carry **no pin or exclude overlay**. An author act against one passage
+would be a durable pointer into mutable prose, which §4.1 forbids; the overlay stays a
+gathered-set affordance over immutable sources, where anchors are stable. An
+appearance the author wants suppressed is a sentence in the brief.
 
-Where the two disagree, that is informative rather than a conflict: the agent was
-handed Bob's entry and the paragraph came out about the acquisition.
+**Two engines, one name.** For People, Timeline and Events, an appearance is a match —
+names, aliases, dates — using the same lexical machinery as the gathered set. For
+Themes and Arcs there are no match terms that work: a paragraph about the fear of
+dependence need not contain any of the entry's words, and §19.6's card carries
+judgements — *"frames episode as ambition"* — rather than matches. Those require a
+model reading the passage against the entry.
 
-The author is never required to cite manually.
+**Recall is unreported here too**, and worse than in §8.3. An appearances list over two
+thousand paragraphs will miss some and cannot say which. For People that can be
+sanity-checked against aliases; for Control there is no ground truth at all.
 
-**This narrows the §4 anchoring problem.** Derived edges recompute every pass, so
-anchor drift is survivable — re-run the audit and get fresh edges, with nothing
-silently stale. What genuinely needs durable passage identity is much smaller:
-**settlements** and **write-time provenance**, both rare, deliberate, author-triggered
-acts rather than bulk machine output. See the editorial note in part 04.
+---
+
+## 8.12 Memoization, and when anything runs
+
+Both the appearances pass and the audit evaluate the same unit: one paragraph against
+one entry. Every such judgement is cached on the three things it depends on.
+
+```text
+key    = hash(paragraph text)
+       + hash(entry author text + settlements)
+       + hash(subject prompt)
+value  = { engages: yes/no, note: "frames episode as ambition" }
+```
+
+Three consequences follow, and they replace a good deal of machinery.
+
+**One — the audit and manuscript impact analysis are the same mechanism.** The audit
+fires when the prose changes; §17's impact analysis fires when an entry changes. Both
+recompute the same value from the same key. There are not two systems, and part 09's
+dependency graph and impact scan collapse into this one. The rule is not "only new
+text" but **only changed inputs**: Memoria never re-derives a judgement whose inputs
+have not moved.
+
+**Two — invalidation is impact analysis.** Editing the Control entry invalidates every
+cached Control judgement in the book. The set of passages needing re-evaluation *is*
+the answer to "what does this change affect", and the difference between the old and
+new judgements *is* the impact set. Editing a theme is expensive in exactly the way it
+should be: it re-reads the book against your revised reading.
+
+**Three — staleness is free, and evaluation is not automatic.** Deciding that a
+judgement is missing or stale is a hash comparison: no model, no cost, known across the
+whole manuscript at all times. Producing the judgement is a model call and **happens
+only when the author asks for it.** So Memoria always knows what is **not current** and
+never audits unasked.
+
+A paragraph is not current when it has never been audited, when it has been edited
+since, or when an entry or subject prompt it touches has changed since. All three are
+cache misses and are shown identically — a quiet tint on the paragraph — with the
+distinction carried in the summary line above the prose, where it can be acted on:
+
+```text
+142 paragraphs not current · 12 stale since you revised Control · Audit section
+```
+
+This trims **Invariant 8**. The invariant granted autonomy in observation, reasoning
+and recommendation, reserving authorization for canonical authorship. Evaluation is no
+longer autonomous. What remains autonomous is everything that needs no model: the
+staleness map, §47's health report, and validation.
 
 ---
 

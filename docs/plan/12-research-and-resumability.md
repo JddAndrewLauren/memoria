@@ -17,7 +17,7 @@ Typical activities:
 - resolve local questions;
 - check continuity;
 - discuss choices;
-- apply authorized manuscript-impact suggestions.
+- apply authorized findings.
 
 ---
 
@@ -168,61 +168,43 @@ At the same time, every important conclusion in the memo remains linked to under
 
 ---
 
-# 39. Section State and Resumability
+# 39. Resumability
 
-Each section has a `state.md`.
+**There is no section state record, and no checkpoint.** §39 previously specified a
+`state.md` holding seventeen tracked fields — purpose, status, last worked, checkpoint,
+current approach, important decisions, rejected approaches, themes, arcs, people,
+events, claims, source packets, open questions, attention flags, unresolved manuscript
+impacts, next step. **That list is withdrawn in full.**
 
-A useful state record contains:
+Eleven of those items were views of state that lives elsewhere and are now composed at
+read time: themes, arcs, people, events and claims resolve from the brief through the
+subjects; decisions and questions filter from `decisions.md` and `questions.md`;
+attention flags are findings from the last audit; unresolved impacts do not exist at
+all, since nothing accumulates; status and last-worked are git facts. Purpose and craft
+direction moved into the **brief** (§2.1). The checkpoint, the current approach, the
+next step and the rejected approaches were **removed**.
 
-```text
-purpose
-status
-last worked
-checkpoint
-current approach
-important decisions
-rejected approaches
-themes
-arcs
-people
-events
-claims
-source packets
-open questions
-attention flags
-unresolved manuscript impacts
-next step
-```
+What replaces them, for resumption, is:
 
-The defining test is simple:
+- the **brief** — what this section is and is for;
+- the **draft** — where you actually got to;
+- the **audit**, on request — what is wrong with it right now.
 
-> Leave a section untouched for several weeks, reopen it, and continue productive work without reconstructing what happened last time.
+The checkpoint was a summary of three things that are all still in front of you.
+Removing it also removes the last routine machine-write path into author-supreme text:
+nothing rewrites a brief at the end of a session.
 
-If Memoria cannot pass that test, the rest of the architecture is premature.
+The defining test is unchanged:
 
----
+> Leave a section untouched for several weeks, reopen it, and continue productive work
+> without reconstructing what happened last time.
 
-<!-- Editorial note appended 2026-08-31, when the desktop design was incorporated. -->
-<!-- The section text above is unchanged. -->
+If Memoria cannot pass that test, the rest of the architecture is premature. The test
+is now **harder and more honest**, because it must be passed by a brief, a draft and a
+live audit rather than by a stored recap. §43.2 keeps the test and changes its subject.
 
-## Editorial note — the desktop design
-
-§39's resumption test is the design's most literal borrowing: **Resume →**, the
-`CHECKPOINT` card with its *"Next — rewrite the final three paragraphs using only
-contemporaneous evidence"*, and the line *"Last worked October 18, 2026 · six weeks
-ago."* §34's research memos land as `✓ Saved as research memo RES-20261018-003 ·
-linked to CLM-0041`.
-
-§31's three modes are visible as conversation scope labels — "book-wide",
-"Chapter 6", "research", "Theme · Control", "§ 8.3".
-
-Two additions:
-
-- **A browsable conversation history.** The plan records sessions (§10, part 07) but
-  never offers them back as a list to return to. The design gives them a 264px rail
-  with `+ New`.
-- **Entry points from an object into a conversation about it** — `💬 Discuss this` on a
-  theme, *"see the exact turn"*, *"when did this change?"* `trace()` and `backlinks()`
-  exist as tools; these affordances do not.
-
-Full reconciliation: [19. Desktop UI — as designed](19-desktop-ui.md) §19.11.
+One consequence, recorded rather than solved: the Thoreau corpus supplies evidence and
+audit targets but nothing to *resume* — no brief, no declared scope, no passage written
+from something. **The manuscript layer has no test corpus**, and this is the claim that
+most needs one. The authorship track's short piece is the only place it can be
+exercised, and it should be shaped deliberately to do so.

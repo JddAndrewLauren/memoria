@@ -327,7 +327,9 @@ commit d41f2a9            the git commit for an author edit
 - The slide-over citation panel.
 - A chapter-level editor with click-to-edit paragraphs.
 - Manuscript structure editing in the sidebar: add chapter, add section, drag to
-  reorder.
+  reorder. **Adopted 2026-08-31**: there is no `outline.md`, so the ordered tree *is*
+  the outline and reordering renumbers directories; §4's stable IDs keep references
+  intact. See part 04 §2.1.
 - `Timeline` as a sixth group. **Adopted 2026-08-31**: Timeline is a built-in subject,
   and §04's `chronology.md` is an entry under it.
 - A browsable conversation history, scoped per §31 mode ("book-wide", "Chapter 6",
@@ -342,10 +344,18 @@ commit d41f2a9            the git commit for an author edit
 - A `SUPPORTED` verdict, and severity worded as a diagnosis. **Superseded
   2026-08-31**: findings carry no category at all. See part 06 §8.10 and the banner
   at the head of this part.
-- A `LEGACY DRAFT` badge on pre-Memoria manuscript text. No such state exists in §3's
-  state classes or §19's authorship classes.
-- A Curator status line. Nothing in the plan surfaces whether the Curator is running
-  or when it last passed.
+- A `LEGACY DRAFT` badge on pre-Memoria manuscript text. **Resolved 2026-08-31**: it is
+  not a state of the prose but of the **brief** — one drafted by summarizing existing
+  prose and not yet confirmed by the author. §3 needs no new class. See part 04 §2.1.
+- A Curator status line. **Adopted 2026-08-31** in a different form: what the interface
+  surfaces is the **not current** count — *"142 paragraphs not current · 12 stale since
+  you revised Control · Audit section"* — which is free to compute and is the trigger
+  for the audit rather than a report on a background pass. There is no background pass.
+- The `CHECKPOINT` card and its *"Next — rewrite the final three paragraphs"*.
+  **Superseded 2026-08-31**: the checkpoint is removed entirely (part 12 §39).
+  `Resume →` becomes "open a session on this section"; *"Last worked October 18"*
+  survives because it is a git fact. Of §19.5's six right-rail cards, only `PURPOSE`
+  reads a file — it reads the brief — and the other five compose live.
 - `Settings` and `Feedback`.
 
 **Runs ahead of decisions that are still open. Recorded, not resolved.**
@@ -353,14 +363,21 @@ commit d41f2a9            the git commit for an author edit
 - **Ask Memoria is the home screen** and the flagship of the design. `poc-plan.md` §5
   defers it as the one surface needing a model driver. This part does not change that
   reduction; it records that the design assumes it.
+- **The Review queue is drawn as an inbox** the Curator filled unasked — "twelve
+  findings after the chronology revision". **Superseded 2026-08-31**: audits run only
+  on demand, so Review is the results view for an audit the author asked for, reached
+  from the section or chapter button or from a highlighted passage. Invariant 8 is
+  amended accordingly.
 - **In-app prose editing** sits against §40.4 ("do not depend on a sophisticated
   rich-text editor") and the PoC's "Obsidian is the editor". The design's editor is
   paragraph-at-a-time rather than rich text, but it is still a second write path into
   the manuscript, and it is what the reduced §40.6 stale-revision check would have to
   cover.
-- **Every locator on screen** — `Ch 2 ¶7`, `SRC-0184 ¶17`, `Chapter 2 ¶14–17` — assumes
-  the part 04 anchoring question is settled. Past mock data, the UI cannot be built
-  without it.
+- **Every locator on screen** — `Ch 2 ¶7`, `SRC-0184 ¶17`, `Chapter 2 ¶14–17`.
+  **Resolved 2026-08-31, and the UI is unblocked.** Nothing durable points at a
+  passage (part 04 §4.1): source locators are stable because evidence is immutable,
+  and manuscript locators are computed per view from the index and from `git blame`.
+  A locator is display state with the lifetime of one render, never a stored pointer.
 - **Review actions differ from §40.3's list.** The card offers View evidence, Explain,
   Preview diff, Rewrite, Dismiss; `Apply` is not a per-finding action but the batch
   **Apply high-confidence fixes…** in the summary bar.
@@ -369,7 +386,10 @@ commit d41f2a9            the git commit for an author edit
   source packet"), and unresolved impacts are folded into `NEEDS ATTENTION`.
 - **Drag-to-reorder chapters** implies manuscript structure is editable from the app.
   Nothing in the plan describes that operation.
-- **Identifier width.** Every id form on screen comes from §4 — `IMP-20261103-004`,
+- **Identifier width.** `IMP-20261103-004` appears on the finding card and in the
+  vocabulary list. **Superseded 2026-08-31**: impact records do not exist, findings are
+  identified by their disagreement set, and `IMP-` is gone from §4. The remaining id
+  forms on screen come from §4 —
   `RES-20261018-003`, `DEC-0088`, `SES-20260912-1432 · T017` are the plan's own
   examples. The one divergence is `SRC-0184` against §4's `SRC-000184`.
 

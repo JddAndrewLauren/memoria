@@ -22,8 +22,8 @@ The Curator runs after events such as:
 | Event | Response |
 |---|---|
 | AI session ends | Post-session curation |
-| Human edits an entry | Propagation + manuscript-impact pass |
-| **New manuscript prose exists** (hand-written or AI-written) | **Audit pass** — evaluate it against the entries, bounded by the subjects that exist |
+| Human edits an entry | Propagate to derived non-manuscript material; invalidate that entry's cached judgements — **no manuscript pass runs** |
+| **New or edited manuscript prose exists** | Mark it **not current**. The audit itself runs only when the author asks |
 | Research memo completes | Fold supported findings into entries |
 | New evidence ingested | Index, match against every subject, refresh candidates and gathered sets |
 | **A subject is added or its prompt changes** | **Re-match that subject across the corpus; refresh its candidates** |
@@ -32,12 +32,17 @@ Passes are debounced and materiality-gated.
 
 A spelling correction should not trigger a cascade through the book.
 
-Two scoping rules govern the audit, and both exist to make its coverage inspectable:
+Three rules govern the audit, and they exist to make its coverage inspectable:
 
-- **It evaluates only new text.** Prose that has already been audited and settled is
-  not re-argued. §15 supplies the memory.
-- **It evaluates only on subjects that exist.** A risk with no subject is not
-  checked, and the pass says so. See part 06 §8.5.
+- **It runs only on demand** — a button on a section, a chapter, or a highlighted
+  passage. Invariant 8 is amended accordingly. What runs unasked is only what needs no
+  model: the staleness map, §47's health report, and §23's validation.
+- **It evaluates only changed inputs.** A judgement whose paragraph, entry and subject
+  prompt are unchanged is read from cache, never re-argued. This replaces the older
+  "only new text" rule, which was a proxy for cost. See part 06 §8.12.
+- **It evaluates only on subjects that exist**, asking the questions those subjects
+  declare, bounded by the entries the section's brief resolves to. A risk with no
+  subject is not checked, and the pass says so. See part 06 §8.1 and §8.5.
 
 ---
 

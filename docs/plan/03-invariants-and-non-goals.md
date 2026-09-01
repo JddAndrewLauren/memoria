@@ -59,15 +59,26 @@ Automation may challenge them but does not silently overwrite them.
 
 AI authorship is first-class.
 
-Memoria may autonomously read manuscript prose, analyze it, identify impacts, recommend changes, and prepare candidate patches.
+**Amended 2026-08-31.** Memoria no longer analyzes manuscript prose autonomously. An
+audit runs only when the author asks for one — on a section, a chapter, or a
+highlighted passage. Within a requested audit, identifying findings, recommending
+changes and preparing candidate patches need no further authorization.
 
-AI may draft, revise, and directly modify the canonical manuscript within an explicitly author-authorized scope.
+What remains autonomous is everything that requires no model: knowing which paragraphs
+are **not current** (a hash comparison over cached judgements, part 06 §8.12), §47's
+health report, and §23's validation. Memoria therefore always knows what has gone
+stale and never forms an opinion about prose unasked.
+
+AI may draft, revise, and directly modify the canonical manuscript — prose or a brief —
+within an explicitly author-authorized scope. A brief is authorized only by a
+deliberate act on that brief, never from a finding card and never in a batch.
 
 It may not independently apply manuscript changes merely because it believes they would improve the book.
 
 ## Invariant 9 — Authorization is scoped and attributable
 
 Every AI manuscript write must have an identifiable authorization covering the change.
+This covers writes to a brief as well as to `draft.md`.
 
 ## Invariant 10 — Search scope is explicit
 

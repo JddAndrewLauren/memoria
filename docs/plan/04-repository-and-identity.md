@@ -8,16 +8,15 @@ A representative repository:
 ```text
 memoria/
 │
-├── book.md
-├── outline.md
+├── book.md                           the book's brief
 │
 ├── chapters/
 │   └── 08/
-│       ├── chapter.md
+│       ├── chapter.md                the chapter's brief
 │       └── sections/
 │           └── 03/
-│               ├── draft.md
-│               └── state.md          includes the section's declared scope
+│               ├── draft.md          the prose
+│               └── section.md        the section's brief
 │
 ├── subjects/
 │   ├── people/
@@ -46,9 +45,6 @@ memoria/
 ├── research/
 │   ├── memos/
 │   └── packets/
-│
-├── impacts/
-│   └── IMP-20261103-004.md
 │
 ├── sources/
 │   ├── raw/
@@ -79,6 +75,53 @@ The repository should remain understandable without Memoria-specific software.
 
 ---
 
+## 2.1 Briefs
+
+Every level of the manuscript carries exactly one editable prose field: **its brief**.
+`book.md`, `chapter.md` and `section.md` are the same artifact at three scales, and
+they are the manuscript layer's entire durable footprint besides the prose itself.
+
+A brief says what this part of the book is, what it covers and what it is for. It
+holds, as prose rather than as fields:
+
+- the **declared scope** — "June 1839 to October 1841, and my interactions with Bob
+  about the conflict in the capital" (§32);
+- **craft direction** — "Bob should read as unreliable early on", which part 06 §8.6
+  excludes from entries because it is not a claim about the world;
+- whatever else the author needs the next session to know before it starts.
+
+**There are no separate fields.** Purpose, checkpoint, current approach, next step
+and rejected approaches are not stored: §39's list is withdrawn, and what survives of
+it is regenerable from the session records and git.
+
+A brief has three write paths, all of them landing in the same field:
+
+| Path | Authorization |
+|---|---|
+| The author writes or edits it | direct; supreme |
+| An AI writes it from a conversation the author answered | §19.3 authorization, one level below prose |
+| An AI drafts it by summarizing prose that already exists | produces an **unconfirmed** brief |
+
+The third is how a pre-Memoria manuscript enters the system. An unconfirmed brief is
+structurally partial — summarizing recovers coverage but never intent — and it is
+**circular**, having been derived from the prose it would otherwise constrain, so
+assembly uses it but brief drift is not evaluated against it. Editing or confirming it
+makes it the author's. This is what the desktop design's `LEGACY DRAFT` badge is
+marking: a state of the brief, not of the prose, which is why §3 needs no new class
+for it.
+
+Nothing but a deliberate act on the brief may write a brief. In particular, a finding
+may not be resolved by editing the brief from a review card — rewriting a passage is
+bounded and reviewable in a diff, while rewriting a brief silently changes what every
+future audit checks and what every future assembly loads.
+
+**The outline is not an artifact.** The ordered tree of chapters and sections, with
+their briefs, *is* the outline; a planned section is one whose brief is written and
+whose draft is empty. Reordering renumbers directories, and the stable IDs of §4 keep
+references intact.
+
+---
+
 ---
 
 # 3. State Classes and Ownership
@@ -89,12 +132,12 @@ Every durable artifact belongs to an explicit class.
 |---|---|---|
 | **Evidence** | `sources/**` | Immutable documentary record |
 | **Interaction record** | `sessions/**` | Immutable record of conversations |
-| **Manuscript** | `chapters/**/draft.md` | Canonical book prose; human- or AI-authored, but AI writes require author authorization |
+| **Manuscript** | `chapters/**/draft.md`, and the briefs `book.md` / `chapter.md` / `section.md` | Canonical book prose and intent; human- or AI-authored, but AI writes require author authorization |
 | **Subjects** | `subjects/**` entries — author text, match terms, settlements | Author-authored and supreme; see §8.6 |
 | **Claims** | `claims/**` | Propositions accreted from settlements, or asserted outright |
-| **Working state** | `state.md`, decisions, questions, research, impacts | Primarily machine-maintained |
+| **Working state** | decisions, questions, research | Primarily machine-maintained |
 | **Change record** | Git history + `changes/**` | Record of direct human, AI, and Curator edits |
-| **Derived** | digests, indexes, dependency data, **gathered sets**, **candidates**, audit findings | Machine-only, rebuildable |
+| **Derived** | digests, indexes, **gathered sets**, **candidates**, **appearances**, memoized audit judgements, findings | Machine-only, rebuildable |
 
 These distinctions matter because different classes have different epistemic meanings.
 
@@ -121,7 +164,6 @@ SRC-000184                normalized source record
 SES-20260912-1432         AI session
 SES-20260912-1432#T017    exact transcript turn
 CHG-20261014-0917         direct change
-IMP-20261103-004          manuscript-impact record
 CLM-0041                  important claim
 RES-20261018-003          research memo
 DEC-0088                  author decision
@@ -140,6 +182,38 @@ SUB-themes/control        entry
 A **gathered set** is not addressable. It is derived, it asserts nothing, and it is
 regenerated by `memoria rebuild` (§42). A **pin**, an **exclusion** and a
 **settlement** are attributable author acts and survive the rebuild.
+
+## 4.1 Manuscript passages have no durable identity
+
+**Nothing canonical points at a paragraph of manuscript prose.** There is no anchoring
+mechanism, because there is nothing left that needs one.
+
+The problem was never about evidence: `SRC-000184 ¶17` is stable by construction,
+because sources are immutable (Invariant 3). Only mutable prose drifts. Each of the
+things that used to require a durable pointer into `draft.md` now lives somewhere
+better:
+
+| Was anchored to a passage | Now |
+|---|---|
+| Findings, impact records | recomputed from their disagreement set; nothing accumulates |
+| Entry-to-passage edges | **appearances** (part 06 §8.11), held in the index and rebuildable |
+| Settlements | stored on the entry; the passage where the conflict surfaced is provenance of the act, recorded as the session it happened in |
+| Write-time provenance | `git blame` to a commit, the commit to a session, the session to its context manifest (§33) — composed by `trace()` (§26) |
+| Dismissal memory | craft direction in the section's brief, resolved as prose at audit time |
+
+This closes the deferral recorded in `poc-plan.md` §4. That deferral ruled out "store
+no pointers, recompute everything" **on principle**, because §38's dismissal memory
+was thought to need stable passage identity. It does not: a dismissal that is worth
+remembering is craft direction, and craft direction belongs in the brief.
+
+The index is free to key its own tables positionally or by content hash against the
+git revision it was built at, because §42 guarantees that deleting it destroys nothing.
+A cache key is not an identity.
+
+**The cost, accepted knowingly.** A finding you decline that cannot be expressed as
+craft direction has nowhere to go and will be raised again the next time you audit
+that passage. Recurrence is treated as a signal that the brief or the entry is missing
+something, rather than as noise to be suppressed.
 
 Ordinary Markdown links remain the primary human-facing linking mechanism.
 
@@ -185,7 +259,9 @@ This includes:
 - generated digests;
 - **subject candidates**;
 - **gathered sets**;
-- **audit findings and entry-to-passage edges**.
+- **appearances**;
+- **memoized audit judgements, and the staleness map derived from their keys**;
+- **findings**.
 
 The curated overlay is **not** derived and is never regenerated: author text, match
 terms, pins, exclusions and settlements survive the rebuild because they are
@@ -194,56 +270,3 @@ attributable author acts, not machine output.
 Deleting `.memoria/index.db` must never destroy intellectual work.
 
 ---
-
-<!-- Editorial note appended 2026-08-31, when the desktop design was incorporated. -->
-<!-- The section text above is unchanged. -->
-
-## Editorial note — the desktop design
-
-Every locator the design puts on screen — `Ch 2 ¶7`, `SRC-0184 ¶17`,
-`Chapter 2 ¶14–17` — assumes the §4 anchoring question is settled. Past mock data,
-the interface cannot be built before that decision, which makes it a UI blocker as
-well as a Curator one.
-
-Three smaller collisions:
-
-- The design writes `SRC-0184` where §4's example is `SRC-000184`. Every other id on
-  screen — `IMP-20261103-004`, `RES-20261018-003`, `DEC-0088`,
-  `SES-20260912-1432 · T017` — is §4's own, unchanged.
-- Pre-Memoria manuscript prose is badged `LEGACY DRAFT`. §3's state classes have no
-  such state.
-- The sidebar edits manuscript structure: add chapter, add section, drag to reorder.
-  §2 gives `outline.md` a place in the repository; no operation changes it.
-
-Full reconciliation: [19. Desktop UI — as designed](19-desktop-ui.md) §19.11.
-
-
----
-
-<!-- Editorial note appended 2026-08-31, from the subject-system grilling session. -->
-
-## Editorial note — the anchoring problem is narrower than §4 assumes
-
-The note above says the interface cannot be built before the §4 anchoring decision.
-That still holds for what the UI *displays*. What must be **durably stored** is much
-smaller than the plan assumed.
-
-Under part 06 §8.11 the entry-to-passage edge is drawn twice, and only one of them is
-durable:
-
-| | stability required |
-|---|---|
-| Edges derived by the audit | none — recomputed every pass; drift is survivable |
-| Impact findings | none — a finding is its disagreement set, recomputed |
-| **Settlements** | **durable** — "chosen over SRC-0184, at this passage, on this date" |
-| **Write-time provenance** | **durable** — what a passage was written from is a fact about the past |
-
-`poc-plan.md` §4 defers anchoring with the safe default *"do not accumulate a large
-body of stored impact records before deciding."* That default is now cheap to keep:
-impact records are not accumulated at all. They recompute.
-
-The anchors that must hold are attached to **rare, deliberate, author-triggered acts**
-rather than to bulk machine output. That is a materially easier problem than the one
-§4 poses, and it may change which of the four options in `poc-plan.md` §4 is right.
-
-The decision itself remains open.

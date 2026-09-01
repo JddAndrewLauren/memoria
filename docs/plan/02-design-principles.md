@@ -215,6 +215,28 @@ Once authorized, the AI should be allowed to perform the work directly rather th
 
 ---
 
+## 1.10a Enumerations are withdrawn on contact with use
+
+A recurring failure in this plan has been specifying a **fixed list of kinds** before
+anything was built. Three have now been withdrawn:
+
+| Enumeration | Replaced by |
+|---|---|
+| §18's ten impact categories | a finding is a disagreement set; its shape is read from the set |
+| §19.3's four review verdicts | the same; the design's labels are illustrative only |
+| §17's seven impact questions | each subject declares the questions it asks (part 06 §8.1) |
+
+The pattern is the same each time. A category list is a schema imposed before the
+material demanded one, it is always slightly wrong, and it hardens into data structures
+that outlive the reasoning behind it. The replacements share a shape too: the thing
+that used to be enumerated centrally is **derived from a set**, or **stated locally by
+whoever owns it**.
+
+Treat any new fixed list of kinds in this plan as suspect until something real needs
+it. This is §1.11 applied to vocabulary rather than to files.
+
+---
+
 ## 1.11 Structure should earn its existence
 
 Memoria begins with a deliberately small ontology.

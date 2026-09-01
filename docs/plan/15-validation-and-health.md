@@ -20,8 +20,8 @@ checks for:
 - `[source]` assertions without sources;
 - `[author]` assertions without author records;
 - `[inferred]` assertions without a basis;
-- AI manuscript writes without an identifiable authorization;
-- manuscript-impact records whose triggers no longer resolve;
+- AI manuscript writes without an identifiable authorization — **including writes to a
+  brief**, which is manuscript-class and has an AI write path of its own (§2.1);
 - derived summaries that introduce unsupported claims;
 - provenance chains that terminate in another derived artifact instead of original material.
 
@@ -54,7 +54,9 @@ The test should verify that it:
 
 ## 43.2 Resumption test
 
-Can Memoria resume a section after a long absence?
+Can Memoria resume a section after a long absence — from its **brief**, its draft and
+an audit on request, with no stored checkpoint to read? See part 12 §39. Nothing in the
+Thoreau corpus exercises this; only the authorship track can.
 
 ## 43.3 Date-leakage test
 
@@ -113,7 +115,9 @@ Every consequential real-world failure becomes a regression test.
 Memoria should periodically be able to report:
 
 - sections not worked on recently;
-- stale checkpoints;
+- **paragraphs, sections and chapters that are not current**, and why — never audited,
+  edited since, or touching an entry that has changed;
+- sections whose brief is still **unconfirmed**;
 - old unresolved questions;
 - themes with substantial new evidence but no recent review;
 - arcs whose current interpretation conflicts with recent manuscript changes;
@@ -122,12 +126,14 @@ Memoria should periodically be able to report:
 - broken provenance;
 - unprocessed source additions;
 - research projects left incomplete;
-- manuscript passages affected by changed chronology, themes, arcs, claims, or source status;
-- manuscript-impact suggestions awaiting a decision;
-- dismissed impacts that may deserve reopening because materially new evidence appeared.
+- manuscript passages affected by changed chronology, themes, arcs, claims, or source
+  status — which is the staleness map, not a scan.
 
 This is a health report, not an approval queue.
 
-Normal Curator work remains autonomous.
+**Everything in it is computed without a model** — hash comparisons, git facts and
+mechanical validation — which is why it may run autonomously even though the audit
+(Invariant 8, as amended) may not. It reports what has gone stale; it does not form an
+opinion about the prose.
 
 ---
