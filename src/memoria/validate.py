@@ -8,30 +8,36 @@ from pathlib import Path
 
 import yaml
 
-MANIFEST_RELATIVE_PATH = "raw/gutenberg/manifest.yaml"
-NORMALIZED_RELATIVE_PATH = "sources/normalized"
-ANSWER_KEY_RELATIVE_PATH = "benchmark/answer-key.yaml"
+from memoria.records import NORMALIZED_RELATIVE_PATH
+
+# Where the acquisition manifest sits inside the evidence repo. A default,
+# not a constant of the system: it was "raw/gutenberg/manifest.yaml" while the
+# corpus was Thoreau's Gutenberg texts, and a different archive will lay
+# itself out differently. Override per call.
+DEFAULT_MANIFEST_RELATIVE_PATH = "raw/manifest.yaml"
 
 _SRC_ID_RE = re.compile(r"SRC-\d{6}", re.IGNORECASE)
-# A record's body is a run of `<a id="src-000184-p17"></a>` anchors, each
-# followed by its paragraph - the form _record_to_markdown writes.
-_ANCHOR_RE = re.compile(r'<a id="(?P<anchor>[a-z0-9-]+)"></a>')
 
 
-def validate(evidence_root: Path, repo_root: Path | None = None) -> list[str]:
+def validate(
+    evidence_root: Path,
+    repo_root: Path | None = None,
+    manifest_relative_path: str = DEFAULT_MANIFEST_RELATIVE_PATH,
+) -> list[str]:
     """Verify every raw file listed in the manifest matches its recorded hash,
-    that every SRC- ID referenced in a normalized record resolves to an
-    actual record, and that the answer key still describes the corpus it was
-    built from.
+    and that every SRC- ID referenced in a normalized record resolves to an
+    actual record.
 
     Returns a list of human-readable error messages; an empty list means the
-    corpus matches the manifest exactly, no SRC- ID is left unresolved, and
-    every answer-key row still quotes the paragraphs it names.
+    corpus matches the manifest exactly and no SRC- ID is left unresolved.
+
+    The answer-key staleness check that used to run here is gone with the
+    answer key itself (docs/open-problems.md §2.4).
     """
     evidence_root = Path(evidence_root)
     repo_root = Path(repo_root) if repo_root is not None else Path(".")
 
-    manifest_path = evidence_root / MANIFEST_RELATIVE_PATH
+    manifest_path = evidence_root / manifest_relative_path
     manifest = yaml.safe_load(manifest_path.read_text())
 
     errors = []
@@ -47,7 +53,6 @@ def validate(evidence_root: Path, repo_root: Path | None = None) -> list[str]:
             errors.append(f"hash mismatch: {entry['path']}")
 
     errors.extend(_validate_normalized_src_ids(repo_root))
-    errors.extend(_validate_answer_key(repo_root))
 
     return errors
 
@@ -73,76 +78,4 @@ def _validate_normalized_src_ids(repo_root: Path) -> list[str]:
                     f"unresolved SRC- ID: {referenced_id} referenced in "
                     f"{path.name}"
                 )
-    return errors
-
-
-def _read_paragraphs(path: Path) -> dict[str, str]:
-    """Map anchor id to paragraph text for one normalized record file."""
-    content = path.read_text(encoding="utf-8")
-    paragraphs: dict[str, str] = {}
-    matches = list(_ANCHOR_RE.finditer(content))
-    for n, match in enumerate(matches):
-        end = matches[n + 1].start() if n + 1 < len(matches) else len(content)
-        paragraphs[match.group("anchor")] = content[match.end() : end].strip()
-    return paragraphs
-
-
-def _validate_answer_key(repo_root: Path) -> list[str]:
-    """Check the answer key still describes the corpus it was built from.
-
-    The key is committed while the normalized records it points into are
-    derived and gitignored, so the two can drift apart silently - a
-    normalizer change that renumbers a paragraph would leave every affected
-    row quoting text that is no longer at the anchor it names. The key
-    carries the target text verbatim precisely so that drift is detectable
-    rather than merely possible: this compares the two.
-    """
-    key_path = repo_root / ANSWER_KEY_RELATIVE_PATH
-    normalized_dir = repo_root / NORMALIZED_RELATIVE_PATH
-    if not key_path.is_file() or not normalized_dir.is_dir():
-        return []
-
-    key = yaml.safe_load(key_path.read_text(encoding="utf-8"))
-    cache: dict[str, dict[str, str]] = {}
-
-    def paragraphs_for(record_id: str) -> dict[str, str] | None:
-        if record_id not in cache:
-            path = normalized_dir / f"{record_id}.md"
-            if not path.is_file():
-                return None
-            cache[record_id] = _read_paragraphs(path)
-        return cache[record_id]
-
-    errors = []
-    for link in key.get("links", []):
-        link_id = link["link_id"]
-        source = paragraphs_for(link["source_record_id"])
-        if source is None:
-            errors.append(
-                f"answer key {link_id}: source record "
-                f"{link['source_record_id']} does not exist"
-            )
-        elif link["source_anchor"] not in source:
-            errors.append(
-                f"answer key {link_id}: source anchor {link['source_anchor']} "
-                "does not exist"
-            )
-        if link["status"] != "resolved":
-            continue
-        quoted = []
-        for anchor in link["target_anchors"]:
-            record_id = anchor.rsplit("-p", 1)[0].upper()
-            target = paragraphs_for(record_id)
-            if target is None or anchor not in target:
-                errors.append(
-                    f"answer key {link_id}: target anchor {anchor} does not exist"
-                )
-                quoted = None
-                break
-            quoted.append(target[anchor])
-        if quoted is not None and "\n\n".join(quoted) != link["target_text"]:
-            errors.append(
-                f"answer key {link_id}: target_text no longer matches the "
-                "paragraphs at its anchors"
-            )
     return errors

@@ -1,11 +1,5 @@
-import os
-
-import pytest
-
-from memoria.normalize import NormalizedRecord
-from memoria.index import build_index, rebuild, search
-
-EVIDENCE_ROOT_ENV_VAR = "MEMORIA_EVIDENCE_ROOT"
+from memoria.index import INDEX_RELATIVE_PATH, build_index, rebuild, search
+from memoria.records import NormalizedRecord
 
 
 def _record(record_id, paragraphs, source_type="journal"):
@@ -16,7 +10,7 @@ def _record(record_id, paragraphs, source_type="journal"):
         event_date="Oct. 22.",
         date_confidence="unresolved",
         contemporaneous=True,
-        original_file="raw/gutenberg/57393-journal-01/pg57393.txt",
+        original_file="raw/vol-01/text.txt",
         original_locator="Journal I, entry dated Oct. 22.",
         paragraphs=paragraphs,
     )
@@ -53,7 +47,7 @@ def test_search_returns_the_specific_paragraph_anchor_that_matched(tmp_path):
 def test_search_can_exclude_editorial_records(tmp_path):
     db_path = tmp_path / "index.db"
     records = [
-        _record("SRC-000003", ["Thoreau saw a heron by the pond."], source_type="journal"),
+        _record("SRC-000003", ["He saw a heron by the pond."], source_type="journal"),
         _record(
             "SRC-000004",
             ["The editor notes that a heron was a common sight."],
@@ -70,7 +64,7 @@ def test_search_can_exclude_editorial_records(tmp_path):
 def test_search_includes_editorial_records_by_default(tmp_path):
     db_path = tmp_path / "index.db"
     records = [
-        _record("SRC-000003", ["Thoreau saw a heron by the pond."], source_type="journal"),
+        _record("SRC-000003", ["He saw a heron by the pond."], source_type="journal"),
         _record(
             "SRC-000004",
             ["The editor notes that a heron was a common sight."],
@@ -84,159 +78,41 @@ def test_search_includes_editorial_records_by_default(tmp_path):
     assert {r.src_id for r in results} == {"SRC-000003", "SRC-000004"}
 
 
-@pytest.mark.m0
-@pytest.mark.skipif(
-    EVIDENCE_ROOT_ENV_VAR not in os.environ,
-    reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
-)
-def test_rebuild_writes_normalized_records_and_builds_a_searchable_index(tmp_path):
-    evidence_root = os.environ[EVIDENCE_ROOT_ENV_VAR]
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+def test_rebuild_regenerates_an_index_deleted_from_disk(tmp_path):
+    """§42: derived state carries no authority and can always be thrown away.
 
-    rebuild(evidence_root, repo_root)
+    The contract survives the retirement of the corpus even though no
+    normalizer feeds it any more (docs/open-problems.md 2.4).
+    """
+    from memoria.records import NORMALIZED_RELATIVE_PATH, write_normalized_records
 
-    normalized = list((repo_root / "sources" / "normalized").glob("SRC-*.md"))
-    # 587 journal + 130 letter + 27 book records (issue #6 review round 1:
-    # rebuild() used to call normalize_journals alone, silently deleting
-    # every letter record on a rebuild).
-    assert len(normalized) == 744
+    records = [
+        NormalizedRecord(
+            id="SRC-000184",
+            source_type="journal",
+            recorded_date="Oct. 22.",
+            event_date="Oct. 22., 1845",
+            date_confidence="inferred",
+            contemporaneous=True,
+            original_file="raw/vol-01/text.txt",
+            original_locator="Journal I, entry dated Oct. 22.",
+            paragraphs=["A blue heron flew over."],
+        )
+    ]
+    write_normalized_records(records, tmp_path / NORMALIZED_RELATIVE_PATH)
 
-    db_path = repo_root / ".memoria" / "index.db"
-    assert db_path.is_file()
-
-    results = search(db_path, "woodchuck")
-    assert len(results) > 0
-
-
-@pytest.mark.m0
-@pytest.mark.skipif(
-    EVIDENCE_ROOT_ENV_VAR not in os.environ,
-    reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
-)
-def test_rebuild_after_deleting_the_index_reproduces_identical_search_results(
-    tmp_path,
-):
-    evidence_root = os.environ[EVIDENCE_ROOT_ENV_VAR]
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-
-    rebuild(evidence_root, repo_root)
-    db_path = repo_root / ".memoria" / "index.db"
-    before = search(db_path, "woodchuck")
+    rebuild(tmp_path)
+    db_path = tmp_path / INDEX_RELATIVE_PATH
+    before = [(r.src_id, r.anchor) for r in search(db_path, "heron")]
+    assert before
 
     db_path.unlink()
-    rebuild(evidence_root, repo_root)
-    after = search(db_path, "woodchuck")
+    rebuild(tmp_path)
 
-    assert before == after
-
-
-@pytest.mark.m0
-@pytest.mark.skipif(
-    EVIDENCE_ROOT_ENV_VAR not in os.environ,
-    reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
-)
-def test_rebuild_resolves_years_and_never_leaves_a_journal_record_unresolved(
-    tmp_path,
-):
-    # Regression test (PR #50 review round 1): rebuild() re-derives
-    # normalized records from evidence via normalize_journals alone, which
-    # produces date_confidence: unresolved - it must also call
-    # resolve_years(), or every rebuild silently discards year resolution
-    # (docs/normalized-record-schema.md's date_confidence contract, and
-    # rebuild()'s own "losing nothing" (§42) docstring).
-    #
-    # Scoped to journal records deliberately (issue #6 review round 1):
-    # resolve_years() only ever touches journal records (it filters by
-    # original_file against JOURNAL_VOLUMES). Letters get their
-    # date_confidence resolved separately, directly inside
-    # normalize_letters (issue #57) - 126 of 130 real letters resolve to
-    # `inferred` (an explicit, unambiguous year in the dateline), and the
-    # remaining 4 stay `unresolved` (see docs/normalized-record-schema.md's
-    # Letters section and tests/test_letters.py's real-corpus split test).
-    evidence_root = os.environ[EVIDENCE_ROOT_ENV_VAR]
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-
-    records = rebuild(evidence_root, repo_root)
-    journal_records = [r for r in records if r.source_type == "journal"]
-    letter_records = [r for r in records if r.source_type == "letter"]
-
-    assert all(r.date_confidence != "unresolved" for r in journal_records)
-    assert {r.date_confidence for r in journal_records} <= {
-        "exact",
-        "inferred",
-        "chapter-only",
-    }
-    assert letter_records, "rebuild() must not drop the letter records"
-    assert {r.date_confidence for r in letter_records} <= {"inferred", "unresolved"}
-    assert any(r.date_confidence == "inferred" for r in letter_records)
+    assert [(r.src_id, r.anchor) for r in search(db_path, "heron")] == before
 
 
-@pytest.mark.m0
-@pytest.mark.skipif(
-    EVIDENCE_ROOT_ENV_VAR not in os.environ,
-    reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
-)
-def test_rebuild_strips_editorial_apparatus_and_exclude_editorial_excludes_it(
-    tmp_path,
-):
-    # Regression test for PR #51 review round 1, BLOCKING 1: a plain
-    # `rebuild()` used to index unstripped paragraphs (never calling
-    # extract_editorial_apparatus) and never index EditorialRecords at
-    # all, so exclude_editorial excluded nothing. A query that only
-    # matches editorial apparatus text must find real matches by default
-    # and none once excluded, and every remaining match must be tagged
-    # source_type "editorial".
-    evidence_root = os.environ[EVIDENCE_ROOT_ENV_VAR]
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-
-    rebuild(evidence_root, repo_root)
-    db_path = repo_root / ".memoria" / "index.db"
-
-    with_editorial = search(db_path, "sic")
-    without_editorial = search(db_path, "sic", exclude_editorial=True)
-
-    assert len(with_editorial) > 0
-    assert len(without_editorial) == 0
-    assert {r.source_type for r in with_editorial} == {"editorial"}
-
-    editorial_written = list((repo_root / "sources" / "editorial").glob("ED-*.md"))
-    # See tests/test_cli.py::test_normalize_writes_editorial_records_under_sources_editorial
-    # for the count breakdown (issue #56 extended this to the letters volume).
-    assert len(editorial_written) == 1287
-
-
-@pytest.mark.m0
-@pytest.mark.skipif(
-    EVIDENCE_ROOT_ENV_VAR not in os.environ,
-    reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
-)
-def test_search_excludes_letters_editorial_content(tmp_path):
-    # Issue #56's own acceptance criterion: search(..., exclude_editorial=
-    # True) must exclude the letters volume's editorial content too, not
-    # just the journals' - proven against real corpus content, not a
-    # synthetic record. "Concord Battle-Ground" is Sanborn's illustration
-    # caption for a real letter (SRC-000592) - a standalone bracketed
-    # aside stripped from the letter's own evidence text and extracted as
-    # its own editorial record.
-    evidence_root = os.environ[EVIDENCE_ROOT_ENV_VAR]
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-
-    rebuild(evidence_root, repo_root)
-    db_path = repo_root / ".memoria" / "index.db"
-
-    with_editorial = search(db_path, '"Battle-Ground"')
-    without_editorial = search(db_path, '"Battle-Ground"', exclude_editorial=True)
-
-    assert any(
-        r.source_type == "editorial" and r.anchor == "src-000592-p7"
-        for r in with_editorial
-    )
-    assert not any(
-        r.source_type == "editorial" and r.anchor == "src-000592-p7"
-        for r in without_editorial
-    )
+def test_rebuild_reports_no_records_when_none_exist(tmp_path):
+    """With no corpus chosen there is nothing to index, and that is not an
+    error - it is the honest state."""
+    assert rebuild(tmp_path) == []
