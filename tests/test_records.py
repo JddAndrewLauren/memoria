@@ -64,6 +64,14 @@ def test_type_specific_fields_are_written_when_set():
     assert "dateline: Concord" in markdown
 
 
+def test_record_carries_raw_sha256_and_converter():
+    markdown = record_to_markdown(
+        _record(raw_sha256="a" * 64, converter="plain-text 1")
+    )
+    assert f"raw_sha256: {'a' * 64}" in markdown
+    assert "converter: plain-text 1" in markdown
+
+
 def test_records_round_trip_through_disk(tmp_path):
     """Every field the index reads survives a write/read cycle."""
     original = _record()

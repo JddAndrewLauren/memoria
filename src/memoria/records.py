@@ -47,6 +47,14 @@ class NormalizedRecord:
     contemporaneous: bool
     original_file: str
     original_locator: str
+    # The raw unit's hash, and the converter (name + pinned version) that
+    # produced this body, both as the manifest ledger recorded them at
+    # conversion time (ADR-0006, part 05 §5.4). A normalization run compares
+    # these to the manifest to decide whether to reconvert. Default "" so
+    # every existing construction of a record - most of them predating the
+    # ledger - keeps working; a real normalizer always sets both.
+    raw_sha256: str = ""
+    converter: str = ""
     paragraphs: list[str] = field(default_factory=list)
     # Letter-specific structured fields. None for records that are not
     # letters; always set for letter records.
@@ -104,6 +112,8 @@ def record_to_markdown(record: NormalizedRecord) -> str:
         "contemporaneous": record.contemporaneous,
         "original_file": record.original_file,
         "original_locator": record.original_locator,
+        "raw_sha256": record.raw_sha256,
+        "converter": record.converter,
     }
     # Type-specific fields are included only when set, so a record that is
     # not a letter or a book carries no empty keys for fields that do not
@@ -170,6 +180,8 @@ _REQUIRED_FIELDS = (
     "contemporaneous",
     "original_file",
     "original_locator",
+    "raw_sha256",
+    "converter",
 )
 _OPTIONAL_FIELDS = ("recipient", "dateline", "salutation", "work", "chapter")
 
