@@ -99,4 +99,11 @@ def test_normalize_writes_records_under_sources_normalized(tmp_path):
 
     assert result.returncode == 0
     written = list((tmp_path / "sources" / "normalized").glob("SRC-*.md"))
-    assert len(written) == 558
+    # 558 journal records (issue #3) + 130 letter records (issue #6).
+    assert len(written) == 688
+    recipients_path = tmp_path / "sources" / "normalized" / "recipients.yaml"
+    assert recipients_path.is_file()
+    import yaml
+
+    table = yaml.safe_load(recipients_path.read_text())
+    assert len(table) == 43

@@ -5,7 +5,13 @@ import os
 import sys
 from pathlib import Path
 
-from memoria.normalize import normalize_journals, write_normalized_records
+from memoria.normalize import (
+    normalize_journals,
+    normalize_letters,
+    recipients_table,
+    write_normalized_records,
+    write_recipients_table,
+)
 from memoria.validate import NORMALIZED_RELATIVE_PATH, validate
 
 EVIDENCE_ROOT_ENV_VAR = "MEMORIA_EVIDENCE_ROOT"
@@ -38,7 +44,10 @@ def main(argv=None):
     )
     subparsers.add_parser(
         "normalize",
-        help="Normalize the journal volumes into per-entry sources/normalized/ records",
+        help=(
+            "Normalize the journal and letters volumes into per-entry "
+            "sources/normalized/ records"
+        ),
     )
 
     args = parser.parse_args(argv)
@@ -53,10 +62,21 @@ def main(argv=None):
         return 0
 
     if args.command == "normalize":
-        records = normalize_journals(evidence_root())
+        journal_records = normalize_journals(evidence_root())
+        letter_records = normalize_letters(
+            evidence_root(), start_id=len(journal_records) + 1
+        )
+        records = journal_records + letter_records
         output_root = repo_root() / NORMALIZED_RELATIVE_PATH
         written = write_normalized_records(records, output_root)
         print(f"normalize: wrote {len(written)} records to {output_root}")
+        table = recipients_table(letter_records)
+        recipients_path = write_recipients_table(
+            table, output_root / "recipients.yaml"
+        )
+        print(
+            f"normalize: wrote {len(table)} recipients to {recipients_path}"
+        )
         return 0
 
     parser.print_help()
