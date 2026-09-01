@@ -218,10 +218,59 @@ def test_resolve_years_carries_the_running_year_across_a_chapter_boundary(tmp_pa
     assert feb_entry.event_date == "Feb. 22, 1847"
 
 
-def test_resolve_years_leaves_an_entry_with_no_governing_chapter_chapter_only(tmp_path):
-    # An entry preceding any chapter marker has no year context at all -
-    # RECON.md §3's description of J02 Chapter I's undated fragments. Must
-    # not invent an event_date.
+def test_resolve_years_marks_a_volumes_undated_opening_fragments_chapter_only(
+    tmp_path,
+):
+    # RECON.md §3: J02 Chapter I "opens with undated fragments separated by
+    # `*   *   *   *   *` dividers ... They need `date_confidence:
+    # chapter-only` - scoped to 1850, no day." The chapter gives the year;
+    # the fragment gives no day, so neither date field is filled in.
+    evidence_root = tmp_path / "thoreau-evidence"
+    fragment_volume = (
+        "The Project Gutenberg eBook of Journal 95\r\n"
+        "\r\n"
+        "*** START OF THE PROJECT GUTENBERG EBOOK JOURNAL 95 ***\r\n"
+        "\r\n"
+        "I\r\n"
+        "\r\n"
+        "1850 (ÆT. 32-33)\r\n"
+        "\r\n"
+        "The Hindoos are more serenely religious than the Hebrews.\r\n"
+        "\r\n"
+        "       *       *       *       *       *\r\n"
+        "\r\n"
+        "Man flows at once to God as soon as the channel is open.\r\n"
+        "\r\n"
+        "_June 20._ I can see from my window three or four cows.\r\n"
+        "\r\n"
+        "END OF VOLUME 95\r\n"
+        "\r\n"
+        "*** END OF THE PROJECT GUTENBERG EBOOK JOURNAL 95 ***\r\n"
+    )
+    _write_fake_volumes(evidence_root, [fragment_volume, _EMPTY_SECOND_VOLUME])
+    records = normalize_journals(evidence_root)
+
+    resolve_years(records, evidence_root)
+
+    fragments = [r for r in records if not r.recorded_date]
+    assert len(fragments) == 2
+    for fragment in fragments:
+        assert fragment.date_confidence == "chapter-only"
+        assert fragment.event_date == ""
+
+    # The dated entry that follows still resolves against the same chapter -
+    # the fragments take no part in the record-to-heading pairing.
+    dated_entry = records[2]
+    assert dated_entry.recorded_date == "June 20."
+    assert dated_entry.date_confidence == "inferred"
+    assert dated_entry.event_date == "June 20., 1850"
+
+
+def test_resolve_years_leaves_an_entry_with_no_governing_chapter_unresolved(tmp_path):
+    # A *dated* entry preceding any chapter marker has a heading to resolve
+    # but no year context to resolve it against - distinct from
+    # `chapter-only`, which is the opposite case (a chapter year, but no
+    # heading of its own). Must not invent an event_date either way.
     evidence_root = tmp_path / "thoreau-evidence"
     headerless_volume = (
         "The Project Gutenberg eBook of Journal 97\r\n"
@@ -247,7 +296,7 @@ def test_resolve_years_leaves_an_entry_with_no_governing_chapter_chapter_only(tm
 
     chapterless_entry = records[0]
     assert chapterless_entry.recorded_date == "June 20."
-    assert chapterless_entry.date_confidence == "chapter-only"
+    assert chapterless_entry.date_confidence == "unresolved"
     assert chapterless_entry.event_date == chapterless_entry.recorded_date
 
     dated_entry = records[1]
@@ -271,7 +320,14 @@ class TestAgainstTheRealEvidenceCorpus:
 
     def test_every_record_carries_event_date_and_a_recognized_confidence(self, records):
         for record in records:
-            assert record.event_date
+            # A `chapter-only` fragment is the one record shape with no
+            # event_date at all: it has no date heading, so there is no date
+            # to carry and none may be invented. Every dated record still
+            # carries one.
+            if record.date_confidence == "chapter-only":
+                assert record.event_date == ""
+            else:
+                assert record.event_date
             assert record.date_confidence in ("exact", "inferred", "chapter-only")
 
     def test_no_record_is_exact_without_a_weekday_in_its_heading(self, records):
@@ -298,30 +354,33 @@ class TestAgainstTheRealEvidenceCorpus:
     def test_j02_chapter_i_entries_carry_no_invented_event_date_when_undated(
         self, records
     ):
-        # normalize_journals discards J02 Chapter I's undated opening
-        # fragments by construction (docs/normalized-record-schema.md,
-        # "Known data loss") - none of the 558 real records are undated,
-        # so no record currently exercises the chapter-only branch. This
-        # test asserts the invariant chapter-only exists to guarantee:
-        # nothing gets an event_date it did not earn.
-        for record in records:
-            if record.date_confidence == "chapter-only":
-                assert record.event_date == record.recorded_date
+        # The invariant chapter-only exists to guarantee: nothing gets an
+        # event_date it did not earn. J02 Chapter I's 29 undated opening
+        # fragments are the records that exercise it - they carry neither a
+        # recorded_date nor an event_date, and they are the only journal
+        # records that carry neither.
+        undated = [r for r in records if r.date_confidence == "chapter-only"]
+        assert len(undated) == 29
+        for record in undated:
+            assert record.recorded_date == ""
+            assert record.event_date == ""
+            assert record.original_file.endswith("pg59031.txt")
+            assert "Chapter I, undated fragment" in record.original_locator
 
     def test_confidence_counts_reconcile_with_the_weekday_checked_headings(self, records):
         # Per docs/normalized-record-schema.md, this slice resolves all
-        # 558 records with no invented event_date and no chapter-only
-        # fragments in the current corpus (see the test above). ~100
+        # 587 records with no invented event_date: 558 dated entries, plus
+        # J02 Chapter I's 29 undated fragments as chapter-only. ~100
         # headings carry a weekday (issue #4); 152 actually do, of which 2
         # fail the checksum against a real calendar (SRC-000332's "Sept.
-        # 5. Saturday." - actually a Sunday in 1841; SRC-000464's "May 6.
+        # 5. Saturday." - actually a Sunday in 1841; SRC-000493's "May 6.
         # Monday." - actually a Tuesday in 1851), both surfaced as
         # warnings rather than marked exact.
         counts = Counter(r.date_confidence for r in records)
-        assert counts["chapter-only"] == 0
+        assert counts["chapter-only"] == 29
         assert counts["exact"] == 150
         assert counts["inferred"] == 408
-        assert sum(counts.values()) == 558
+        assert sum(counts.values()) == 587
 
     def test_weekday_checksum_failures_are_surfaced_as_warnings_not_silently_accepted(
         self, records
@@ -331,7 +390,7 @@ class TestAgainstTheRealEvidenceCorpus:
         warnings = resolve_years(fresh_records, evidence_root)
 
         assert any("SRC-000332" in w for w in warnings)
-        assert any("SRC-000464" in w for w in warnings)
+        assert any("SRC-000493" in w for w in warnings)
         mismatched = {r.id: r for r in fresh_records if r.id in ("SRC-000332", "SRC-000464")}
         for record in mismatched.values():
             assert record.date_confidence == "inferred"

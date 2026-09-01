@@ -284,9 +284,9 @@ def extract_editorial_apparatus(
     bracketed aside, one per interpolation, and one per introduction -
     each linked back to the evidence record and paragraph anchor it
     annotates (or, for a footnote whose marker fell in text this slice
-    does not cover - Torrey's Introduction, or J02's undated opening
-    fragments discarded by #3 - left unlinked rather than dropped, per
-    "nothing in this slice deletes anything").
+    does not cover - Torrey's Introduction, or J02's Chapter I heading
+    line - left unlinked rather than dropped, per "nothing in this slice
+    deletes anything").
     """
     evidence_root = Path(evidence_root)
     editorial: list[EditorialRecord] = []

@@ -75,10 +75,11 @@ def extract_cross_references(
     (issue #5's footnote records).
 
     A footnote whose marker fell outside this slice's covered entries
-    (``linked_record_id is None`` - Torrey's Introduction or J02's undated
-    opening fragments, both pre-existing, already-documented #3/#5 gaps) is
-    skipped: this issue's acceptance criteria require every cross-reference
-    to carry a resolved journal-side ``SRC-`` ID and anchor, and there is no
+    (``linked_record_id is None`` - Torrey's Introduction, or J02's Chapter
+    I heading line, both apparatus rather than any record's evidence; see
+    docs/editorial-record-schema.md's "Known gaps") is skipped: this
+    issue's acceptance criteria require every cross-reference to carry a
+    resolved journal-side ``SRC-`` ID and anchor, and there is no
     normalized record to point one at.
     """
     cross_references: list[CrossReference] = []

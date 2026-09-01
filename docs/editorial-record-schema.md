@@ -97,23 +97,30 @@ behind. Whitespace left by a removed span next to punctuation (e.g. "word
 
 ## Known gaps
 
-Not every footnote marker links to an evidence paragraph. Two already-
-documented gaps (both pre-existing #3 scope decisions, not defects here)
-leave a footnote's marker outside the entries this slice walks:
+Not every footnote marker links to an evidence paragraph. Two gaps leave a
+footnote's marker outside the entries this slice walks, and neither is a
+defect here:
 
 - **Torrey's Introduction** (Journal I) itself carries 3 footnote markers.
   The introduction is extracted whole as its own editorial record rather
   than further decomposed, so these 3 footnotes are extracted (their
   bodies are real, readable text) but left unlinked (`linked_record_id:
   null`).
-- **J02's undated opening fragments**, discarded by #3 ("Known data loss:
-  J02's undated opening fragments" in `docs/normalized-record-schema.md`),
-  carry 26 footnote markers for the same reason.
+- **J02's Chapter I heading line**, `1850 (ÆT. 32-33)[1]`, carries marker
+  `[1]`. The chapter heading is apparatus, not any record's evidence, so it
+  belongs to no record and its footnote is unlinked for the same reason.
 
 Per real-corpus counts: 880 footnotes total (508 J01 + 372 J02), of which
-851 (505 + 346) link to an evidence paragraph and 29 (3 + 26) do not, for
-the reasons above. Nothing is deleted either way - every footnote body is
+876 (505 + 371) link to an evidence paragraph and 4 (3 + 1) do not, for the
+reasons above. Nothing is deleted either way - every footnote body is
 extracted and readable regardless of whether it links.
+
+A third gap used to sit here: J02's undated opening fragments, discarded by
+an earlier pass of #3, took 26 footnote markers out of reach with them.
+Recovering those fragments as records
+(`docs/normalized-record-schema.md`, "J02's undated opening fragments")
+linked 25 of the 26 - all but the chapter-heading marker above - and with
+them 17 cross-references (`docs/cross-reference-schema.md`).
 
 ## Reconciliation against RECON.md
 
@@ -133,13 +140,17 @@ each footnote twice, once as the inline citation marker and once as the
 footnote list's own `[N]` number label, which is why the extracted
 `footnote` record count (880, one per distinct footnote) is roughly half
 this total rather than close to it. The 1,105 non-numeric spans split
-232 in-entry (86 standalone asides + 146 interpolations) against 873
+244 in-entry (90 standalone asides + 154 interpolations) against 861
 inside back-matter footnote bodies and the two introductions - already
-extracted whole as part of those records, not decomposed further.
-`tests/test_editorial.py`'s `TestAgainstTheRealEvidenceCorpus` pins both
-the raw-text reconciliation counts above and the extracted-record counts
-(880 footnotes, 86 standalone asides, 146 interpolations, 2
-introductions) rather than either number in isolation.
+extracted whole as part of those records, not decomposed further. (232
+in-entry on the first pass: recovering J02 Chapter I's undated opening
+fragments as records brought 4 more asides and 8 more interpolations
+within reach, among them "[Part of leaf missing here.]" and "[A third of a
+page torn out here.]".) `tests/test_editorial.py`'s
+`TestAgainstTheRealEvidenceCorpus` pins both the raw-text reconciliation
+counts above and the extracted-record counts (880 footnotes, 90 standalone
+asides, 154 interpolations, 2 introductions) rather than either number in
+isolation.
 
 ## Indexing (issue #7's `memoria rebuild`)
 

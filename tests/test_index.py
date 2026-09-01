@@ -96,10 +96,10 @@ def test_rebuild_writes_normalized_records_and_builds_a_searchable_index(tmp_pat
     rebuild(evidence_root, repo_root)
 
     normalized = list((repo_root / "sources" / "normalized").glob("SRC-*.md"))
-    # 558 journal records + 130 letter records (issue #6 review round 1:
+    # 587 journal records + 130 letter records (issue #6 review round 1:
     # rebuild() used to call normalize_journals alone, silently deleting
     # every letter record on a rebuild).
-    assert len(normalized) == 688
+    assert len(normalized) == 717
 
     db_path = repo_root / ".memoria" / "index.db"
     assert db_path.is_file()
@@ -197,4 +197,4 @@ def test_rebuild_strips_editorial_apparatus_and_exclude_editorial_excludes_it(
     assert {r.source_type for r in with_editorial} == {"editorial"}
 
     editorial_written = list((repo_root / "sources" / "editorial").glob("ED-*.md"))
-    assert len(editorial_written) == 1114
+    assert len(editorial_written) == 1126

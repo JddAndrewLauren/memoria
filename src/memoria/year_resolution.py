@@ -19,7 +19,12 @@ import re
 from datetime import date
 from pathlib import Path
 
-from memoria.normalize import DATE_HEADING_RE, JOURNAL_VOLUMES, _extract_body_lines
+from memoria.normalize import (
+    DATE_HEADING_RE,
+    JOURNAL_VOLUMES,
+    _CHAPTER_MARKER_LINE_RE,
+    _extract_body_lines,
+)
 
 _MONTH_TO_NUM = {
     "Jan": 1,
@@ -50,12 +55,6 @@ _WEEKDAY_NUM = {
     "Saturday": 5,
     "Sunday": 6,
 }
-
-# A chapter marker line is a bare Roman numeral, flush left (no leading
-# whitespace - front-matter title-page lines like "     I" are indented and
-# must not match). RECON.md §3: J01 chapters are bare years, J02 chapters
-# are month-scoped; both open with a Roman-numeral chapter number.
-_CHAPTER_MARKER_LINE_RE = re.compile(r"^[IVXLCM]+$")
 
 # A chapter's candidate-year range spans at most this many years - guards
 # the year-line parser against picking up unrelated 4-digit numbers that
@@ -164,9 +163,20 @@ def resolve_years(records, evidence_root) -> list[str]:
         ]
         chapters = _find_chapters(body_lines)
 
-        assert len(volume_records) == len(heading_positions), (
+        # A volume's undated opening fragments (RECON.md §3) have no date
+        # heading of their own, so they take no part in the zip below - and
+        # nothing to resolve: their chapter scopes them to a year, but the
+        # source gives no day, which is exactly what `chapter-only` means.
+        # Both date fields stay empty rather than carrying a date the
+        # fragment never had.
+        dated_records = [r for r in volume_records if r.recorded_date]
+        for record in volume_records:
+            if not record.recorded_date:
+                record.date_confidence = "chapter-only"
+
+        assert len(dated_records) == len(heading_positions), (
             f"{volume['raw_path']}: normalize_journals produced "
-            f"{len(volume_records)} records but {len(heading_positions)} "
+            f"{len(dated_records)} dated records but {len(heading_positions)} "
             "date headings were found on this pass - they must zip 1:1, "
             "in order, or entries and their chapter positions would "
             "silently drift apart."
@@ -182,16 +192,17 @@ def resolve_years(records, evidence_root) -> list[str]:
         # previous chapter, sees Feb < March, and rolls it to 1847.
         current_year = None
         current_month = None
-        for record, position in zip(volume_records, heading_positions):
+        for record, position in zip(dated_records, heading_positions):
             chapter_years = _chapter_years_at(chapters, position)
             month, day, explicit_year, weekday = _parse_heading(record.recorded_date)
 
             if chapter_years is None:
-                # No chapter marker precedes this entry at all - we have no
-                # year context whatsoever. Leave event_date untouched
-                # rather than inventing one (RECON.md §3: J02 Chapter I's
-                # undated fragments).
-                record.date_confidence = "chapter-only"
+                # A dated entry with no chapter marker before it anywhere -
+                # a heading to resolve, but no year context to resolve it
+                # against. Leave event_date untouched rather than inventing
+                # one. No record in the real corpus reaches this: both
+                # volumes open with a chapter heading.
+                record.date_confidence = "unresolved"
                 continue
 
             confirmed_by_weekday = False

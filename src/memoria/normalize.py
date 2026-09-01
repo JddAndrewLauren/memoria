@@ -121,6 +121,25 @@ _CHAPTER_MARKER_RE = re.compile(
     r"^(?:[IVXLCM]+|\d{4}(?:-\d{2,4})?|\(?ÆT\.\s*\d+(?:-\d+)?\)?)$"
 )
 
+# A chapter marker line is a bare Roman numeral, flush left (no leading
+# whitespace - front-matter title-page lines like "     I" are indented and
+# must not match). RECON.md §3: J01 chapters are bare years, J02 chapters
+# are month-scoped; both open with a Roman-numeral chapter number, followed
+# by a year line ("1837", "1850 (ÆT. 32-33)[1]", "DECEMBER, 1850").
+# Defined here rather than in year_resolution because entry splitting is
+# the earlier consumer - the volume's first chapter heading is where a
+# volume's evidence begins; year_resolution imports it from here.
+_CHAPTER_MARKER_LINE_RE = re.compile(r"^[IVXLCM]+$")
+
+# RECON.md §3: J02 Chapter I "opens (L319) with undated fragments separated
+# by `*   *   *   *   *` dividers ... transcript-book extracts, not dated
+# entries". The same dividers also separate thoughts *inside* dated entries
+# (156 in J02, 581 in J01), so a divider is only an entry boundary in the
+# one place where there is no date heading to be a boundary instead: a
+# volume's undated opening, between its first chapter heading and its first
+# date heading.
+_DIVIDER_RE = re.compile(r"^\s*\*(?:\s+\*)+\s*$")
+
 
 @dataclass
 class NormalizedRecord:
@@ -207,6 +226,63 @@ def _split_entries(body_lines: list[str]) -> list[tuple[str, list[str]]]:
     return entries
 
 
+def _first_chapter_heading(body_lines: list[str]) -> tuple[str, int] | None:
+    """Locate the volume's first chapter heading: its Roman numeral and the
+    index of the first line *after* its year line.
+
+    Both parts of the heading are chapter apparatus, not evidence, so the
+    undated opening begins after them. The year line is required (a
+    Roman-numeral line whose next non-blank line carries no four-digit year
+    is not a chapter heading) so a stray flush-left "I" in the front matter
+    cannot be mistaken for one.
+    """
+    for i, line in enumerate(body_lines):
+        if not _CHAPTER_MARKER_LINE_RE.match(line):
+            continue
+        year_line = i + 1
+        while year_line < len(body_lines) and not body_lines[year_line].strip():
+            year_line += 1
+        if year_line < len(body_lines) and re.search(r"\d{4}", body_lines[year_line]):
+            return line, year_line + 1
+    return None
+
+
+def _split_undated_opening(body_lines: list[str]) -> list[tuple[str, list[str]]]:
+    """Split a volume's undated opening into (chapter_numeral, fragment_lines).
+
+    A natural documentary boundary defines a record (part 05 §5.2). These
+    fragments have no date heading to bound them, so the divider that the
+    1906 edition sets between them is the boundary instead - the only one
+    the source offers (RECON.md §3). Everything from the first chapter
+    heading to the first date heading is in scope; for J01 that is the
+    chapter's age marker and nothing else, so J01 yields no fragments.
+    """
+    heading = _first_chapter_heading(body_lines)
+    if heading is None:
+        return []
+    numeral, region_start = heading
+    date_headings = [
+        i for i, line in enumerate(body_lines) if DATE_HEADING_RE.match(line)
+    ]
+    if not date_headings or date_headings[0] <= region_start:
+        return []
+    region = body_lines[region_start : date_headings[0]]
+
+    fragments = []
+    current: list[str] = []
+    for line in region:
+        if _DIVIDER_RE.match(line):
+            fragments.append(current)
+            current = []
+        else:
+            current.append(line)
+    fragments.append(current)
+    # A fragment holding nothing but the chapter's remaining apparatus (or
+    # nothing at all) is not a record - _paragraphs is the same filter the
+    # dated entries use.
+    return [(numeral, lines) for lines in fragments if _paragraphs(lines)]
+
+
 def _paragraphs(entry_lines: list[str]) -> list[str]:
     text = "\n".join(entry_lines)
     raw_paragraphs = re.split(r"\n\s*\n", text)
@@ -223,6 +299,8 @@ def normalize_journals(evidence_root: Path) -> list[NormalizedRecord]:
     SRC- IDs are assigned sequentially in a fixed order - volume order
     (J01 then J02), then entry order within the volume - so re-running the
     normalizer over unchanged input reproduces the same IDs every time.
+    A volume's undated opening fragments (RECON.md §3) come first within
+    their volume, since that is the order they appear in the source.
     """
     evidence_root = Path(evidence_root)
     records: list[NormalizedRecord] = []
@@ -231,6 +309,31 @@ def normalize_journals(evidence_root: Path) -> list[NormalizedRecord]:
         raw_path = evidence_root / volume["raw_path"]
         raw_text = raw_path.read_text(encoding="utf-8")
         body_lines = _extract_body_lines(raw_text)
+        fragments = _split_undated_opening(body_lines)
+        for position, (numeral, fragment_lines) in enumerate(fragments, start=1):
+            paragraphs = [normalize_quotes(p) for p in _paragraphs(fragment_lines)]
+            src_id = f"SRC-{counter:06d}"
+            counter += 1
+            records.append(
+                NormalizedRecord(
+                    id=src_id,
+                    source_type=volume["source_type"],
+                    # No date heading at all, so nothing to record and
+                    # nothing to resolve into: year resolution marks these
+                    # chapter-only and leaves both fields empty rather than
+                    # inventing a date the source does not give.
+                    recorded_date="",
+                    event_date="",
+                    date_confidence="unresolved",
+                    contemporaneous=True,
+                    original_file=volume["raw_path"],
+                    original_locator=(
+                        f"{volume['volume_label']}, Chapter {numeral}, "
+                        f"undated fragment {position} of {len(fragments)}"
+                    ),
+                    paragraphs=paragraphs,
+                )
+            )
         for heading_text, entry_lines in _split_entries(body_lines):
             paragraphs = [normalize_quotes(p) for p in _paragraphs(entry_lines)]
             src_id = f"SRC-{counter:06d}"

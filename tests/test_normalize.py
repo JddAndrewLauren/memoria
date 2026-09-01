@@ -148,6 +148,103 @@ def test_normalize_journals_strips_chapter_marker_paragraphs(tmp_path):
         assert "II" not in record.paragraphs
 
 
+# A volume shaped like J02: its first chapter opens with undated
+# transcript-book fragments separated by "*   *   *   *   *" dividers
+# (RECON.md §3), and only then reaches its first date heading. The chapter
+# heading itself - the numeral and its year line - is apparatus, not
+# evidence, and must not land in the first fragment.
+_UNDATED_OPENING_VOLUME_TEXT = (
+    "The Project Gutenberg eBook of Journal 94\r\n"
+    "\r\n"
+    "*** START OF THE PROJECT GUTENBERG EBOOK JOURNAL 94 ***\r\n"
+    "\r\n"
+    "     II\r\n"
+    "\r\n"
+    "I\r\n"
+    "\r\n"
+    "1850 (ÆT. 32-33)\r\n"
+    "\r\n"
+    "The Hindoos are more serenely religious than the Hebrews.\r\n"
+    "\r\n"
+    "       *       *       *       *       *\r\n"
+    "\r\n"
+    "Man flows at once to God as soon as the channel is open.\r\n"
+    "\r\n"
+    "One wise sentence is worth the state of Massachusetts.\r\n"
+    "\r\n"
+    "_June 20._ I can see from my window three or four cows.\r\n"
+    "\r\n"
+    "END OF VOLUME 94\r\n"
+    "\r\n"
+    "*** END OF THE PROJECT GUTENBERG EBOOK JOURNAL 94 ***\r\n"
+)
+
+
+def test_normalize_journals_splits_the_undated_opening_on_dividers(tmp_path):
+    evidence_root = tmp_path / "thoreau-evidence"
+    _write_fake_volumes(
+        evidence_root, [_UNDATED_OPENING_VOLUME_TEXT, _FAKE_VOLUME_TEXT]
+    )
+
+    records = normalize_journals(evidence_root)
+
+    fragments = [r for r in records if not r.recorded_date]
+    assert len(fragments) == 2
+    # The divider is the boundary, so the second fragment keeps both of its
+    # paragraphs together while the first stands alone.
+    assert fragments[0].paragraphs == [
+        "The Hindoos are more serenely religious than the Hebrews."
+    ]
+    assert fragments[1].paragraphs == [
+        "Man flows at once to God as soon as the channel is open.",
+        "One wise sentence is worth the state of Massachusetts.",
+    ]
+    assert fragments[0].original_locator == (
+        "Journal I, Chapter I, undated fragment 1 of 2"
+    )
+    # The fragments come first within their volume, in source order, and the
+    # dated entry that follows them is unaffected.
+    assert [r.id for r in records[:3]] == [
+        "SRC-000001",
+        "SRC-000002",
+        "SRC-000003",
+    ]
+    assert records[2].recorded_date == "June 20."
+
+
+def test_normalize_journals_keeps_chapter_apparatus_out_of_the_first_fragment(
+    tmp_path,
+):
+    # The indented "     II" is front-matter title-page text, not a chapter
+    # marker; the flush-left "I" and its "1850 (ÆT. 32-33)" year line are the
+    # chapter heading. None of the three may become evidence.
+    evidence_root = tmp_path / "thoreau-evidence"
+    _write_fake_volumes(
+        evidence_root, [_UNDATED_OPENING_VOLUME_TEXT, _FAKE_VOLUME_TEXT]
+    )
+
+    records = normalize_journals(evidence_root)
+
+    all_paragraphs = [p for r in records for p in r.paragraphs]
+    assert "II" not in all_paragraphs
+    assert "I" not in all_paragraphs
+    assert "1850 (ÆT. 32-33)" not in all_paragraphs
+
+
+def test_normalize_journals_yields_no_fragments_when_a_chapter_heading_is_followed_by_a_date(
+    tmp_path,
+):
+    # J01's own shape: its first chapter heading is followed straight away by
+    # its age marker and then a date heading, so there is no undated opening
+    # to recover and no empty record may be emitted for one.
+    evidence_root = tmp_path / "thoreau-evidence"
+    _write_fake_volumes(evidence_root, [_FAKE_VOLUME_TEXT, _FAKE_VOLUME_TEXT])
+
+    records = normalize_journals(evidence_root)
+
+    assert [r for r in records if not r.recorded_date] == []
+
+
 def test_normalize_journals_assigns_stable_src_ids_across_reruns(tmp_path):
     evidence_root = tmp_path / "thoreau-evidence"
     _write_fake_volumes(evidence_root, [_FAKE_VOLUME_TEXT, _FAKE_VOLUME_TEXT])
@@ -350,12 +447,16 @@ class TestAgainstTheRealEvidenceCorpus:
                 assert not chapter_marker.match(paragraph), (record.id, paragraph)
 
     def test_every_entry_starts_at_a_line_matched_by_the_heading_regex(self, records):
-        # Every record's recorded_date was extracted verbatim from a raw
-        # line DATE_HEADING_RE matched (normalize.py's _split_entries); a
-        # record whose recorded_date does not itself re-match the heading
+        # Every dated record's recorded_date was extracted verbatim from a
+        # raw line DATE_HEADING_RE matched (normalize.py's _split_entries);
+        # a record whose recorded_date does not itself re-match the heading
         # form would mean an entry started somewhere other than a matched
-        # heading.
+        # heading. The undated opening fragments are bounded by dividers
+        # instead and carry no recorded_date at all - covered by
+        # test_the_undated_opening_is_split_on_dividers below.
         for record in records:
+            if not record.recorded_date:
+                continue
             assert DATE_HEADING_RE.match(f"_{record.recorded_date}_")
 
     def test_every_matched_heading_is_preceded_by_a_blank_line_in_the_raw_text(self):
@@ -413,9 +514,52 @@ class TestAgainstTheRealEvidenceCorpus:
         # range for that chapter). This test asserts the mechanically
         # verified count rather than RECON's summary figure - see the
         # finding posted on issue #3.
-        j01_count = sum(1 for r in records if "57393" in r.original_file)
-        j02_count = sum(1 for r in records if "59031" in r.original_file)
+        dated = [r for r in records if r.recorded_date]
+        j01_count = sum(1 for r in dated if "57393" in r.original_file)
+        j02_count = sum(1 for r in dated if "59031" in r.original_file)
 
         assert j01_count == 401
         assert j02_count == 157
         assert j01_count + j02_count == 558
+
+    def test_j02_chapter_i_undated_opening_is_recovered_as_fragment_records(
+        self, records
+    ):
+        # RECON.md §3: J02 Chapter I "opens (L319) with undated fragments
+        # separated by `*   *   *   *   *` dividers ... transcript-book
+        # extracts, not dated entries". 28 dividers between the chapter
+        # heading and the volume's first date heading make 29 fragments.
+        # They are the whole of the corpus's undated evidence: J01's own
+        # chapter heading is followed straight away by a date heading.
+        fragments = [r for r in records if not r.recorded_date]
+
+        assert len(fragments) == 29
+        assert all("59031" in r.original_file for r in fragments)
+        assert [r.id for r in fragments] == [
+            f"SRC-{n:06d}" for n in range(402, 431)
+        ]
+        assert fragments[0].original_locator == (
+            "Journal II, Chapter I, undated fragment 1 of 29"
+        )
+        assert fragments[0].paragraphs[0].startswith(
+            "The Hindoos are more serenely and thoughtfully religious"
+        )
+        # 130 blank-line-delimited paragraphs sit between the chapter
+        # heading and the first date heading; one of them is the chapter's
+        # own year line ("1850 (ÆT. 32-33)[1]"), which is apparatus. The
+        # other 129 are evidence, and all 129 survive into a fragment.
+        assert sum(len(r.paragraphs) for r in fragments) == 129
+
+    def test_no_fragment_carries_a_divider_or_chapter_heading_as_a_paragraph(
+        self, records
+    ):
+        # The divider is the boundary between fragments, so it must never
+        # survive as one of their paragraphs, and neither may the chapter
+        # heading that opens the region.
+        divider = re.compile(r"^\*(?:\s+\*)+$")
+        for record in records:
+            if record.recorded_date:
+                continue
+            for paragraph in record.paragraphs:
+                assert not divider.match(paragraph), (record.id, paragraph)
+                assert not paragraph.startswith("1850 (ÆT."), record.id

@@ -106,8 +106,9 @@ def test_normalize_writes_records_under_sources_normalized(tmp_path):
 
     assert result.returncode == 0
     written = list((tmp_path / "sources" / "normalized").glob("SRC-*.md"))
-    # 558 journal records (issue #3) + 130 letter records (issue #6).
-    assert len(written) == 688
+    # 587 journal records (issue #3, plus J02 Chapter I's 29 recovered
+    # undated fragments) + 130 letter records (issue #6).
+    assert len(written) == 717
     recipients_path = tmp_path / "sources" / "normalized" / "recipients.yaml"
     assert recipients_path.is_file()
     table = yaml.safe_load(recipients_path.read_text())
@@ -131,9 +132,9 @@ def test_normalize_writes_cross_references_under_sources_normalized(tmp_path):
     rows = yaml.safe_load(cross_references_path.read_text())
     # See tests/test_cross_references.py's TestAgainstTheRealEvidenceCorpus
     # for the reconciliation against RECON.md §4(b)'s 628/364.
-    assert len(rows) == 651
+    assert len(rows) == 668
     resolvable = [r for r in rows if r["resolvable"]]
-    assert len(resolvable) == 369
+    assert len(resolvable) == 379
     for row in rows:
         assert row["source_record_id"].startswith("SRC-")
         assert row["target_work"]
@@ -152,7 +153,7 @@ def test_normalize_writes_editorial_records_under_sources_editorial(tmp_path):
     written = list((tmp_path / "sources" / "editorial").glob("ED-*.md"))
     # 880 footnotes (508 J01 + 372 J02) + 232 spans (asides + interpolations,
     # 83 + 149) + 2 introductions (Torrey, Sanborn) - see test_editorial.py.
-    assert len(written) == 1114
+    assert len(written) == 1126
 
 
 @pytest.mark.skipif(
@@ -166,10 +167,10 @@ def test_rebuild_writes_normalized_records_and_the_index(tmp_path):
 
     assert result.returncode == 0
     written = list((tmp_path / "sources" / "normalized").glob("SRC-*.md"))
-    # 558 journal + 130 letter records (issue #6 review round 1: rebuild()
+    # 587 journal + 130 letter records (issue #6 review round 1: rebuild()
     # used to call normalize_journals alone, silently deleting every
     # letter record produced by `memoria normalize`).
-    assert len(written) == 688
+    assert len(written) == 717
     recipients_path = tmp_path / "sources" / "normalized" / "recipients.yaml"
     assert recipients_path.is_file()
     table = yaml.safe_load(recipients_path.read_text())
@@ -183,7 +184,7 @@ def test_rebuild_writes_normalized_records_and_the_index(tmp_path):
     # instance of the class of defect test_rebuild_produces_byte_identical_
     # output_to_normalize guards, below) - not just the normalized records
     # and index.
-    assert len(yaml.safe_load(cross_references_path.read_text())) == 651
+    assert len(yaml.safe_load(cross_references_path.read_text())) == 668
 
 
 @pytest.mark.skipif(
@@ -201,7 +202,7 @@ def test_rebuild_writes_editorial_records_and_strips_them_from_normalized(tmp_pa
 
     assert result.returncode == 0
     editorial_written = list((tmp_path / "sources" / "editorial").glob("ED-*.md"))
-    assert len(editorial_written) == 1114
+    assert len(editorial_written) == 1126
     # Scoped to journal records (issue #6 rebase, round 3): #5's
     # extract_editorial_apparatus only ever processes JOURNAL_VOLUMES, so
     # letters keep their own bracketed footnote markers inline by design
