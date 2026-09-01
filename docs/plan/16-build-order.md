@@ -11,17 +11,24 @@ independent infrastructure projects. Each milestone ends at a **gate**: a
 concrete, author-visible act that either works or does not.
 
 This order sequences the PoC (`../poc-plan.md`): Memoria as an MCP server with
-Claude Code as the client, proved against the Thoreau corpus in the sibling
-evidence repo, on the two tracks poc-plan §1 keeps separate. Four rules shaped
-the slicing:
+Claude Code as the client.
 
-- **The harness carries the discipline.** §45's "observe failure, then adopt"
-  only works if the measurement exists, so the benchmark harness (§43.14)
-  reports its three numbers from the first milestone that can produce any of
-  them, printing the rest as *not yet measurable* rather than omitting them.
+> **Amended 2026-09-01.** The Thoreau corpus was retired as PoC data and no
+> replacement was chosen (`../open-problems.md` §2.4). **M0 is withdrawn**, and
+> **M1 and M2 can be built but not gated** — their gate acts need evidence, and
+> there is none. The machine-scored track of poc-plan §1 is gone; the authorship
+> track is untouched. M3, M4 and M5 are unaffected.
+
+Four rules shaped the slicing; the first no longer holds:
+
+- ~~**The harness carries the discipline.**~~ **Withdrawn with the corpus.** §45's
+  "observe failure, then adopt" only works if the measurement exists — and it no
+  longer does, so §45 now governs unaided. This is a real loss of discipline,
+  recorded rather than papered over (`../open-problems.md` §2.2).
 - **Normalization before everything.** It is the one place a mistake silently
-  invalidates every downstream number (poc-plan §6 risk 3), so it lands first,
-  recon-informed, with mechanical checks against `RECON.md`'s counts.
+  invalidates everything downstream (poc-plan §6 risk 3), so it lands first,
+  recon-informed, with mechanical checks against whatever counts the corpus's own
+  recon supplies.
 - **The index maintainer before the record extractor.** The maintainer writes
   only rebuildable derived state and no restraint rule binds it (§12); the
   extractor needs session records, the curation restraint rules and the entry
@@ -33,66 +40,35 @@ the slicing:
 
 ---
 
-## M0 — Normalized Evidence You Can Trust
+## M0 — Normalized Evidence You Can Trust — WITHDRAWN 2026-09-01
 
-Build:
+> **This milestone was built, gated, and then withdrawn.** It normalized the
+> Thoreau corpus: the five works, year resolution with the weekday checksum,
+> editorial-voice segregation, letters parsing, cross-reference extraction, the
+> answer key, and a check-suite reconciling all of it against `RECON.md`'s
+> counts. Every part of it was written for that corpus, so when the corpus was
+> retired (`../open-problems.md` §2.4) the code went with it.
+>
+> **What survives:** the normalized-record contract — stable `SRC-` IDs,
+> paragraph anchors, the frontmatter fields and the whitespace policy — recorded
+> in `../normalized-record-schema.md`. That is what a successor normalizer must
+> produce, and `memoria.index` and `memoria validate` already read it.
+>
+> **What a successor must re-force:** the editorial-apparatus representation, and
+> whatever adjudication a new corpus's ground truth needs — if it has any. The
+> lesson worth carrying is the one that retired this milestone: **do not build
+> ingestion machinery against a corpus before establishing that what it measures
+> is the task the real archive has.**
+>
+> Normalization stays first whenever a corpus does arrive. It is the one place a
+> mistake silently invalidates everything downstream, with no failing test to
+> reveal it (poc-plan §6 risk 3), and that risk was not discharged by the
+> retirement.
 
-- the normalizer for the five works, driven by the evidence repo's `RECON.md`:
-  Gutenberg boilerplate and front matter excluded; CRLF and per-volume quote
-  conventions handled; entries split on the line-initial italic date headings;
-- year resolution from chapter headings with the **weekday checksum** as the
-  primary path: `date_confidence: exact` only where checked, `inferred` for the
-  remainder, `chapter-only` for J02's undated fragments (§5.2, §6);
-- **editorial-voice segregation**: Torrey's and Sanborn's introductions, the
-  ~1,750 footnote markers and ~1,050 bracketed editorial spans stored as
-  retrospective editorial records *about* the evidence, never inside it (§6);
-- letters parsing: header, dateline, recipient, salutation, body;
-- the normalized record schema, stable `SRC-` IDs and paragraph anchors
-  (§5.2–5.3);
-- SQLite FTS5 over the normalized records;
-- ground truth extraction: all cross-references parsed from the journals —
-  668, of which the 379 landing on held targets are tabled with their
-  journal-side anchors; the letter recipients tabled — 41 rows, `RECON.md`'s 43
-  heading strings with the three carrying a footnote marker collapsed as
-  apparatus (`docs/m0-check-suite.md`);
-- the **answer key**: the cross-references cite pages of editions the corpus
-  does not hold, and `RECON.md` §4 read that as needing adjudication rather
-  than lookup. **That premise was wrong** — the cited editions are digitized
-  page by page, so the target side is a page lookup plus an alignment between
-  two printings of one book. The key resolves **348 of 379** links by
-  requiring two independent editions to agree, and uses no part of the
-  retrieval system it will be used to score
-  (`docs/answer-key-protocol.md`, issue #9). Neither the hand-resolved pilot
-  nor the re-scoping escape hatch was needed;
-- `memoria rebuild` over the derived state that exists so far, and
-  `memoria validate` (IDs, links, raw-file hashes) — both grow at every later
-  milestone;
-- a mechanical check-suite reconciling the normalizer against `RECON.md`:
-  date headings, 130 letters, recipients, footnote and bracketed-span counts,
-  and sampled evidence records containing no editorial voice. `RECON.md` is
-  reconnaissance, not ground truth: the suite re-derives each count and asserts
-  the verified figure with RECON's stated alongside it, so four of the five
-  reconcile as documented deviations rather than as equalities — 558 date
-  headings, not RECON's 448; 41 recipient rows, not 43. Every deviation found is
-  an addition. The table, and the map from each M0 mismatch to the regression
-  test that catches it again, are in `docs/m0-check-suite.md`.
 
-### Gate
+## M1 — The Tool Surface
 
-Open a normalized journal entry. Its text carries no 1906 voice; its apparatus
-is linked alongside it; its date says how it was resolved.
-
-Pick an entry inside a multi-year chapter (`1845–1847`) and see the weekday
-resolve its year exactly.
-
-Delete the index and rebuild it without losing anything.
-
-The check-suite passes, and every mismatch it caught on the way is now a
-regression test (§43).
-
----
-
-## M1 — The Tool Surface and the First Number
+*Renamed 2026-09-01: there is no first number.* **Gate needs an evidence corpus.**
 
 Build:
 
@@ -101,29 +77,23 @@ Build:
   never a summary in its place, with a raw undecorated full-source read
   available (poc-plan §7's superset-of-grep constraint);
 - the `events.jsonl` read ledger: every served read recorded (§10.4, §33);
-- the benchmark harness, reporting all three slots: **retrieval recall@10**
-  over the answer key measured; gathered-set recall and the promotion miss
-  rate printed as *not yet measurable*. The harness spec also defines the
-  **link-to-entry mapping** that makes gathered-set recall well-defined —
-  which entries the cross-referenced passages are held to belong to — rather
-  than leaving M2 to improvise it;
-- **pre-registration**: before M2 begins, the harness records what its three
-  numbers will decide and how — the embeddings go/no-go procedure (§45) is
-  written down while the numbers do not yet exist, so the decision cannot be
-  rationalized after the fact.
+- ~~the benchmark harness~~ and ~~pre-registration~~ — **both withdrawn
+  2026-09-01** with the corpus that supplied their ground truth (issues #14, #22,
+  #23). The link-to-entry mapping went with them.
 
 The evidence-read routing hook already exists; this milestone is what makes the
 routed path the path of least resistance — the tools return more than a raw
 read does.
 
-### Gate
+### Gate — needs an evidence corpus
 
-From Claude Code, ask a question about a journal passage. Every evidence read
+From Claude Code, ask a question about an evidence record. Every evidence read
 arrives through the tools and lands in `events.jsonl`.
 
-Run the harness and read the first real number. FTS5 is expected to score
-poorly on paraphrase links (poc-plan §3); the point of this gate is that the
-number exists before anything heavier is argued for.
+**This cannot be walked today.** The slices above are buildable against the
+record schema and synthetic fixtures; the gate waits for a corpus. It is left
+open rather than replaced — a substitute gate against evidence that does not
+exist would assert nothing.
 
 ---
 
@@ -132,8 +102,8 @@ number exists before anything heavier is argued for.
 Build:
 
 - the five built-in subjects with their prompts — match definition, matching
-  hazards, audit questions (part 06 §8.1). People's hazards carry `RECON.md`'s
-  four Thoreaus sharing a surname and Emerson under four location forms;
+  hazards, audit questions (part 06 §8.1). Hazards are stated as **classes** —
+  surname collision, multi-form naming — not as instances of a particular corpus;
 - continuous candidate matching and the recurrence filter (part 06 §8.4);
   promotion as an author act; manual entry creation;
 - **match terms** on entries — populated by ingest, owned by the author, the
@@ -147,23 +117,21 @@ Build:
   entry links, exclusions, settlements citing the paragraph (poc-plan §7);
 - `rebuild` covers candidates, gathered sets and appearances; `validate` covers
   overlay attribution;
-- harness numbers two and three: **gathered-set recall** over the links, under
-  M1's link-to-entry mapping, and **promotion miss rate** against the 43
-  recipients. Ground truth exists only where `RECON.md` supplies it — the
-  recipients table is People-scoped — and the numbers claim no more than the
-  mapping and that table cover.
+- ~~harness numbers two and three~~ — **withdrawn 2026-09-01** (issue #22). What
+  survives is the structural mitigation: candidates the recurrence filter rejects
+  stay **enumerable**, so a miss rate is computable the day ground truth exists.
 
-### Gate
+### Gate — withdrawn 2026-09-01
 
-Promote Emerson. The entry materializes with its gathered set already built;
-add his four location forms as match terms and watch the set complete.
+Two of its three acts named people from the corpus, and the third was the harness
+printing three numbers (issue #23). **M2 is left ungated.** No substitute is
+written: inventing gate acts against a corpus that does not exist is ceremony, not
+verification.
 
-Exclude a wrong Thoreau from an entry's gathered set, run `memoria rebuild`,
-and see the exclusion survive.
-
-The harness prints three real numbers. **With all three in hand, the embeddings
-decision (open-problems §2.2) is taken by the procedure pre-registered at M1 —
-the only mechanism decision this build order schedules.**
+The embeddings decision this gate carried is withdrawn with it. It reverts to
+§45's default — observe a real failure before adopting heavier machinery — which
+is weaker than the pre-registered procedure it replaces (`../open-problems.md`
+§2.2).
 
 ---
 
@@ -195,8 +163,9 @@ This is the original M0 gate, kept.
 ## M4 — Sessions and the Record Extractor
 
 This milestone opens by deciding the **subject and length of the
-authorship-track piece** (open-problems §4.1 and §6; the likely subject is
-Thoreau's revision practice, poc-plan §1). Deciding it here rather than at M5
+authorship-track piece** (open-problems §4.1 and §6). The subject is fully open
+as of 2026-09-01 — it was expected to be Thoreau's revision practice, and the
+corpus that supplied that evidence is gone. Deciding it here rather than at M5
 buys two things: the piece's research sessions become M4's real sessions,
 exercising the extractor on genuine work instead of staged conversation, and
 the clock the resumption gate needs starts as early as it can.
@@ -274,8 +243,8 @@ Build:
 
 ### Gate
 
-Import a Walden chapter as legacy manuscript. It gets an unconfirmed brief and
-a not-current tint; no model pass runs unasked.
+Import an existing chapter of prose as legacy manuscript. It gets an unconfirmed
+brief and a not-current tint; no model pass runs unasked.
 
 Write the piece's section brief, naming something with no entry. Open the
 supplied context: assembly reports what the scope resolved to, and the fallback
@@ -306,11 +275,13 @@ gate green and this fails, Memoria advanced while no book did.
 
 The poc-plan §5 reductions stand: no `ModelBackend`, no capacity queue, no
 auth or remote access, no web/phone surface, no Ask Memoria, and the write
-coordinator stays a stale-revision check. Embeddings enter only if the M2
-numbers say so.
+coordinator stays a stale-revision check. Embeddings enter only against an
+observed failure (§45) — there are no M2 numbers to say so.
 
-Also deliberately unsequenced: acquiring *Excursions*, *Cape Cod* and *The
-Service* (would lift harness coverage from 58%; nothing forces it), the in-app
+Also deliberately unsequenced: **choosing an evidence corpus at all**
+(open-problems §2.4) and rebuilding a benchmark harness against one — a successor
+needs an archive carrying labelled provenance, and building one against an archive
+that has none is what this retirement removed. Likewise the in-app
 prose editor (open-problems §1.2), editability of built-in subjects (§1.3),
 late-subject backfill (§1.5), and everything about the real archive —
 including whether its sources live inside the repo (§1.4). Those wait for
@@ -322,9 +293,9 @@ observed need, under §45.
 
 | Milestone | Decision forced |
 |---|---|
-| M0 | the normalized record schema, the editorial-apparatus representation, and the answer-key adjudication protocol (open-problems §6, `RECON.md` §4) |
-| M1 | exact signatures of `search_text` and `read(ref)`; the link-to-entry mapping behind gathered-set recall; the pre-registered embeddings decision procedure. The rest of §25's tool list stays open |
-| M2 | at its gate: embeddings, go or no-go, by the procedure M1 registered (§45, open-problems §2.2) |
+| M0 | **withdrawn** — the record schema it forced survives (`../normalized-record-schema.md`); the editorial-apparatus representation is re-forced when a corpus is chosen |
+| M1 | exact signatures of `search_text` and `read(ref)`. The rest of §25's tool list stays open |
+| M2 | nothing open — the embeddings decision it carried is withdrawn (open-problems §2.2) |
 | M3 | nothing open — it builds what earlier decisions already settled |
 | M4 | at its start: the authorship piece's subject and length (open-problems §4.1, §6) |
 | M5 | nothing new — it spends decisions forced earlier |

@@ -49,36 +49,16 @@ scripts:
     uv venv .venv
     uv pip install --python .venv/bin/python -e ".[dev]"
 
-    # The read-only evidence corpus is a sibling of the *primary* checkout, so
-    # the README's `../thoreau-evidence` default -- correct when running from
-    # that checkout -- does not resolve from `workspaces/<project>/<name>/`,
-    # two levels deeper. $ORCA_ROOT_PATH is tried first and the git common dir
-    # second, which both keeps this runnable by hand outside Orca and means a
-    # surprise in what Orca calls "root" degrades into the fallback rather
-    # than into a silently wrong path.
-    evidence=""
-    for root in "${ORCA_ROOT_PATH:-.}" "$(dirname "$(git rev-parse --git-common-dir)")"; do
-      if [ -d "$root/../thoreau-evidence" ]; then
-        evidence=$(cd "$root/../thoreau-evidence" && pwd)
-        break
-      fi
-    done
-    [ -n "$evidence" ] || {
-      echo "setup: no thoreau-evidence corpus beside the primary checkout -- clone it there" >&2
-      exit 1
-    }
+    # No evidence corpus. The Thoreau corpus was retired 2026-09-01
+    # (docs/open-problems.md 2.4) and no replacement is chosen, so setup no
+    # longer probes for a sibling checkout and no longer writes
+    # MEMORIA_EVIDENCE_ROOT into .claude/settings.local.json. It used to hard-
+    # fail without the corpus, which would now block every worktree.
+    #
+    # When a corpus is chosen, restore the probe here and the end-to-end
+    # `memoria validate` gate with it.
 
-    # A setup hook cannot export into the sessions that follow it, so the
-    # absolute path is written where Claude Code will read it: `env` in
-    # settings.local.json is applied to every Bash call, including calls made
-    # from a `.claude/worktrees/issue-<n>` sub-worktree, where a relative
-    # default would not resolve either. Gitignored, and a freshly created
-    # worktree has none to clobber.
-    mkdir -p .claude
-    printf '{\n  "env": {\n    "MEMORIA_EVIDENCE_ROOT": "%s"\n  }\n}\n' "$evidence" \
-      > .claude/settings.local.json
-
-    # One end-to-end gate: hashing every raw file against the corpus manifest
-    # is only reachable if the venv, the editable install and the evidence
-    # path above are all correct. Costs under a second.
-    MEMORIA_EVIDENCE_ROOT="$evidence" .venv/bin/memoria validate
+    # The gate is the test suite instead: it reaches the venv and the editable
+    # install, and it must pass with no corpus and no environment set. If it
+    # ever needs MEMORIA_EVIDENCE_ROOT, that is a bug in the test.
+    .venv/bin/pytest tests/ -q

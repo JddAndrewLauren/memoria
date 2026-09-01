@@ -140,10 +140,11 @@ Aliasing therefore lives in two places, at two scales:
 - **The subject prompt's matching hazards** (part 06 §8.1) carry the discipline
   that spans entries: match aliases, initials, honorifics, married names and
   location forms; do not merge people sharing a surname without corroboration.
-  Cross-entry disambiguation — the four Thoreaus sharing a surname in the evidence
-  repo's `RECON.md` — is a hazard stated once per subject, not a map row.
-- **The entry's match terms** carry the forms specific to one entry — Emerson's
-  four location forms, a nickname, a variant spelling the transcriber preserved.
+  Cross-entry disambiguation — several people sharing a surname — is a hazard
+  stated once per subject, not a map row.
+- **The entry's match terms** carry the forms specific to one entry — the several
+  forms one person is named by, a nickname, a variant spelling the transcriber
+  preserved.
 
 The resolution discipline is unchanged, and the People subject's hazards are where
 it is carried: alias resolution is one of the few curation activities where

@@ -1,7 +1,7 @@
 # Open Problems
 
-Everything the plan knows it has not settled, in one place. Updated 2026-08-31, after
-the manuscript-layer session.
+Everything the plan knows it has not settled, in one place. Updated 2026-09-01, after
+the Thoreau corpus was retired (§2.4).
 
 Each entry says what the question is, where it lives, and — where one exists — the
 **safe default** that keeps deferring it cheap. §45's discipline governs all of them:
@@ -97,42 +97,71 @@ not exist in the PoC, so at M5 the surface opens from the Section view only (ADR
 
 Where: `poc-plan.md` §3 and §5, part 19 §19.11.
 
-### 2.2 Semantic embeddings
+### 2.2 Semantic embeddings — REOPENED 2026-09-01, with no instrument
 
-FTS5 first. The resolvable cross-references produce the number that decides whether
-heavier machinery is justified. **This only works if the benchmark harness is built
-early** — FTS5-first without measurement is just under-building.
+FTS5 first, and it was to stay first only until a number said otherwise. That number
+is gone: the benchmark harness was withdrawn with the corpus that supplied its ground
+truth (§2.4), and with it the pre-registered go/no-go procedure that was the only
+mechanism decision the build order scheduled.
 
-The answer key now exists (issue #9): **348 of 379** links resolved, by aligning the
-editions the footnotes cite rather than by adjudication. See §2.3 before reading the
-number it produces as a threshold.
+**This is a real loss and should not be dressed up.** The plan's own rule was that
+FTS5-first without measurement is just under-building. What remains is §45 unaided:
+adopt heavier machinery only against a failure observed in use. That is a weaker
+discipline than a pre-registered threshold, because "observed in use" is exactly the
+kind of judgement that rationalizes after the fact.
 
-Where: `poc-plan.md` §3, part 11, part 15.
+**Safe default:** FTS5. Anything heavier needs a written-down failure first.
 
-### 2.3 What recall@10 over the cross-references is evidence for
+Where: `poc-plan.md` §3, part 11, part 15 §43.14.
 
-Raised 2026-09-01 while building the answer key, and it constrains how §2.2 may be
-decided rather than deferring anything.
+### 2.3 What recall@10 over the cross-references is evidence for — SUPERSEDED
 
-Recall@10 over these links measures **retrieval when wording diverges** — a real
-capability the eventual archive needs, since prose about an event rarely repeats the
-words of the evidence behind it. But the *distribution* is Thoreau deliberately
-rewriting journal into literature: almost certainly harder, and differently shaped,
-than "the same event, described differently". The capability transfers; the difficulty
-does not.
+Raised 2026-09-01 while building the answer key; superseded the same day by §2.4,
+which retired the corpus this was about. Kept because the reasoning is why the corpus
+went.
 
-So the number is a **stress case, good for detecting gross failure, and a poor
-instrument for setting thresholds**. `poc-plan.md` §6 risk 4 anticipates half of this —
-that the task may be hard enough to swamp the signal — but frames it as difficulty
-rather than as measuring a task the real archive does not have.
+Recall@10 over the editors' cross-references measured **retrieval when wording
+diverges** — a real capability the eventual archive needs, since prose about an event
+rarely repeats the words of the evidence behind it. But the *distribution* was Thoreau
+deliberately rewriting journal into literature: almost certainly harder, and
+differently shaped, than "the same event, described differently". The capability
+transfers; the difficulty does not. So the number was **a stress case, good for
+detecting gross failure, and a poor instrument for setting thresholds** — and a stress
+case did not justify the machinery built to produce it.
 
-**What follows:** M1's pre-registered embeddings procedure (issue #14) must say what a
-poor score licenses, written down before the number exists. Harness numbers two and
-three are unaffected — gathered-set recall measures index completeness, promotion miss
-rate measures entity resolution against `RECON.md`'s 43 recipients, and both are the
-People/Timeline/Events material a factual archive is actually made of.
+### 2.4 The evidence corpus — OPEN, deliberately
 
-Where: `docs/answer-key-protocol.md`, issue #14, part 15 §43.14.
+**Decided 2026-09-01: the Thoreau corpus is retired as PoC data, and no replacement is
+chosen.**
+
+It had been chosen for a property almost no public corpus has — an archive, a
+manuscript derived from it, and 628 editorial cross-references labelling which journal
+passage became which published passage. What §2.3 established is that the ground truth
+this bought was measuring a task the real archive does not have. Memoria is being built
+for an author concerned with facts and event timelines; Thoreau is literary rewriting.
+
+Not deferred pending a search for a better corpus. The alternative on offer was to keep
+building measurement scaffolding for an instrument of uncertain validity, and that is
+the trade being refused.
+
+**What went with it:** the benchmark harness and all three of its numbers (issues #14,
+#22, #23); M0's normalizer, editorial segregation, year resolution, cross-reference
+extraction and answer key, and the code that implemented them; the M1 and M2 gates,
+which now carry a *needs an evidence corpus* precondition.
+
+**What did not:** everything in §1-23 — provenance, temporal discipline, attribution,
+the subject system, manuscript authorization. `CONTEXT.md` and ADRs 0001-0004 are
+corpus-agnostic, and ADR-0004 anticipated this directly by modelling evidence location
+as a configured field inside the repository value.
+
+**What this reopens:** §2.2 above, with nothing to decide it. And §4.1's gap widens —
+the manuscript layer never had a test corpus, and now neither does the evidence side.
+
+**Safe default:** build against the record schema, not against a corpus. The
+normalized-record contract (`SRC-` IDs, paragraph anchors, the frontmatter fields) is
+what a future normalizer must produce, and it survives.
+
+Where: issue #1, `poc-plan.md` §1 and §3, part 16.
 
 ---
 
@@ -153,15 +182,17 @@ in §1 above is decided by it. The old build order is archived in
 
 ### 4.1 The manuscript layer has no test corpus
 
-Thoreau supplies evidence and audit targets. It supplies **nothing with a brief, a
-declared scope, or a passage written from something**, and nothing to resume. §43.2's
-resumption test is now the manuscript layer's central claim — it must be passed by a
-brief, a draft and an audit on request, with no stored recap — and it cannot be
-exercised against the corpus at all.
+An archive supplies evidence and audit targets. No archive supplies **anything with a
+brief, a declared scope, or a passage written from something**, and nothing to resume.
+§43.2's resumption test is now the manuscript layer's central claim — it must be passed
+by a brief, a draft and an audit on request, with no stored recap — and no corpus can
+exercise it.
 
 The authorship track's short piece is the only place any of this can be tested, which
 means its subject and length are no longer a free choice. Deciding them is on the list
-below.
+below. As of §2.4 the subject is fully open: it was expected to be Thoreau's revision
+practice, on the grounds that the corpus supplied the evidence directly, and that
+reasoning is void.
 
 Where: part 12 §39, part 15 §43.2, `poc-plan.md` §6 risk 6.
 
@@ -195,4 +226,4 @@ Build detail rather than open decisions, from `poc-plan.md` §7:
 - the Curator's scope and trigger policy;
 - **the subject and length of the authorship-track piece** — now constrained by §4.1
   above, and forced at part 16's M4;
-- whether and when to acquire *Excursions*, *Cape Cod* and *The Service*.
+- **which evidence corpus, if any, Memoria is proved against** — §2.4.

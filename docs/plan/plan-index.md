@@ -75,11 +75,12 @@ for briefs summarized from existing prose. New **§4.1** closes the anchoring qu
 **nothing durable points at a manuscript passage.** `state.md`, `outline.md` and
 `impacts/` are gone from §2's tree; §3 puts briefs in the Manuscript class and adds
 appearances and memoized judgements to Derived.
-**05 is where the current risk concentrates.** The Thoreau recon (`RECON.md` in the
-sibling evidence repo `../thoreau-evidence/raw/gutenberg/`) shows normalization is the hard part —
-1906 editorial voice sits inside 1837 evidence, and year resolution depends on
-chapter headings plus a weekday checksum. If this is wrong, everything
-downstream is quietly wrong with no failing test.
+**05 is where the risk concentrates.** Normalization is the hard part of any
+archive — later editorial voice sits inside earlier evidence, and dates often
+resolve only by inference. If this is wrong, everything downstream is quietly
+wrong with no failing test. **No evidence corpus is currently chosen** (the
+Thoreau PoC corpus was retired 2026-09-01, `../open-problems.md` §2.4), so 05 is
+a contract waiting for its recon rather than a live build.
 **06 was rewritten 2026-08-31** and is now the load-bearing part. §8 defines
 **subjects** (People, Timeline, Events, Themes, Arcs, plus whatever the author adds),
 **entries**, the derived **gathered set** with its pin/exclude overlay, promotion from
@@ -138,8 +139,8 @@ the search-scope problem: an index reports nothing about its own recall, and tha
 the central risk of the subject system.
 **12** — §39 was rewritten 2026-08-31. The seventeen-field state record and the
 checkpoint are **withdrawn**; resumption is carried by the brief, the draft and an audit
-on request. The test itself stands and is now harder, and **nothing in the Thoreau
-corpus exercises it.**
+on request. The test itself stands and is now harder, and **no evidence corpus
+exercises it** — only the authorship track can.
 
 ### Runtime and interface
 
@@ -204,7 +205,7 @@ independent requirements.
 
 - **Orienting from scratch:** 01 → 02 → 03 → 18
 - **The subject system:** 06 → 11 (§32, §33.1) → 09 → 08, then 04's anchoring note
-- **Working on ingest now:** 05 → 04 → 06, with `RECON.md` alongside
+- **Working on ingest now:** 05 → 04 → 06, with the corpus's own recon alongside
 - **Resolving the open decisions:** none remain at the architecture level — 04's anchoring and 08's ownership are both closed; what's left is in `../open-problems.md` §1
 - **The manuscript layer:** 04 (§2.1, §4.1) → 06 (§8.11, §8.12) → 09 → 12 (§39)
 - **Following the build:** 16, with `../poc-plan.md` and `../open-problems.md`
@@ -213,8 +214,8 @@ independent requirements.
 ## Files
 
 ```
-../thoreau-evidence/                sibling evidence repo: the PoC corpus
-                                    (raw/, manifest.yaml, RECON.md)
+<evidence repo>/                    sibling evidence repo, located by
+                                    MEMORIA_EVIDENCE_ROOT; none chosen yet
 CONTEXT.md                          settled domain vocabulary
 docs/
 ├── poc-plan.md                     decisions from the grilling sessions

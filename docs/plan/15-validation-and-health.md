@@ -58,8 +58,8 @@ The test should verify that it:
 ## 43.2 Resumption test
 
 Can Memoria resume a section after a long absence — from its **brief**, its draft and
-an audit on request, with no stored checkpoint to read? See part 12 §39. Nothing in the
-Thoreau corpus exercises this; only the authorship track can.
+an audit on request, with no stored checkpoint to read? See part 12 §39. No evidence
+corpus exercises this; only the authorship track can.
 
 ## 43.3 Date-leakage test
 
@@ -107,21 +107,26 @@ Can Memoria propose a manuscript rewrite autonomously while refusing to apply it
 
 If the author authorizes one paragraph, does Memoria leave unrelated manuscript prose untouched?
 
-## 43.14 Benchmark harness — three numbers
+## 43.14 Benchmark harness — withdrawn
 
-The machine-scored track's harness is built early (`poc-plan.md` §3) and reports
-three numbers:
+**Withdrawn 2026-09-01 with the Thoreau corpus** (`../open-problems.md` §2.4). The
+harness was to report three numbers, and each drew its ground truth from that
+corpus: retrieval recall@10 and gathered-set recall over the editors'
+cross-references, and promotion miss rate over the letter recipients. None of them
+survives the corpus.
 
-- **retrieval recall@10** over the 348 cross-references the answer key resolves
-  (`docs/answer-key-protocol.md`) — the number that decides whether embeddings
-  get built (§45), and one to read as a stress case rather than a threshold
-  (`open-problems.md` §2.3);
-- **gathered-set recall** — a set metric: whether an entry's gathered set is
-  complete enough to write from, the silent recall risk of part 06 §8.3 and part
-  11 §33.1;
-- **promotion miss rate** — the promoted set scored against `RECON.md`'s 43 known
-  letter recipients, since the ≥5-recurrence filter admits at most 36 candidates
+What the three numbers were *for* is worth keeping on record, because a successor
+harness owes the same three things:
+
+- whether retrieval finds evidence **when the wording diverges** — the number that
+  was to decide whether embeddings get built (§45);
+- whether an entry's gathered set is **complete enough to write from** — a set
+  metric, not @k; the silent recall risk of part 06 §8.3 and part 11 §33.1;
+- how badly the recurrence filter **misses** entries it should have promoted
   (part 06 §8.4).
+
+A successor needs an archive carrying labelled provenance. Until one exists, §45
+governs unaided: adopt heavier machinery only against an observed failure.
 
 Every consequential real-world failure becomes a regression test.
 

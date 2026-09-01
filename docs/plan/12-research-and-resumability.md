@@ -203,8 +203,8 @@ If Memoria cannot pass that test, the rest of the architecture is premature. The
 is now **harder and more honest**, because it must be passed by a brief, a draft and a
 live audit rather than by a stored recap. §43.2 keeps the test and changes its subject.
 
-One consequence, recorded rather than solved: the Thoreau corpus supplies evidence and
-audit targets but nothing to *resume* — no brief, no declared scope, no passage written
-from something. **The manuscript layer has no test corpus**, and this is the claim that
+One consequence, recorded rather than solved: an archive supplies evidence and audit
+targets but nothing to *resume* — no brief, no declared scope, no passage written from
+something. **The manuscript layer has no test corpus**, and this is the claim that
 most needs one. The authorship track's short piece is the only place it can be
 exercised, and it should be shaped deliberately to do so.

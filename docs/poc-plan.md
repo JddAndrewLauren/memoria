@@ -4,6 +4,20 @@ Status: preliminary. Produced 2026-08-31 from a grilling session over
 `memoria-plan.md`. Records decisions reached, decisions deliberately deferred,
 and where this narrows the build plan. **No build sequencing is implied.**
 
+> ## RETIRED 2026-09-01 — the corpus this plan was built around is gone
+>
+> **The Thoreau corpus is no longer Memoria's PoC data, and no replacement was
+> chosen.** See `open-problems.md` §2.4 for the decision and its reasoning, and
+> issue #1 for what it cost.
+>
+> This document is kept as the **decision record it is** — the sections below are
+> what was decided on 2026-08-31 and why, not a description of the current plan.
+> §1's corpus framing, all of §2, the benchmark half of §3, and risks 2 and 4 of
+> §6 are retired along with the corpus; each is marked in place. Everything else
+> — the runtime decision, the UI split, the rejection ledger, the two closed
+> architectural deferrals, and the three addenda — stands unchanged, because none
+> of it depended on which corpus was used.
+
 ---
 
 ## 1. What the PoC is
@@ -12,12 +26,18 @@ Memoria will be proved out against a **public archive** before it touches the
 real one. The final archive for the book exists but its state is not yet
 established; nothing here depends on it.
 
-The test corpus is **Thoreau** — his journals and letters as evidence, and the
-books he built from them as targets. It was chosen for a property almost no
-public corpus has: it contains an archive, a manuscript derived from that
-archive, and **628 editorial cross-references labelling which journal passage
-became which published passage**. That is ground truth for journal-to-manuscript
-provenance, which is the hardest thing in the plan to evaluate.
+~~The test corpus is **Thoreau**~~ — **RETIRED 2026-09-01.** It was chosen for a
+property almost no public corpus has: it contained an archive, a manuscript
+derived from that archive, and 628 editorial cross-references labelling which
+journal passage became which published passage — ground truth for
+journal-to-manuscript provenance, the hardest thing in the plan to evaluate.
+
+It was retired anyway, because that ground truth measured a task the real archive
+does not have: Memoria is for an author concerned with facts and event timelines,
+and Thoreau is literary rewriting. `open-problems.md` §2.4 carries the decision;
+§2.3 carries the reasoning that forced it.
+
+**No corpus is chosen.** Everything below that names one is history.
 
 ### The two tracks
 
@@ -25,7 +45,7 @@ One corpus, two uses, deliberately kept separate.
 
 | | Machine-scored track | Authorship track |
 |---|---|---|
-| **Instrument** | 348 resolved cross-references (§1, superseded below) | A real short piece of prose |
+| **Instrument** | ~~348 resolved cross-references~~ — **withdrawn 2026-09-01** | A real short piece of prose |
 | **Author needed?** | No — runs unattended | Yes — must be genuine |
 | **Tests** | Retrieval, provenance, temporal discipline (§43.1, §43.7, §43.11) | Ownership, curator restraint, authorization (§1.7, §13.4, §14, §15, §19-21) |
 | **Output** | Three numbers: retrieval recall@10 / precision@10, gathered-set recall, promotion miss rate (§3) | Observed failures |
@@ -39,12 +59,20 @@ from the journals was considered and rejected for exactly this reason: it gives
 an objective quality signal but turns authorship into imitation, reopening the
 gap.
 
-The authorship track's likely subject is **Thoreau's revision practice** — the
-corpus supplies the evidence for it directly.
+~~The authorship track's likely subject is **Thoreau's revision practice**~~ —
+void as of 2026-09-01; the corpus that supplied the evidence for it is gone, and
+the subject is fully open again (issue #27).
 
 ---
 
-## 2. Corpus — acquired
+## 2. Corpus — acquired, and RETIRED 2026-09-01
+
+> **This whole section is history.** The corpus was retired as PoC data on
+> 2026-09-01 (`open-problems.md` §2.4) and the ingestion code written for it was
+> removed. The findings below are kept because several of them are *general* —
+> normalization being the hard part, dates being harder than boundaries, quote
+> conventions differing within one edition — and a future corpus will meet them
+> again.
 
 10 files under `raw/gutenberg/` in the **sibling evidence repo**
 `../thoreau-evidence/` (moved out of this repo 2026-08-31 — see §3), hashed in its
@@ -99,7 +127,7 @@ its file tree holds only `m4b/`, `mp3/`, `ogg/`, `spx/`. Substituted ID 205.
 
 ## 3. Decisions reached
 
-### Corpus scale — accepted as-is
+### Corpus scale — accepted as-is *(moot: corpus retired 2026-09-01)*
 662k words is roughly 860-930k tokens, which **fits inside a 1M context window**.
 The central claim (§0.1) therefore cannot be falsified against this corpus, and a
 "paste everything in" baseline would beat Memoria on most queries. Expanding was
@@ -114,8 +142,8 @@ unresolvable.
 **Superseded 2026-09-01 (issue #9).** Both numbers were RECON's. Re-deriving the
 cross-references mechanically finds 668, not 628, of which 379 land on held works;
 the answer key resolves **348** of those. Coverage against the full 668 is 52%
-rather than the 58% projected here. The projection is left standing because
-`docs/answer-key-protocol.md` measures itself against it.
+rather than the 58% projected here. The projection was left standing because the
+answer-key protocol measured itself against it; both are gone as of 2026-09-01.
 
 ### Runtime — local, no model-driving service
 Everything runs on one machine. Memoria is an **MCP server** exposing the §24.2
@@ -175,21 +203,28 @@ SQLite FTS5 plus the §28 agentic loop. No embeddings initially.
 Normalized record counts will be small — roughly 448 dated journal entries, 130
 letters, plus book chapters — so FTS5 is instant over 600-1,500 records.
 
-The tension is acknowledged: the headline benchmark is **paraphrase matching**,
-where lexical search is structurally weak, so FTS5 is expected to score poorly.
-That is the point. §45 requires heavier machinery to beat the existing system
-against an observed failure, and this corpus produces that number on day one
+The tension was acknowledged: the headline benchmark was **paraphrase matching**,
+where lexical search is structurally weak, so FTS5 was expected to score poorly.
+That was the point. §45 requires heavier machinery to beat the existing system
+against an observed failure, and the corpus produced that number on day one
 rather than after months of vague dissatisfaction. Adding local embeddings later
-is cheap here — bge-base on CUDA and a recall/precision harness over 80k messages
-are already proven in a separate project.
+is cheap — bge-base on CUDA and a recall/precision harness over 80k messages are
+already proven in a separate project.
 
 **This only works if the benchmark harness is built early.** FTS5-first without
 measurement is just under-building.
 
-**The harness reports three numbers, not one** (2026-08-31):
+> **RETIRED 2026-09-01.** The harness was withdrawn with the corpus that supplied
+> its ground truth (issues #14, #22, #23). The sentence above still stands as a
+> criticism — of the current state. There is no measurement, so §45 governs
+> unaided: heavier machinery enters only against a failure observed in use, which
+> is a weaker discipline than the pre-registered threshold this replaced.
+> `open-problems.md` §2.2 carries it.
 
-1. **Retrieval recall@10** over the 348 cross-references the answer key resolves
-   (`docs/answer-key-protocol.md`) — the number that decides whether embeddings
+**The harness reports three numbers, not one** (2026-08-31; ~~withdrawn~~ 2026-09-01 — kept because a successor harness owes the same three things):
+
+1. **Retrieval recall@10** over the 348 cross-references the answer key resolved
+   — the number that was to decide whether embeddings
    get built (§45 discipline). What a poor score licenses has to be written down
    before the number exists; see `open-problems.md` §2.3.
 2. **Gathered-set recall** — a set metric, not @k: of the cross-referenced
@@ -280,20 +315,22 @@ interface.
    (§0.1) is not falsifiable here and must be proved against the real archive.
    Capping the Context Builder budget well below corpus size would test the same
    retrieval discipline honestly, and remains available.
-2. **Benchmark coverage is 58%.** 264 of 628 cross-references point at works not
-   held.
+2. ~~**Benchmark coverage is 58%.**~~ **Void 2026-09-01** — there is no benchmark.
+   Replaced by: **there is no evidence corpus at all**, so M1 and M2 can be built
+   but not gated, and nothing measures retrieval quality.
 3. **Normalization correctness is load-bearing and unverifiable downstream.** If
-   editorial voice leaks into evidence, every temporal-discipline result and every
-   benchmark number is quietly wrong, with no failing test to reveal it.
-4. **Paraphrase matching may be hard enough to swamp the signal.** Thoreau rewrote
-   heavily; if even embeddings score poorly on the 348 links, the benchmark
-   measures the difficulty of the task rather than the quality of Memoria. Half of
-   this is now sharper than a risk — see `open-problems.md` §2.3.
+   editorial voice leaks into evidence, every temporal-discipline result is quietly
+   wrong, with no failing test to reveal it. **Not discharged by the retirement** —
+   it transfers intact to whatever corpus arrives next.
+4. ~~**Paraphrase matching may be hard enough to swamp the signal.**~~ **Resolved
+   by retirement 2026-09-01.** This risk was the argument that retired the corpus:
+   the links measured a distribution the real archive does not have. See
+   `open-problems.md` §2.3 and §2.4.
 5. **Ownership — resolved 2026-08-31** (ownership by badge, §4). Both architectural
    deferrals are now closed; what remains open is listed in `open-problems.md` §1.
-6. **The manuscript layer has no test corpus.** Thoreau supplies evidence and audit
-   targets, but nothing with a brief, a declared scope, or a passage written from
-   something. §43.2's resumption test is now the manuscript layer's central claim and
+6. **The manuscript layer has no test corpus.** An archive supplies evidence and
+   audit targets, but nothing with a brief, a declared scope, or a passage written
+   from something. §43.2's resumption test is now the manuscript layer's central claim and
    can only be exercised on the authorship track's own piece.
 7. **§1.12 remains the governing risk.** The failure condition is Memoria
    advancing while no book does. The authorship track exists partly to keep that
@@ -305,7 +342,10 @@ interface.
 
 - Build sequencing and milestone structure — **deliberately not addressed** here;
   addressed 2026-08-31 in the rewritten [`plan/16-build-order.md`](plan/16-build-order.md).
-- Normalized record schema and the editorial-apparatus representation.
+- ~~Normalized record schema and the editorial-apparatus representation.~~ Settled
+  2026-08-31, and the corpus-agnostic half survives the retirement:
+  [`normalized-record-schema.md`](normalized-record-schema.md) is now the contract
+  a future normalizer must produce.
 - Which §25 tools ship, and their exact signatures — constrained 2026-08-31:
   retrieval must be a **superset of grep**: verbatim source text (never
   summarized-only), decorated with the curated overlay, a raw full-source read
@@ -314,8 +354,11 @@ interface.
   (part 11 §25, mirrored in §24.2). Which of the remaining tools ship is still
   open.
 - Scope and trigger policy for the Curator.
-- Subject and length of the authorship-track piece.
-- Whether and when to acquire *Excursions*, *Cape Cod* and *The Service*.
+- Subject and length of the authorship-track piece — fully open again as of
+  2026-09-01, since the corpus that suggested one is gone (issue #27).
+- **Which evidence corpus, if any, Memoria is proved against** — `open-problems.md`
+  §2.4. This replaces the old question of whether to acquire *Excursions*,
+  *Cape Cod* and *The Service*, which is moot.
 
 ---
 

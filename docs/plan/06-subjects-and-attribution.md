@@ -47,9 +47,10 @@ Match aliases, initials, honorifics, married names and location forms.
 Do not merge people sharing a surname without corroboration.
 ```
 
-§7's alias discipline and the hazards catalogued in the evidence repo's `RECON.md`
-(`../thoreau-evidence/raw/gutenberg/`) — Emerson under four location forms, four
-Thoreaus sharing a surname — are what this exists to carry.
+§7's alias discipline and the hazards catalogued in the evidence repo's own recon —
+one person named under several forms, several people sharing a surname — are what
+this exists to carry. The hazards are stated as classes here; their instances come
+from whatever archive is ingested.
 
 **Three — the audit questions this subject asks of manuscript prose.**
 
@@ -166,16 +167,17 @@ Consequences:
   falls back to the candidate, and says that it did;
 - **context is safe** — unpromoted candidates never enter a session.
 
-Recurrence is a strong filter. On the PoC corpus, distinct capitalized-name
-candidates run 516 / 638 / 1,066 per volume; those appearing five or more times run
-9 / 18 / 36, against `RECON.md`'s ground truth of 43 distinct letter recipients.
-The promotable set is dozens, not hundreds.
+Recurrence is a strong filter: on any archive, most distinct capitalized-name
+candidates appear once or twice, and requiring five or more collapses the list by
+an order of magnitude. The promotable set is dozens, not hundreds.
 
-The same numbers face the other way: a filter admitting at most 36 candidates
-cannot reach all 43 known recipients, so the filter that makes promotion tractable
-is a guaranteed miss generator. The benchmark's **promotion miss rate**
-(`poc-plan.md` §3, part 15 §43.14) scores the promoted set against that ground
-truth rather than letting the encouraging collapse hide the misses.
+The collapse faces the other way too: a threshold that makes promotion tractable
+discards real entries that happen to be mentioned rarely, so the filter is a
+guaranteed miss generator. This was to be quantified by the benchmark's
+**promotion miss rate**, which was withdrawn with the Thoreau corpus
+(`../open-problems.md` §2.4). Until an archive with known ground truth exists the
+mitigation is structural rather than measured: **candidates the filter rejects
+stay enumerable**, so the misses are countable rather than invisible.
 
 The author may also **create an entry manually**, on any subject, at any time. A
 manually created entry has no matched history, so it needs its own match terms
