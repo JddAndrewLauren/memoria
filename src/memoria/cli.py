@@ -6,6 +6,11 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from memoria.answer_key import (
+    ANSWER_KEY_RELATIVE_PATH,
+    build_answer_key,
+    write_answer_key,
+)
 from memoria.cross_references import (
     CROSS_REFERENCES_RELATIVE_PATH,
     extract_cross_references,
@@ -154,6 +159,20 @@ def main(argv=None):
         print(
             f"normalize: wrote {len(cross_references)} cross-references to "
             f"{cross_references_path}"
+        )
+        key_rows, key_summaries, key_editions = build_answer_key(
+            evidence_root(), cross_references, records
+        )
+        key_path = write_answer_key(
+            key_rows,
+            key_summaries,
+            key_editions,
+            repo_root() / ANSWER_KEY_RELATIVE_PATH,
+        )
+        resolved = sum(s.resolved for s in key_summaries)
+        print(
+            f"normalize: wrote {len(key_rows)} answer-key links to {key_path} "
+            f"({resolved} resolved)"
         )
         return 0
 

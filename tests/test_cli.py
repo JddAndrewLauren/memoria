@@ -263,3 +263,12 @@ def test_rebuild_produces_byte_identical_output_to_normalize(tmp_path):
         # covered here too, not just picked up incidentally by the glob above.
         if subdir == "normalized":
             assert "cross-references.yaml" in normalize_files
+
+    # Issue #9's instance: the answer key is written by both commands and
+    # lives outside sources/, so the loop above cannot see it. It is the one
+    # committed artifact of the three, which makes a rebuild that quietly
+    # produces a different key worse than a rebuild that drops one.
+    normalize_key = (normalize_dir / "benchmark" / "answer-key.yaml").read_text()
+    rebuild_key = (rebuild_dir / "benchmark" / "answer-key.yaml").read_text()
+    assert normalize_key == rebuild_key
+    assert "two-edition-alignment" in normalize_key

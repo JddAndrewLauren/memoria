@@ -14,6 +14,11 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from memoria.answer_key import (
+    ANSWER_KEY_RELATIVE_PATH,
+    build_answer_key,
+    write_answer_key,
+)
 from memoria.cross_references import (
     CROSS_REFERENCES_RELATIVE_PATH,
     extract_cross_references,
@@ -194,9 +199,13 @@ def rebuild(evidence_root: Path, repo_root: Path) -> list[NormalizedRecord]:
     write_recipients_table(
         recipients_table(letter_records), output_root / "recipients.yaml"
     )
+    cross_references = extract_cross_references(editorial_records)
     write_cross_references_table(
-        extract_cross_references(editorial_records),
-        repo_root / CROSS_REFERENCES_RELATIVE_PATH,
+        cross_references, repo_root / CROSS_REFERENCES_RELATIVE_PATH
+    )
+    write_answer_key(
+        *build_answer_key(evidence_root, cross_references, records),
+        repo_root / ANSWER_KEY_RELATIVE_PATH,
     )
     write_editorial_records(editorial_records, repo_root / EDITORIAL_RELATIVE_PATH)
     # The audit targets are deliberately **not** indexed. The index is the

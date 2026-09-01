@@ -81,11 +81,40 @@ Where: `poc-plan.md` §3 and §5, part 19 §19.11.
 
 ### 2.2 Semantic embeddings
 
-FTS5 first. The 364 resolvable cross-references produce the number that decides whether
+FTS5 first. The resolvable cross-references produce the number that decides whether
 heavier machinery is justified. **This only works if the benchmark harness is built
 early** — FTS5-first without measurement is just under-building.
 
+The answer key now exists (issue #9): **365 of 379** links resolved, by aligning the
+editions the footnotes cite rather than by adjudication. See §2.3 before reading the
+number it produces as a threshold.
+
 Where: `poc-plan.md` §3, part 11, part 15.
+
+### 2.3 What recall@10 over the cross-references is evidence for
+
+Raised 2026-09-01 while building the answer key, and it constrains how §2.2 may be
+decided rather than deferring anything.
+
+Recall@10 over these links measures **retrieval when wording diverges** — a real
+capability the eventual archive needs, since prose about an event rarely repeats the
+words of the evidence behind it. But the *distribution* is Thoreau deliberately
+rewriting journal into literature: almost certainly harder, and differently shaped,
+than "the same event, described differently". The capability transfers; the difficulty
+does not.
+
+So the number is a **stress case, good for detecting gross failure, and a poor
+instrument for setting thresholds**. `poc-plan.md` §6 risk 4 anticipates half of this —
+that the task may be hard enough to swamp the signal — but frames it as difficulty
+rather than as measuring a task the real archive does not have.
+
+**What follows:** M1's pre-registered embeddings procedure (issue #14) must say what a
+poor score licenses, written down before the number exists. Harness numbers two and
+three are unaffected — gathered-set recall measures index completeness, promotion miss
+rate measures entity resolution against `RECON.md`'s 43 recipients, and both are the
+People/Timeline/Events material a factual archive is actually made of.
+
+Where: `docs/answer-key-protocol.md`, issue #14, part 15 §43.14.
 
 ---
 
