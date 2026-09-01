@@ -77,6 +77,11 @@ Where: `poc-plan.md` §9.
 The one surface of §40.3 that needs a model driver, and the front door of the desktop
 design. Deferred; the other four surfaces are reads over the repository and SQLite.
 
+Deferred with it: the **second opener onto the supplied-context surface**, beside the
+§19.2 scope note. That is the semantically right home for it — the scope note discharges
+§33 for search, the panel discharges §33.1 for assembly — but book-wide conversations do
+not exist in the PoC, so at M5 the surface opens from the Section view only (ADR-0001).
+
 Where: `poc-plan.md` §3 and §5, part 19 §19.11.
 
 ### 2.2 Semantic embeddings
@@ -135,6 +140,7 @@ failure is recognised as evidence rather than as a surprise.
 | A legacy import audits from a cold cache | part 06 §8.12 | First audit of a real chapter being unaffordably slow |
 | Assembly is reproducible per session, not globally deterministic | part 11 §32 | Needing to reproduce an old assembly exactly and being unable to |
 | Ingest stales audit verdicts across every touched entry | part 06 §8.12 — fourth hash | Not-current counts so noisy after routine ingest that the author stops trusting the tint |
+| The supplied-context account lists reads the client may have compacted away | ADR-0001 — the account covers the whole session, not just assembly | An author acting on a supplied item the model demonstrably no longer holds |
 
 ---
 

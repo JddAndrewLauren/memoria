@@ -222,6 +222,12 @@ A session should never begin by dumping the repository into a model, nor should 
 
 The Context Builder is the layer that turns a book-sized corpus into a focused working context. It assembles the durable state most relevant to the task under a token budget, while leaving the broader archive available through retrieval tools.
 
+**A budget that is reached is reported, never silent** (added 2026-09-01). When the
+budget binds, assembly names what loaded only in part and how far it got — *"Bob's
+audit-visible body loaded in part, 40 of 96 statements"*. Truncating in silence would be
+§33.1's failure one level up: material the agent cannot know is missing. The report is
+in countable units, not tokens; the token figures live on the manifest (§33).
+
 The operating principle is:
 
 > **Load what is predictably relevant. Retrieve what becomes relevant. Preserve what must survive the session.**
@@ -360,6 +366,16 @@ Two obligations follow:
   cross-references are the instrument; **gathered-set recall** over those links —
   a set metric, not recall@10 — is the measure of whether the index is complete
   enough to write from. See `poc-plan.md` §3 and part 15 §43.14.
+
+**What discharges the first obligation** (added 2026-09-01): the **supplied context**
+surface. It reports, for one session, the **working context** assembly produced and every
+read served since — which entries the scope named, which fell back to unpromoted
+candidates, what the budget truncated, and that gathered sets are indexes rather than
+exhaustive searches. It is opened deliberately rather than watched, states countable
+domain units rather than tokens, and claims only what Memoria **supplied**: the client
+may compact served reads away, and an account that claimed to describe the model's
+current knowledge would be this section's own error in a new place. Part 14 §40 is
+amended accordingly; part 16 builds it at M5 and gates on it.
 
 This is the central risk of the subject system and it is silent by nature. Part 06
 §8.3 states it; §15's evaluation suite is where it is caught.

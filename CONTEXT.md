@@ -59,6 +59,20 @@ the subjects into a working context to write from. Happens at write time, in ser
 session; it is not curation.
 _Avoid_: Context building, retrieval, gathering
 
+**Working context**:
+The Tier 1-3 load [[assembly]] produces for one session — the briefs, the draft, the
+named entries' audit-visible bodies and the structural neighbourhood. Bounded by the
+size of the declared scope, not by corpus size, subject count or entry count.
+_Avoid_: Context window, prompt, loaded files, the context
+
+**Supplied context**:
+The [[working-context]] plus every read served since, for one session. It is an account
+of what Memoria supplied and asserts nothing about what the model still holds — the
+client may compact served reads away, and Memoria cannot see that it has. Reported in
+countable domain units; token counts belong to the session's context manifest, never to
+a surface.
+_Avoid_: Context window usage, what the model has seen, context budget, token usage
+
 **Audit**:
 Evaluating manuscript prose — hand-written or AI-written — against the entries, asking
 the audit questions each subject declares, bounded by the entries the section's brief

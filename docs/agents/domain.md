@@ -18,7 +18,7 @@ Single-context repo (most repos). This repo:
 /
 ├── CONTEXT.md              settled domain vocabulary
 ├── docs/
-│   ├── adr/                (does not exist yet — created lazily by /domain-modeling)
+│   ├── adr/                architectural decisions (created lazily by /domain-modeling)
 │   ├── plan/               the build plan, 19 parts + index
 │   ├── poc-plan.md
 │   └── open-problems.md

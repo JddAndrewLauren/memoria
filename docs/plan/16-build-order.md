@@ -197,7 +197,9 @@ Build:
   `sessions/**/transcript.md` with stable `#T` anchors, metadata, and the
   served-reads ledger folded in (§10, poc-plan §3);
 - context manifests (§33), with the completeness claim conditioned on the
-  routed layout;
+  routed layout, and **token counts per supplied item** — the development
+  instrument behind `poc-plan.md` §6 risk 1's budget-capping experiment. It
+  lives on the manifest and is never rendered by any surface (part 14 §40);
 - the **record extractor** (§12–§13): decisions, questions, research memos;
   `[author]` only on a citing transcript turn, `[open]` otherwise; entry
   statement writes per part 06 §8.2's write matrix;
@@ -238,7 +240,11 @@ Build:
   unconfirmed brief and a cold cache — a tinted chapter and a count, not ten
   thousand model calls (part 06 §8.12);
 - **assembly**: the declared scope resolved through the subjects into the §32
-  tiers, reporting what it resolved (§33.1);
+  tiers, reporting what it resolved (§33.1). The report is the
+  **supplied-context** surface, opened from the Section view: an unnumbered
+  opener, live while open and absent while closed, stating countable domain
+  units — briefs, entries, fallbacks, sources served — and naming anything the
+  budget truncated. No token figure reaches it;
 - one **scope resolver**: assembly, the audit's bounding and drift detection
   all resolve brief-to-entries through the same module (§32, part 06 §8.5) —
   three call sites independently inferring that fact is a divergence bug
@@ -261,7 +267,9 @@ Build:
 Import a Walden chapter as legacy manuscript. It gets an unconfirmed brief and
 a not-current tint; no model pass runs unasked.
 
-Write the piece's section brief. Assembly reports what the scope resolved to.
+Write the piece's section brief, naming something with no entry. Open the
+supplied context: assembly reports what the scope resolved to, and the fallback
+to an unpromoted candidate is named there rather than passing in silence.
 Authorize a draft from the assembled context, then ask why a paragraph says
 what it says and walk the provenance to the session, the authorization and the
 evidence.

@@ -19,6 +19,25 @@ This follows directly from the product promise:
 
 The user should interact in terms of questions, chapters, themes, arcs, evidence, and manuscript changes—not commands, token budgets, context manifests, or retrieval mechanics.
 
+<!-- Amended 2026-09-01, from the supplied-context grilling session. -->
+
+**Amended 2026-09-01.** The sentence above bans those things as the **medium of work**.
+It does not ban **inspecting**, on demand, what Memoria did on the author's behalf, and
+as written it was already false in two places.
+
+- **Context manifests.** The **supplied context** — what assembly loaded, and what has
+  been served since — is inspectable from an unnumbered opener, in countable domain
+  units (part 11 §33.1). Reading what was supplied is not managing what fits, and
+  Invariant 1's verb is *manage*: nothing in that surface asks the author for a
+  decision, a threshold or an action.
+- **Retrieval mechanics.** §40.7's streamed activity is retrieval mechanics on screen,
+  specified three subsections below this line and drawn in part 19 §19.2. The exception
+  predates this amendment; it was simply never written down.
+
+**Token budgets remain banned from every author-facing surface**, without exception.
+They are recorded on the session's context manifest (§33) as a development instrument
+and are never rendered. The separation is a file boundary, not a setting.
+
 The early UI should expose Memoria's intelligence without attempting to replace every mature writing tool.
 
 ---

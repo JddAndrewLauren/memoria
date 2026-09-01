@@ -415,3 +415,33 @@ Neither list is adopted by recording the other.
 Two candidates the labels may be standing in for — which axis raised the finding,
 and which resolutions the finding admits — are noted here as candidates only, and
 are not decided.
+
+---
+
+<!-- Editorial note appended 2026-09-01, from the supplied-context grilling session. -->
+<!-- The section text above is unchanged. -->
+
+## Editorial note — the supplied-context surface, which the design does not have
+
+The design draws §33's honesty for the **search** half — the scope note under an answer,
+*"I did not search unrelated correspondence from that period"* — and §40.7's activity log
+for the **retrieval** half. It draws nothing for the **assembly** half, which §33.1 calls
+the harder case: an index reports nothing about its own recall.
+
+**Adopted 2026-09-01**: a **supplied-context** surface, reporting for one session the
+working context assembly produced and every read served since. Its shape, and the
+reasoning that kept it clear of Invariant 1, are in `../adr/0001-supplied-context-is-inspectable.md`.
+In summary: opened rather than watched, live only while open, an opener that carries no
+count, countable domain units rather than tokens, and anything the budget truncated named
+outright.
+
+Its home in the PoC is the **Section view** (§19.5), because part 16 builds assembly and
+that view together at M5 while **Ask Memoria never ships** (`poc-plan.md` §5). The
+semantically right home is beside the scope note in §19.2, paired with the sibling
+obligation it discharges — that is a second opener onto the same surface, and it arrives
+with Ask Memoria, post-PoC.
+
+This is the second line in §19.11's "runs ahead of decisions" list to resolve toward
+*more* interface rather than less, after `+ New subject`. The design was not wrong to
+omit it; the plan had simply never said what "assembly must report what it resolved"
+looked like on a screen.
