@@ -95,10 +95,15 @@ _LETTERS_RAW_PATH = "raw/gutenberg/43523-familiar-letters/pg43523.txt"
 # (issue #56): a footnote marker in a letter's body, that footnote's body
 # in a "FOOTNOTES:" block (plural, unlike the journals' single "FOOTNOTES"
 # back-matter section - see docs/editorial-record-schema.md), a standalone
-# bracketed aside, a sentence-completing interpolation, and a second
-# footnote marker sitting in a letter's own heading line rather than its
-# body text - the real corpus's own "known gap" shape (footnotes 15, 41,
-# 42), left unlinked rather than dropped.
+# bracketed aside, a sentence-completing interpolation, a second footnote
+# marker sitting in a letter's own heading line rather than its body text
+# - the real corpus's own "known gap" shape (footnotes 15, 41, 42), left
+# unlinked rather than dropped - and, resuming right after that first
+# footnote's own body, the two other shapes PR #63 review round 1 found
+# body text actually resumes in on the real corpus: a two-line chapter
+# heading (bare roman numeral, then an all-caps title) and a letter
+# addressed *to* Thoreau from another correspondent (which, unlike
+# Thoreau's own "TO ..." letters, does not start with "TO ").
 _FAKE_LETTERS_WITH_APPARATUS = (
     "The Project Gutenberg eBook of Familiar Letters\r\n"
     "\r\n"
@@ -126,6 +131,17 @@ _FAKE_LETTERS_WITH_APPARATUS = (
     "FOOTNOTES:\r\n"
     "\r\n"
     "[2] Helen's reply has not survived.\r\n"
+    "\r\n"
+    "II\r\n"
+    "\r\n"
+    "A CHAPTER HEADING\r\n"
+    "\r\n"
+    "This chapter narrative must never appear in any footnote body.\r\n"
+    "\r\n"
+    "A CORRESPONDENT TO THOREAU (AT CONCORD).\r\n"
+    "\r\n"
+    "DEAR THOREAU,--This letter to Thoreau must never appear in any\r\n"
+    "footnote body.\r\n"
     "\r\n"
     "TO JOHN THOREAU[3] (AT TAUNTON).\r\n"
     "\r\n"
@@ -361,6 +377,28 @@ def test_letters_footnote_marker_is_stripped_and_body_extracted_and_linked(tmp_p
     assert footnote_2.linked_record_id == helen_letter.id
     assert footnote_2.recorded_date == "1906"
     assert footnote_2.retrospective is True
+
+
+def test_letters_footnote_block_ends_at_a_chapter_heading_or_a_letter_to_thoreau(
+    tmp_path,
+):
+    # PR #63 review round 1: the block-end terminator only recognized
+    # "FOOTNOTES:", a "TO ..." letter heading, and "GENERAL INDEX" - so a
+    # two-line chapter heading ("II" / "A CHAPTER HEADING") or a letter
+    # addressed *to* Thoreau ("A CORRESPONDENT TO THOREAU (AT CONCORD).",
+    # which does not start with "TO ") never closed the block, and both
+    # got appended to the last footnote seen as if they were more of its
+    # own text.
+    evidence_root = tmp_path / "thoreau-evidence"
+    _write_fake_corpus_with_letters_apparatus(evidence_root)
+
+    _, editorial = _extract_letters(evidence_root)
+
+    footnotes = [e for e in editorial if e.editorial_type == "footnote"]
+    footnote_2 = next(e for e in footnotes if e.original_locator.endswith("footnote 2"))
+    assert footnote_2.text == "Helen's reply has not survived."
+    assert "CHAPTER HEADING" not in footnote_2.text
+    assert "must never appear in any footnote body" not in footnote_2.text
 
 
 def test_letters_footnote_with_marker_in_heading_line_is_unlinked(tmp_path):
@@ -685,6 +723,50 @@ class TestLettersAgainstTheRealEvidenceCorpus:
         assert len(footnotes) == 110
         assert len(asides) == 11
         assert len(interpolations) == 39
+
+    def test_footnote_bodies_stop_at_the_next_chapter_or_letter_to_thoreau(
+        self, extracted
+    ):
+        # PR #63 review round 1 (blocking): the block-end terminator only
+        # recognized "FOOTNOTES:", a "TO ..." letter heading, and "GENERAL
+        # INDEX" - missing the shapes that actually resume body text after
+        # a footnote block in this volume (a two-line chapter heading, a
+        # letter addressed *to* Thoreau, "APPENDIX"). Footnote 34 ran on
+        # 8259 chars past its real end, footnote 106 4881 chars, footnote
+        # 41 21 chars - swallowing chapter II's heading, Sanborn's
+        # narrative, Ellery Channing's full March 5 1845 letter, and
+        # Charles Lane's three letters into footnote 34's body, and the
+        # APPENDIX heading into footnote 106's. Pinned on the real corpus
+        # since the fake fixture cannot see this class of bug: the fake
+        # text has no chapter heading or "TO"-less correspondent heading
+        # shape at all until this PR added one (see
+        # test_letters_footnote_block_ends_at_a_chapter_heading_or_a_letter_to_thoreau).
+        _, editorial = extracted
+        footnote_34 = next(
+            e for e in editorial if e.original_locator == "Familiar Letters, footnote 34"
+        )
+        footnote_106 = next(
+            e for e in editorial if e.original_locator == "Familiar Letters, footnote 106"
+        )
+        assert footnote_34.text.startswith(
+            'This inkstand was presented by Miss Hoar, with a note dated "Boston, May 2, 1843,"'
+        )
+        assert footnote_34.text.endswith("Truly your friend, E. HOAR.")
+        assert len(footnote_34.text) < 1200
+        for junk in (
+            "GOLDEN AGE OF ACHIEVEMENT",
+            "MY DEAR THOREAU",
+            "christened",  # Channing's letter: '"Briars;" ... christened'
+            "CHARLES LANE",
+            "Walden Woods",
+        ):
+            assert junk not in footnote_34.text, junk
+
+        assert footnote_106.text.startswith(
+            "This was a short-lived monthly, edited at Cincinnati (1861-62)"
+        )
+        assert len(footnote_106.text) < 400
+        assert "APPENDIX" not in footnote_106.text
 
     def test_most_footnote_markers_link_back_to_a_letter_paragraph(self, extracted):
         # 9 of the 110 footnotes are known gaps (docs/editorial-record-

@@ -181,13 +181,26 @@ def _parse_footnote_bodies(raw_text: str) -> dict[int, str]:
 # journals' own bare "FOOTNOTES" heading (no colon) by the trailing colon.
 _LETTERS_FOOTNOTES_HEADING_RE = re.compile(r"^FOOTNOTES:\s*$", re.M)
 
-# What closes a Familiar Letters footnote block: the next such block, the
-# next letter ("TO ..." heading), or the volume's General Index - never
-# the Gutenberg END marker the way the journals' one back-matter section
-# is, since ordinary letter and chapter text follows each block rather
-# than the end of the file.
+# What closes a Familiar Letters footnote block: never the Gutenberg END
+# marker the way the journals' one back-matter section is, since ordinary
+# letter and chapter text follows each block rather than the end of the
+# file. Body text resumes in one of several shapes - the next such block,
+# the next letter Thoreau wrote ("TO ..."), a letter TO Thoreau from
+# another correspondent ("ELLERY CHANNING TO THOREAU (AT CONCORD)."), a
+# two-line chapter heading (a bare roman numeral, e.g. "II", followed by
+# an all-caps title, e.g. "GOLDEN AGE OF ACHIEVEMENT"), "APPENDIX", or the
+# volume's "GENERAL INDEX" - an open-ended list of heading shapes that
+# real-corpus inspection keeps finding new members of (see PR #63 review
+# round 1: the original blacklist missed all but the first and last).
+# Rather than keep enumerating shapes, this matches what every one of them
+# has in common and a footnote body never does: a bare, unindented line
+# made up entirely of uppercase letters/digits and light punctuation, with
+# no lowercase letter anywhere on it. Verified against the real corpus
+# (docs/editorial-record-schema.md): no footnote body in any of its four
+# blocks contains such a line - even a footnote that quotes a whole letter
+# keeps every line of that quote indented or mixed-case.
 _LETTERS_FOOTNOTE_BLOCK_END_RE = re.compile(
-    r"^(?:FOOTNOTES:|TO .+|GENERAL INDEX)\s*$", re.M
+    r"""^[A-Z][A-Z0-9 '"().,:;_-]*$""", re.M
 )
 
 

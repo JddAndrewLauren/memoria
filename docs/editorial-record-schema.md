@@ -66,8 +66,14 @@ bracketed span's contents, or the introduction's full text.
   every footnote in one volume-level back-matter `FOOTNOTES` section
   (already cut from evidence by #3); the letters (#56) scatter theirs
   across several `FOOTNOTES:` blocks through the body instead, one per
-  stretch of letters, each closed by the next such block, the next
-  letter's own heading, or the volume's General Index.
+  stretch of letters, each closed by whatever body text resumes next -
+  the next such block, the next letter Thoreau wrote, a letter *to*
+  Thoreau from another correspondent, a chapter heading, `APPENDIX`, or
+  the volume's General Index. Recognized by a positive rule rather than
+  an enumeration of those shapes: a bare, unindented line made up
+  entirely of uppercase letters/digits and light punctuation, with no
+  lowercase letter on it - a shape no footnote body's own text ever
+  takes (PR #63 review round 1).
 - **Standalone bracketed asides.** A `[...]` span that reads as its own
   complete remark - illustration captions (`[Illustration: ...]`),
   cross-references to the published works (`[_Week_, p. 319; Riv.
