@@ -34,7 +34,7 @@ original_locator: "Journal I, entry dated Oct. 22."
 | `source_type` | `journal`, `letter` (the 130 *Familiar Letters*, issue #6), or `book` (the two audit targets, issue #9 — see "The audit targets" below). Other source types (email, ...) are later slices. |
 | `recorded_date` | The date heading text, verbatim, exactly as it appears in the source — never rewritten by year resolution. Empty for the 29 undated opening fragments of J02's Chapter I (`date_confidence: chapter-only`), which have no date heading to quote; see "J02's undated opening fragments" below. |
 | `event_date` | `recorded_date` with its resolved year appended (`"Oct. 22., 1845"`), or unchanged from `recorded_date` where the heading already states its own year, or where no year could be resolved at all (`date_confidence: unresolved` — no invented date). Empty for the `chapter-only` fragments: their chapter scopes them to 1850, but `event_date` is a date and they have no day, so the field is left empty rather than filled with a year pretending to be one. The chapter's year stays recoverable from `original_locator`. Journals have no retrospective/contemporaneous date split within one entry, so before year resolution `recorded_date` and `event_date` were identical; year resolution (`src/memoria/year_resolution.py`, issue #4) is what makes them diverge. |
-| `date_confidence` | `exact` only where a weekday in the heading confirmed the resolved year against a real calendar; `inferred` where the year came from an unambiguous chapter heading, an explicit year in the entry heading itself, or position within a multi-year chapter, without a weekday to confirm it; `chapter-only` where the record has **no date heading of its own**, so its enclosing chapter is the only date context there is — RECON.md §3's reading of the value exactly ("scoped to 1850, no day"), and the 29 undated opening fragments of J02's Chapter I are the records that carry it (see below); `unresolved` where a resolution was attempted and produced nothing — a dated entry with no chapter marker before it anywhere (no record in the corpus: both volumes open with a chapter heading), and all 130 letters: their datelines do carry an explicit year (see the `dateline` row below), but year resolution is a separate M0 step from letters parsing, so that year is left unparsed rather than absent. A weekday that does not match any candidate year is never silently accepted as `exact`; `memoria normalize` prints it as a warning instead. `published` is the audit targets' value: a book's date is its year of publication — a documentary fact about the volume, not a year resolved out of the text — so none of the four resolution outcomes describes it honestly. |
+| `date_confidence` | `exact` only where a weekday in the heading confirmed the resolved year against a real calendar; `inferred` where the year came from an unambiguous chapter heading, an explicit year in the entry heading itself, or position within a multi-year chapter, without a weekday to confirm it — a letter's dateline (issue #57) gets `inferred` the same way, since it too states its own year in plain text with nothing to independently confirm it against (no weekday, no chapter); `chapter-only` where the record has **no date heading of its own**, so its enclosing chapter is the only date context there is — RECON.md §3's reading of the value exactly ("scoped to 1850, no day"), and the 29 undated opening fragments of J02's Chapter I are the records that carry it (see below); `unresolved` where a resolution was attempted and produced nothing — a dated entry with no chapter marker before it anywhere (no record in the corpus: both volumes open with a chapter heading), and the 4 of 130 letters whose dateline is empty (`SRC-000002`, `SRC-000129`) or carries no parseable 4-digit year (`SRC-000007`'s Roman-numeral "MDCCCXL.", `SRC-000024`'s "May 23." with no year at all) — no date is ever invented for these. A weekday that does not match any candidate year is never silently accepted as `exact`; `memoria normalize` prints it as a warning instead. `published` is the audit targets' value: a book's date is its year of publication — a documentary fact about the volume, not a year resolved out of the text — so none of the four resolution outcomes describes it honestly. |
 | `contemporaneous` | `true` for journal entries — a diary entry is contemporaneous evidence by definition (part 05 §6). |
 | `original_file` | Path to the raw source, relative to the evidence root (`MEMORIA_EVIDENCE_ROOT`) — the same convention `manifest.yaml` and `memoria validate` use, e.g. `raw/gutenberg/57393-journal-01/pg57393.txt`. |
 | `original_locator` | Human-readable pointer into the original, e.g. `"Journal I, entry dated Oct. 22."`; for an undated fragment, the chapter and its position within the chapter's opening run, e.g. `"Journal II, Chapter I, undated fragment 3 of 29"`. |
@@ -219,17 +219,23 @@ journal records:
 | Field | Meaning |
 |---|---|
 | `recipient` | The heading text after `TO `, preserved **verbatim** — no stripping, no merging. This is deliberate: R. W. Emerson's four location forms (`(AT CONCORD)`, `(AT NEW YORK)`, `(IN ENGLAND)`, no location) and the Thoreau family's shared surname are the corpus's alias-resolution hazard material (§7), and merging them here would destroy it before M2 ever sees it. |
-| `dateline` | The letter's indented dateline paragraph (e.g. `CONCORD, October 27, 1837.`) — the first substantive paragraph after the heading (skipping a leading editorial annotation like `[The first of many letters.]`), if and only if it is indented; empty when the letter has none, rather than scanning further and risking its closing signature block instead (review round 1 on PR #52's blocking defect 1: `SRC-000002`/`SRC-000129` used to get `"TAHATAWAN."`/`"Yrs. in great haste, HENRY D. THOREAU."`). Unlike the journals, letter datelines already carry an explicit year — still landing here verbatim rather than parsed, since year resolution is a separate M0 step (part 16) from letters parsing. |
+| `dateline` | The letter's indented dateline paragraph (e.g. `CONCORD, October 27, 1837.`) — the first substantive paragraph after the heading (skipping a leading editorial annotation like `[The first of many letters.]`), if and only if it is indented; empty when the letter has none, rather than scanning further and risking its closing signature block instead (review round 1 on PR #52's blocking defect 1: `SRC-000002`/`SRC-000129` used to get `"TAHATAWAN."`/`"Yrs. in great haste, HENRY D. THOREAU."`). Unlike the journals, letter datelines already carry an explicit year, stated in plain text — landing here verbatim, same as always; `date_confidence` (below) is what turns that stated year into a real value (issue #57). |
 | `salutation` | The opening address (`DEAR HELEN,--`, `MR. BLAKE,--`), extracted non-destructively from the body's first paragraph — the body keeps that paragraph in full, so nothing is lost by also exposing this field. |
 
 `recorded_date` / `event_date` land as the dateline text, same as `dateline`
-(the journals' pattern of landing the heading text verbatim). `contemporaneous`
-is `true` — a letter, like a diary entry, is evidence contemporaneous with
-when it was written. `date_confidence` is `unresolved` for every letter
-record this slice produces, the same value the journals slice produces and
-for the same reason: parsing the dateline's already-explicit year into a
-resolved date is year-resolution work, scoped to a later M0 step (part 16),
-not this one.
+(the journals' pattern of landing the heading text verbatim) — a letter's
+dateline already states its own year, so unlike the journals there is no
+separate resolved value for `event_date` to append; the two fields stay
+identical. `contemporaneous` is `true` — a letter, like a diary entry, is
+evidence contemporaneous with when it was written. `date_confidence` is
+`inferred` for the 126 of 130 letters whose dateline carries a plain,
+unambiguous 4-digit year — no chapter to infer from and no weekday to run
+as a checksum, so `inferred` is the same value the journals use for a
+heading that already states its own year with nothing to confirm it
+against. The remaining 4 letters — an empty dateline (`SRC-000002`,
+`SRC-000129`) or one with no parseable year (`SRC-000007`'s Roman-numeral
+"MDCCCXL.", `SRC-000024`'s "May 23." with no year at all) — stay
+`unresolved`, never invented.
 
 ### Scope: editorial narrative between letters is left inline
 
@@ -323,7 +329,12 @@ chapter-only=29** (`tests/test_year_resolution.py`'s
 `TestAgainstTheRealEvidenceCorpus` asserts this distribution, alongside the
 invariant that no record is `exact` without a weekday in its heading, and
 that a `chapter-only` record carries neither a `recorded_date` nor an
-`event_date`). The 130 letters are `unresolved`, for 717 records in all.
+`event_date`). Of the 130 letters (issue #57), **126 are `inferred`** (a
+plain, unambiguous year in the dateline) and **4 are `unresolved`**
+(`SRC-000002`/`SRC-000129`'s empty datelines, `SRC-000007`'s Roman-numeral
+year, `SRC-000024`'s dateline with no year at all) —
+`tests/test_letters.py`'s `TestAgainstTheRealEvidenceCorpus` asserts this
+split by ID, for 717 records in all.
 
 
 ## The audit targets

@@ -146,10 +146,12 @@ def test_rebuild_resolves_years_and_never_leaves_a_journal_record_unresolved(
     #
     # Scoped to journal records deliberately (issue #6 review round 1):
     # resolve_years() only ever touches journal records (it filters by
-    # original_file against JOURNAL_VOLUMES), so every letter keeps
-    # date_confidence: unresolved after rebuild - not a gap in rebuild(),
-    # since letters-specific year resolution is out of issue #6's scope
-    # (see docs/normalized-record-schema.md's Letters section).
+    # original_file against JOURNAL_VOLUMES). Letters get their
+    # date_confidence resolved separately, directly inside
+    # normalize_letters (issue #57) - 126 of 130 real letters resolve to
+    # `inferred` (an explicit, unambiguous year in the dateline), and the
+    # remaining 4 stay `unresolved` (see docs/normalized-record-schema.md's
+    # Letters section and tests/test_letters.py's real-corpus split test).
     evidence_root = os.environ[EVIDENCE_ROOT_ENV_VAR]
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -165,7 +167,8 @@ def test_rebuild_resolves_years_and_never_leaves_a_journal_record_unresolved(
         "chapter-only",
     }
     assert letter_records, "rebuild() must not drop the letter records"
-    assert all(r.date_confidence == "unresolved" for r in letter_records)
+    assert {r.date_confidence for r in letter_records} <= {"inferred", "unresolved"}
+    assert any(r.date_confidence == "inferred" for r in letter_records)
 
 
 @pytest.mark.skipif(
