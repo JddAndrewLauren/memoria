@@ -97,7 +97,7 @@ blacksmith's shop, for centre, and a good deal of wood to cut and cord yet.
 And
 ```
 
-**Verdict:** 
+**Verdict:** matches
 
 ---
 
@@ -194,7 +194,7 @@ before Wawatam had ceased to offer up his prayers." We never hear of him
 again.
 ```
 
-**Verdict:** 
+**Verdict:** matches
 
 ---
 
@@ -279,7 +279,7 @@ is the skilful swordsman who can give clean wounds, and not rip up his work
 with the other edge?
 ```
 
-**Verdict:** 
+**Verdict:** matches
 
 ---
 
@@ -364,7 +364,7 @@ instinctively, for that alone is a true _humanity_, or account of human
 experience.
 ```
 
-**Verdict:** 
+**Verdict:** matches
 
 ---
 
@@ -488,7 +488,7 @@ woodchucks, rabbits, partridges,—by gosh! I could get all I should want for
 a week in one day."
 ```
 
-**Verdict:** 
+**Verdict:** matches
 
 ---
 
@@ -582,6 +582,6 @@ as a mushroom, but partially risen out of the earth, something more than
 erect, like swallows alighted and walking on the ground:—
 ```
 
-**Verdict:** 
+**Verdict:** matches
 
 ---
