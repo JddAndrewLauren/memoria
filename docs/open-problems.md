@@ -91,14 +91,14 @@ Where: `poc-plan.md` §3, part 11, part 15.
 
 ## 3. Documents that must be rewritten before they are followed
 
-### 3.1 Part 16 — Build Order
+### 3.1 Part 16 — Build Order — CLOSED 2026-08-31
 
-**Superseded.** M0 and M1 assume the web service, `ModelBackend` and capacity machinery
-that parts 13 and 14 removed, and it predates the subject system and the manuscript
-layer. Re-slicing was deliberately not done in the three grilling sessions so far.
-
-Sequencing is now more decidable than it was: anchoring is closed, the manuscript's
-durable footprint is fixed, and the audit has one mechanism rather than two.
+**Rewritten.** Part 16 now sequences the PoC as six gated milestones (M0
+normalizer through M5 manuscript layer, plus the resumption gate), replacing the
+M0/M1 that assumed the web service, `ModelBackend` and capacity machinery. Its
+closing table records which open decision each milestone forces and when; nothing
+in §1 above is decided by it. The old build order is archived in
+`_original-memoria-plan.md` §44.
 
 ---
 
@@ -146,5 +146,5 @@ Build detail rather than open decisions, from `poc-plan.md` §7:
 - which §25 tools ship, and their exact signatures;
 - the Curator's scope and trigger policy;
 - **the subject and length of the authorship-track piece** — now constrained by §4.1
-  above;
+  above, and forced at part 16's M4;
 - whether and when to acquire *Excursions*, *Cape Cod* and *The Service*.

@@ -1,243 +1,314 @@
 <!-- Part of the Memoria build plan. Index: ./plan-index.md -->
 <!-- Source sections: 44 of the original memoria-plan.md -->
+<!-- REWRITTEN 2026-08-31: re-sliced for the PoC runtime (MCP server + Claude Code -->
+<!-- client, sibling evidence repo), the subject system, the manuscript layer and -->
+<!-- ownership by badge. The original M0–M4 is in _original-memoria-plan.md §44. -->
 
 # 44. Build Order
 
-Memoria should be built as a sequence of usable milestones rather than as several independent infrastructure projects.
+Memoria is built as a sequence of usable milestones rather than as several
+independent infrastructure projects. Each milestone ends at a **gate**: a
+concrete, author-visible act that either works or does not.
+
+This order sequences the PoC (`../poc-plan.md`): Memoria as an MCP server with
+Claude Code as the client, proved against the Thoreau corpus in the sibling
+evidence repo, on the two tracks poc-plan §1 keeps separate. Four rules shaped
+the slicing:
+
+- **The harness carries the discipline.** §45's "observe failure, then adopt"
+  only works if the measurement exists, so the benchmark harness (§43.14)
+  reports its three numbers from the first milestone that can produce any of
+  them, printing the rest as *not yet measurable* rather than omitting them.
+- **Normalization before everything.** It is the one place a mistake silently
+  invalidates every downstream number (poc-plan §6 risk 3), so it lands first,
+  recon-informed, with mechanical checks against `RECON.md`'s counts.
+- **The index maintainer before the record extractor.** The maintainer writes
+  only rebuildable derived state and no restraint rule binds it (§12); the
+  extractor needs session records, the curation restraint rules and the entry
+  write matrix. Half the Curator is therefore buildable two milestones earlier
+  than the other half.
+- **A milestone forces the decisions it needs, and no others.** The open
+  questions in `../open-problems.md` stay open until a gate needs them closed;
+  the table at the end names what each milestone forces.
 
 ---
 
-## M0 — Repository, Evidence, and Provenance Foundation
+## M0 — Normalized Evidence You Can Trust
 
 Build:
 
-- repository structure;
-- Git conventions;
-- source ingestion;
-- immutable raw storage;
-- normalized Markdown;
-- stable source IDs;
-- internal source anchors;
-- temporal metadata;
-- alias map;
-- stable IDs for semantic objects;
-- SQLite FTS5;
-- semantic embeddings;
-- basic dependency/backlink indexes;
-- provenance reference model;
-- human-change capture;
-- core service layer shared by CLI, web UI, and Curator;
-- `ModelBackend` abstraction;
-- Claude Code subscription backend;
-- controlled Memoria tool/MCP surface;
-- `memoria rebuild`;
-- `memoria validate`.
+- the normalizer for the five works, driven by the evidence repo's `RECON.md`:
+  Gutenberg boilerplate and front matter excluded; CRLF and per-volume quote
+  conventions handled; entries split on the line-initial italic date headings;
+- year resolution from chapter headings with the **weekday checksum** as the
+  primary path: `date_confidence: exact` only where checked, `inferred` for the
+  remainder, `chapter-only` for J02's undated fragments (§5.2, §6);
+- **editorial-voice segregation**: Torrey's and Sanborn's introductions, the
+  ~1,750 footnote markers and ~1,050 bracketed editorial spans stored as
+  retrospective editorial records *about* the evidence, never inside it (§6);
+- letters parsing: header, dateline, recipient, salutation, body;
+- the normalized record schema, stable `SRC-` IDs and paragraph anchors
+  (§5.2–5.3);
+- SQLite FTS5 over the normalized records;
+- ground truth extraction: all 628 cross-references parsed from the journals,
+  the 364 that land on held targets tabled with their journal-side anchors;
+  `RECON.md`'s 43 letter recipients tabled;
+- the **answer key**: the cross-references cite pages of editions not held, so
+  each link's target-side passage must be located by adjudication, not lookup
+  (`RECON.md` §4). A hand-resolved pilot of ~30 links proves the protocol; the
+  full key is completed before M1's gate is scored. If adjudication proves
+  unaffordable, the benchmark is re-scoped then — explicitly, to the subset
+  that can be resolved honestly — rather than quietly scored against a key
+  produced by the machinery under test;
+- `memoria rebuild` over the derived state that exists so far, and
+  `memoria validate` (IDs, links, raw-file hashes) — both grow at every later
+  milestone;
+- a mechanical check-suite reconciling the normalizer against `RECON.md`:
+  448 date headings, 130 letters, 43 recipients, footnote and bracketed-span
+  counts, and sampled evidence records containing no editorial voice.
 
 ### Gate
 
-Take a normalized source citation, click it, reach the exact evidence, then open the original file.
+Open a normalized journal entry. Its text carries no 1906 voice; its apparatus
+is linked alongside it; its date says how it was resolved.
 
-Make a direct edit to a theme and later retrieve its exact diff.
+Pick an entry inside a multi-year chapter (`1845–1847`) and see the weekday
+resolve its year exactly.
 
-Delete the database and rebuild it without losing any durable information.
+Delete the index and rebuild it without losing anything.
 
-Authenticate Claude Code through the author's own supported Anthropic subscription and successfully run a Memoria tool-backed request through the `ModelBackend` abstraction.
-
----
-
-## M1 — The Resumable Writing Loop
-
-Build:
-
-- session harness;
-- three session modes;
-- Context Builder;
-- token budgeting;
-- context manifests;
-- immutable session transcripts;
-- stable turn anchors;
-- detailed event log;
-- core retrieval tools;
-- `trace()` and `backlinks()`;
-- minimum viable post-session Curator;
-- checkpoints;
-- decisions;
-- question extraction;
-- provenance from Curator outputs to conversation turns;
-- direct AI writing to canonical `draft.md`;
-- explicit authorization capture;
-- manuscript-write scoping;
-- provenance for AI-written passages;
-- draft-from-source-packet workflow;
-- safe Git commits for AI manuscript work;
-- responsive web UI;
-- phone-friendly navigation;
-- Home / Ask Memoria;
-- Section view;
-- Source viewer;
-- Theme / Arc view;
-- Research conversation;
-- basic Review / manuscript-impact view;
-- streamed model responses and activity;
-- single write coordinator;
-- graceful preservation and deferral when subscription capacity is unavailable.
-
-### Gates
-
-#### Resumption gate
-
-Work deeply on a real section.
-
-Leave it alone.
-
-Return days or weeks later.
-
-Memoria should restore enough state to continue without a manual recap.
-
-Click an `[author]` interpretation created during the earlier session and arrive at the exact sentence in which it was expressed.
-
-#### Web / phone gate
-
-Open Memoria from both a desktop browser and a phone.
-
-Ask a book-wide question whose answer requires retrieval outside the initial working context.
-
-The user should not need to select files or manage context manually.
-
-The answer should expose clickable provenance, and the same durable session should be resumable from either device.
-
-#### AI writing gate
-
-Research and outline a real section.
-
-Tell Memoria:
-
-> Draft this section from the source packet.
-
-The resulting prose should be written directly into the canonical manuscript and committed.
-
-Later, Memoria must be able to answer:
-
-> Why does this paragraph say this?
-
-and expose:
-
-- the writing session;
-- the authorization;
-- source packet;
-- source evidence;
-- resulting Git change.
+The check-suite passes, and every mismatch it caught on the way is now a
+regression test (§43).
 
 ---
 
-## M2 — Full Curator, Coherence, and Manuscript Impact
+## M1 — The Tool Surface and the First Number
 
 Build:
 
-- ownership enforcement;
-- Git-blame awareness;
-- human-edit supremacy;
-- human deletion boundaries;
-- materiality classification;
-- dependency propagation;
-- conflict list;
-- interpretation refresh;
-- arc/theme propagation;
-- digest generation;
-- provenance validation on Curator commits;
-- manuscript dependency analysis;
-- manuscript-impact records;
-- automatic candidate patches;
-- confidence classification;
-- dismissed-suggestion memory;
-- batch authorization;
-- post-write coherence checks.
+- the MCP server, exposing the minimum of §25 this gate needs: `search_text`
+  over FTS5 and `read(ref)` over the §4 stable IDs — verbatim source text,
+  never a summary in its place, with a raw undecorated full-source read
+  available (poc-plan §7's superset-of-grep constraint);
+- the `events.jsonl` read ledger: every served read recorded (§10.4, §33);
+- the benchmark harness, reporting all three slots: **retrieval recall@10**
+  over the answer key measured; gathered-set recall and the promotion miss
+  rate printed as *not yet measurable*. The harness spec also defines the
+  **link-to-entry mapping** that makes gathered-set recall well-defined —
+  which entries the cross-referenced passages are held to belong to — rather
+  than leaving M2 to improvise it;
+- **pre-registration**: before M2 begins, the harness records what its three
+  numbers will decide and how — the embeddings go/no-go procedure (§45) is
+  written down while the numbers do not yet exist, so the decision cannot be
+  rationalized after the fact.
+
+The evidence-read routing hook already exists; this milestone is what makes the
+routed path the path of least resistance — the tools return more than a raw
+read does.
 
 ### Gate
 
-Change a major event date or correct an important arc.
+From Claude Code, ask a question about a journal passage. Every evidence read
+arrives through the tools and lands in `events.jsonl`.
 
-Memoria should:
-
-1. preserve the author's correction;
-2. identify every materially affected manuscript passage;
-3. distinguish high-confidence conflicts from softer interpretive implications;
-4. prepare appropriate proposed revisions;
-5. change no canonical prose before authorization;
-6. accept a scoped batch instruction;
-7. directly rewrite the authorized passages;
-8. preserve provenance for every rewrite;
-9. leave unauthorized passages untouched;
-10. allow the entire Curator/AI pass to be reverted cleanly.
+Run the harness and read the first real number. FTS5 is expected to score
+poorly on paraphrase links (poc-plan §3); the point of this gate is that the
+number exists before anything heavier is argued for.
 
 ---
 
-## M3 — Research Depth
+## M2 — Subjects, Candidates, and the Index Maintainer
 
 Build:
 
-- investigation skill;
-- contradiction-search discipline;
-- compare-accounts workflow;
-- source-packet workflow;
-- persistent research state;
-- research memos;
-- question-queue workflow;
-- memo-to-interpretation curation;
-- rigorous search-scope reporting.
+- the five built-in subjects with their prompts — match definition, matching
+  hazards, audit questions (part 06 §8.1). People's hazards carry `RECON.md`'s
+  four Thoreaus sharing a surname and Emerson under four location forms;
+- continuous candidate matching and the recurrence filter (part 06 §8.4);
+  promotion as an author act; manual entry creation;
+- **match terms** on entries — populated by ingest, owned by the author, the
+  system's only alias store (§7, part 06 §8.2);
+- gathered sets, and the curated overlay: **pins and exclusions**, attributable
+  and rebuild-surviving — the durable-dismissal machinery poc-plan §3 requires
+  from the first Curator pass;
+- appearances over the audit targets, lexical engine only (part 06 §8.11); the
+  model engine for Themes and Arcs waits for the audit at M5;
+- read decoration: `read(ref)` on evidence now returns the curated overlay —
+  entry links, exclusions, settlements citing the paragraph (poc-plan §7);
+- `rebuild` covers candidates, gathered sets and appearances; `validate` covers
+  overlay attribution;
+- harness numbers two and three: **gathered-set recall** over the links, under
+  M1's link-to-entry mapping, and **promotion miss rate** against the 43
+  recipients. Ground truth exists only where `RECON.md` supplies it — the
+  recipients table is People-scoped — and the numbers claim no more than the
+  mapping and that table cover.
 
 ### Gate
 
-Give Memoria a genuinely contested interpretation.
+Promote Emerson. The entry materializes with its gathered set already built;
+add his four location forms as match terms and watch the set complete.
 
-It should independently:
+Exclude a wrong Thoreau from an entry's gathered set, run `memoria rebuild`,
+and see the exclusion survive.
 
-- plan research;
-- find supporting evidence;
-- seek contradictory evidence;
-- distinguish contemporaneous from retrospective material;
-- inspect full sources rather than relying on chunks;
-- explain uncertainty;
-- create a durable memo;
-- construct a clickable evidence chain.
+The harness prints three real numbers. **With all three in hand, the embeddings
+decision (open-problems §2.2) is taken by the procedure pre-registered at M1 —
+the only mechanism decision this build order schedules.**
 
 ---
 
-## M4 — Whole-Book Reasoning and Hardening
+## M3 — Two Reading Surfaces
 
 Build:
 
-- book/part/theme/arc digests;
-- broader whole-book reasoning workflows;
-- distributed-pattern evaluation;
-- stale-state detection;
-- health checks;
-- Curator activity digest;
-- provenance audits;
-- broken-link repair;
-- manuscript drift reports;
-- advanced web UI polish;
-- richer provenance exploration;
-- richer research workspace;
-- advanced manuscript review tooling.
+- the app shell and three-tree navigation (part 19's `MANUSCRIPT` tree stays
+  empty until M5);
+- the **Source viewer** with the slide-over citation panel and **Open
+  original** into the evidence repo;
+- the **Theme / Arc (entry) view**: audit-visible body with badges visible,
+  match terms, gathered set with its overlay, appearances.
+
+Both are reads over the repository and SQLite; no model driver (poc-plan §3).
+The other two model-free surfaces — Section and Review — wait at M5 for the
+data they show. M3 and M4 are independent of each other; order or overlap them
+freely.
 
 ### Gate
 
-Ask Memoria:
+Take a citation in an entry, click it, land on the exact evidence paragraph in
+the slide-over without losing your place, then open the original file.
 
-> Why do we currently believe control is one of the major themes or arcs of the book?
+This is the original M0 gate, kept.
 
-The answer should synthesize the case but expose direct links all the way down to:
+---
 
-- primary source records;
-- exact author conversations;
-- direct author edits;
-- contrary evidence;
-- research memos;
-- manuscript passages influenced by the interpretation.
+## M4 — Sessions and the Record Extractor
 
-Nothing important should terminate at:
+This milestone opens by deciding the **subject and length of the
+authorship-track piece** (open-problems §4.1 and §6; the likely subject is
+Thoreau's revision practice, poc-plan §1). Deciding it here rather than at M5
+buys two things: the piece's research sessions become M4's real sessions,
+exercising the extractor on genuine work instead of staged conversation, and
+the clock the resumption gate needs starts as early as it can.
 
-> because the AI previously concluded that.
+Build:
+
+- transcript derivation from Claude Code's per-session JSONL:
+  `sessions/**/transcript.md` with stable `#T` anchors, metadata, and the
+  served-reads ledger folded in (§10, poc-plan §3);
+- context manifests (§33), with the completeness claim conditioned on the
+  routed layout;
+- the **record extractor** (§12–§13): decisions, questions, research memos;
+  `[author]` only on a citing transcript turn, `[open]` otherwise; entry
+  statement writes per part 06 §8.2's write matrix;
+- the **human-touched flag**, the dirty-tree rule, and Memoria notes (§14);
+- **settlements**, click-authorized, and the claims they accrete into
+  (part 06 §8.7, §8.9);
+- `validate` grows: an `[author]` statement without a citing turn fails; a
+  badged write without provenance fails.
+
+Research workflows (§34) are skills over the M1 tool surface, not
+infrastructure; what this milestone builds is the durable records they leave.
+
+### Gate
+
+Hold a real research session on the piece's subject. Muse about an
+interpretation; it lands `[open]`. Decide something; the decision cites your
+exact turn, and clicking it lands on the sentence in which you decided.
+
+Hand-edit a badged statement. The next pass flags it human-touched; when
+evidence later conflicts with it, the conflict arrives as a Memoria note and
+your text is unchanged.
+
+---
+
+## M5 — The Manuscript Layer and the Authorship Piece
+
+The piece was decided at M4 and its research already exists as durable
+records; M5 adds the machinery to write it. The manuscript layer has no test
+corpus (open-problems §4.1) — the piece is the only place §43.2 can ever be
+exercised — and the resumption gate needs real elapsed time after real
+writing, so M5 starting late puts the defining test out of reach.
+
+Build:
+
+- **briefs** at three scales, with all three write paths, including the
+  *unconfirmed* state (§2.1);
+- legacy import: an audit target imported as manuscript prose gets an
+  unconfirmed brief and a cold cache — a tinted chapter and a count, not ten
+  thousand model calls (part 06 §8.12);
+- **assembly**: the declared scope resolved through the subjects into the §32
+  tiers, reporting what it resolved (§33.1);
+- one **scope resolver**: assembly, the audit's bounding and drift detection
+  all resolve brief-to-entries through the same module (§32, part 06 §8.5) —
+  three call sites independently inferring that fact is a divergence bug
+  scheduled in advance;
+- AI manuscript writing under explicit authorization, write scoping, and
+  write-time provenance composed from `git blame`, the commit, the session and
+  its manifest via `trace()` (part 04 §4.1, §19–§21);
+- the **audit**, on demand only: memoized judgements under both key
+  compositions, the staleness map, findings as disagreement sets, and the
+  model-engine appearances for Themes and Arcs (part 06 §8.10–§8.12);
+- brief drift as a set difference, never against an unconfirmed brief (§32);
+- the **Section view** and the **Review surface** — the results view of an
+  audit the author asked for, not an inbox (part 19 §19.11);
+- the §47 health report — model-free, so it may run unasked;
+- `validate` grows: an AI manuscript write without an identifiable
+  authorization fails, **including writes to a brief** (§23).
+
+### Gate
+
+Import a Walden chapter as legacy manuscript. It gets an unconfirmed brief and
+a not-current tint; no model pass runs unasked.
+
+Write the piece's section brief. Assembly reports what the scope resolved to.
+Authorize a draft from the assembled context, then ask why a paragraph says
+what it says and walk the provenance to the session, the authorization and the
+evidence.
+
+Audit the section from its button. Settle one finding; the tint clears only
+through re-audit.
+
+---
+
+## The Gate That Waits — Resumption
+
+Work the piece deeply. Leave it for weeks. Return, and continue productive work
+from the brief, the draft and an audit on request — with no stored recap
+(§43.2, part 12 §39).
+
+This gate cannot be scheduled to pass; it passes only after real absence, which
+is why it stands outside the milestones. Everything above exists so that it can
+be attempted honestly, and §1.12 is its governing risk: if the milestones all
+gate green and this fails, Memoria advanced while no book did.
+
+---
+
+## What no milestone builds
+
+The poc-plan §5 reductions stand: no `ModelBackend`, no capacity queue, no
+auth or remote access, no web/phone surface, no Ask Memoria, and the write
+coordinator stays a stale-revision check. Embeddings enter only if the M2
+numbers say so.
+
+Also deliberately unsequenced: acquiring *Excursions*, *Cape Cod* and *The
+Service* (would lift harness coverage from 58%; nothing forces it), the in-app
+prose editor (open-problems §1.2), editability of built-in subjects (§1.3),
+late-subject backfill (§1.5), and everything about the real archive —
+including whether its sources live inside the repo (§1.4). Those wait for
+observed need, under §45.
+
+---
+
+## What each milestone forces
+
+| Milestone | Decision forced |
+|---|---|
+| M0 | the normalized record schema, the editorial-apparatus representation, and the answer-key adjudication protocol (open-problems §6, `RECON.md` §4) |
+| M1 | exact signatures of `search_text` and `read(ref)`; the link-to-entry mapping behind gathered-set recall; the pre-registered embeddings decision procedure. The rest of §25's tool list stays open |
+| M2 | at its gate: embeddings, go or no-go, by the procedure M1 registered (§45, open-problems §2.2) |
+| M3 | nothing open — it builds what earlier decisions already settled |
+| M4 | at its start: the authorship piece's subject and length (open-problems §4.1, §6) |
+| M5 | nothing new — it spends decisions forced earlier |
 
 ---

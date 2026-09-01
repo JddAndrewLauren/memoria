@@ -1,5 +1,7 @@
 <!-- Part of the Memoria build plan. Index: ./plan-index.md -->
 <!-- Source sections: 49, 50, 51 of the original memoria-plan.md -->
+<!-- Invariant 15 revised 2026-08-31: its milestone reference updated for the -->
+<!-- rewritten part 16 ("M1" meant the original writing-loop milestone, now M5). -->
 
 # 49. Explicit Non-Goals
 
@@ -102,7 +104,8 @@ If model capacity is temporarily unavailable, Memoria preserves state, defers lo
 
 ## Invariant 15 — Memoria serves the manuscript
 
-After M1, meaningful system development must accompany real book progress.
+Once the writing loop exists (part 16's M5), meaningful system development must
+accompany real book progress.
 
 ---
 

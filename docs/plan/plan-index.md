@@ -12,7 +12,7 @@ for the manuscript layer), §14 (rewritten as ownership by badge), §18's catego
 and §17's question list (both withdrawn),
 §1.5, §1.10a (new), §2, §2.1 (new), §3, §4, §4.1 (new), §7, §8.1, §8.2, §8.3, §8.4, §8.5, §8.6, §8.11,
 §8.12 (new), §9.5, §12, §12.1, §13, §13.4, §15, §19, §20, §21, §23, §24.2, §25, §32, §33, §36-§38, §42,
-§43.2, §43.14 (new), §47, §52.2, and Invariants 8 and 9.
+§43.2, §43.14 (new), §44 (rewritten as the PoC build order), §47, §52.2, and Invariants 8, 9 and 15.
 
 Five parts — 06, 08, 11, 14, 18 — end in an appended
 `## Editorial note — the desktop design`, recording where that design confirms,
@@ -172,16 +172,20 @@ Review inbox as resolved or superseded.
 | # | Part | Original §§ | Status |
 |---|---|---|---|
 | 15 | [Provenance Validation, Evaluation Suite, Health](15-validation-and-health.md) | 23, 43, 47 | **active** |
-| 16 | [Build Order](16-build-order.md) | 44 | **superseded** |
+| 16 | [Build Order](16-build-order.md) | 44 | **active** |
 | 17 | [Optional Future Infrastructure, Agents, Privacy](17-future-options-and-privacy.md) | 45, 46, 48 | stable |
 
 **15** is active because the benchmark is now the instrument that decides whether
 embeddings get built. §45's "observe failure, then adopt" only works if the
 measurement exists. The harness reports three numbers (§43.14): retrieval
 recall@10, gathered-set recall, and the promotion miss rate.
-**16 must be rewritten before it is followed.** M0 and M1 as written assume the
-web service, ModelBackend and capacity machinery that parts 13 and 14 removed.
-Re-slicing was deliberately not done in this session.
+**16 was rewritten 2026-08-31** and sequences the PoC: six milestones from the
+recon-informed normalizer to the authorship piece, each gated on a concrete
+author-visible act, ending in the resumption gate that only real absence can
+pass. The harness's three numbers land across M0–M2; the authorship piece is
+decided at M4; the embeddings decision is taken at M2's gate by a procedure
+pre-registered at M1. The original M0–M4 is archived in
+`_original-memoria-plan.md` §44.
 **17** — §45's adoption process is the governing rule for every "should we add X"
 question.
 
@@ -203,7 +207,8 @@ independent requirements.
 - **Working on ingest now:** 05 → 04 → 06, with `RECON.md` alongside
 - **Resolving the open decisions:** none remain at the architecture level — 04's anchoring and 08's ownership are both closed; what's left is in `../open-problems.md` §1
 - **The manuscript layer:** 04 (§2.1, §4.1) → 06 (§8.11, §8.12) → 09 → 12 (§39)
-- **Re-planning the build:** 13 → 14 → 19 → 15 → 16
+- **Following the build:** 16, with `../poc-plan.md` and `../open-problems.md`
+  alongside; 13 → 14 → 19 → 15 give the reductions and the harness it sequences
 
 ## Files
 

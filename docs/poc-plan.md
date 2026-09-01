@@ -294,7 +294,8 @@ interface.
 
 ## 7. Not yet decided
 
-- Build sequencing and milestone structure — **deliberately not addressed.**
+- Build sequencing and milestone structure — **deliberately not addressed** here;
+  addressed 2026-08-31 in the rewritten [`plan/16-build-order.md`](plan/16-build-order.md).
 - Normalized record schema and the editorial-apparatus representation.
 - Which §25 tools ship, and their exact signatures — constrained 2026-08-31:
   retrieval must be a **superset of grep**: verbatim source text (never
