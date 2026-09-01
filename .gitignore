@@ -15,3 +15,5 @@ sources/editorial/
 # FTS5 search index; derived state, not durable (§42). Regenerate with
 # `memoria rebuild` (see README).
 .memoria/
+
+.claude/worktrees/
