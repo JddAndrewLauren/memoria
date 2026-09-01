@@ -27,7 +27,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from memoria import references
+from memoria import references, subjects
 from memoria.repository import Repository
 
 # Where normalized records live inside the book repository. Here rather than
@@ -435,8 +435,8 @@ def read(repository: Repository, ref: str) -> Read:
     mistaken for omissions: it does not decorate with the curated overlay
     (#20, which owes a ``raw`` parameter when it does, since undecorated is
     currently what every read is), it does not ledger (#13), and it resolves
-    no reference kind but ``SRC-`` and repository paths - the rest exist as a
-    named error, not as silence.
+    no reference kind but ``SRC-``, ``SUB-`` and repository paths - the rest
+    exist as a named error, not as silence.
     """
     try:
         reference = references.parse(ref)
@@ -454,6 +454,26 @@ def read(repository: Repository, ref: str) -> Read:
         path = _confined(repository, reference.path)
         if not path.is_file():
             raise ReadError(f"no such file in this repository: {reference.path}")
+        return Read(
+            ref=ref, citation=citation, text=path.read_text(encoding="utf-8")
+        )
+
+    if isinstance(reference, references.SubjectReference):
+        # Bare, undecorated, exactly what's on disk - the same full-source
+        # contract as a bare SRC- read (#11), extended to SUB- and SUB-x/y
+        # (#16).
+        if reference.entry_slug is None:
+            path = subjects.subject_path(repository, reference.subject_id)
+            if not path.is_file():
+                raise ReadError(f"no such subject: {reference.subject_id}")
+        else:
+            path = subjects.find_entry_path(
+                repository, reference.subject_id, reference.entry_slug
+            )
+            if path is None:
+                raise ReadError(
+                    f"no such entry: {reference.subject_id}/{reference.entry_slug}"
+                )
         return Read(
             ref=ref, citation=citation, text=path.read_text(encoding="utf-8")
         )
@@ -490,10 +510,11 @@ def _unknown_kind_message(reference: references.UnknownReference) -> str:
     if reference.known:
         return (
             f"{reference.kind}- references are not resolvable in this build "
-            "yet: read(ref) currently serves SRC- records and repository "
-            "paths (see docs/tool-surface.md)"
+            "yet: read(ref) currently serves SRC- records, SUB- subjects "
+            "and entries, and repository paths (see docs/tool-surface.md)"
         )
     return (
         f"unknown reference kind {reference.kind}-: read(ref) serves SRC- "
-        "records and repository paths (see docs/tool-surface.md)"
+        "records, SUB- subjects and entries, and repository paths (see "
+        "docs/tool-surface.md)"
     )

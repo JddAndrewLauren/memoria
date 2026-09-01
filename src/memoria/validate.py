@@ -9,6 +9,7 @@ from pathlib import Path
 import yaml
 
 from memoria.records import NORMALIZED_RELATIVE_PATH
+from memoria.subjects import SUBJECTS_RELATIVE_PATH, SubjectError, parse_entry, parse_subject
 
 # Where the acquisition manifest sits inside the evidence repo. A default,
 # not a constant of the system: it was "raw/gutenberg/manifest.yaml" while the
@@ -53,6 +54,7 @@ def validate(
             errors.append(f"hash mismatch: {entry['path']}")
 
     errors.extend(_validate_normalized_src_ids(repo_root))
+    errors.extend(_validate_subjects(repo_root))
 
     return errors
 
@@ -78,4 +80,34 @@ def _validate_normalized_src_ids(repo_root: Path) -> list[str]:
                     f"unresolved SRC- ID: {referenced_id} referenced in "
                     f"{path.name}"
                 )
+    return errors
+
+
+def _validate_subjects(repo_root: Path) -> list[str]:
+    """Every subject prompt carries its four required declarations, and
+    every entry's match terms are one of the three shapes (issue #16)."""
+    subjects_dir = repo_root / SUBJECTS_RELATIVE_PATH
+    if not subjects_dir.is_dir():
+        return []
+
+    errors = []
+    for subject_dir in sorted(p for p in subjects_dir.iterdir() if p.is_dir()):
+        subject_prompt = subject_dir / "_subject.md"
+        if subject_prompt.is_file():
+            try:
+                parse_subject(
+                    subject_prompt.read_text(encoding="utf-8"),
+                    source=str(subject_prompt),
+                )
+            except SubjectError as exc:
+                errors.append(str(exc))
+
+        for entry_path in sorted(subject_dir.glob("*.md")):
+            if entry_path.name == "_subject.md":
+                continue
+            try:
+                parse_entry(entry_path.read_text(encoding="utf-8"), source=str(entry_path))
+            except SubjectError as exc:
+                errors.append(str(exc))
+
     return errors

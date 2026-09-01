@@ -58,6 +58,8 @@ enumeration of kinds, and had already drifted.
 | `#src-000184-p17` | that paragraph | the fragment alone |
 | `src-000184-p17` | that paragraph | `index.SearchResult.anchor`, verbatim |
 | `docs/poc-plan.md` | the file, verbatim | a repository-relative path |
+| `SUB-people` | the subject's prompt, verbatim | part 04 §4, part 06 §8.1 |
+| `SUB-people/bob` | the entry, verbatim | part 04 §4, part 06 §8.2 |
 
 The bare anchor is accepted deliberately. `SearchResult` carries
 `(src_id, anchor, source_type)`, so a search hit feeds straight back into
@@ -78,6 +80,11 @@ the reference is an ordinary relative path and only the target escapes.
 A reference is treated as an ID only when its kind is upper case, as part 04
 §4 writes them. Without that, `open-problems.md` — a file in this repository —
 was answered with "unknown reference kind OPEN-".
+
+`SUB-` subject and entry slugs are lowercase, directory-name shaped
+(`subjects/people/bob.md`, part 04 §2). `SUB-People` or `SUB-people/Bob` is
+refused as a malformed subject reference rather than folded to lowercase, the
+same call made for a malformed `SRC-` ID.
 
 ### What it returns
 
@@ -114,13 +121,19 @@ Two properties of that header are contracts, not styling:
 `original_locator` is printed and never parsed. It is a pointer a person
 follows, not an offset — issue #25 depends on that staying true.
 
+**A `SUB-` read is bare too** — a subject's prompt or an entry's file,
+exactly as it is on disk, with no header and no delimiter, for the same
+reason a full-source `SRC-` read is (issue #16). An entry read resolves by
+its frontmatter `id` rather than by filename, so a renamed entry file still
+answers to the `SUB-x/y` it was created with.
+
 ### What it refuses, and how
 
 Reference kinds part 04 §4 defines but this build does not resolve —
-`SES-` (with or without a `#T` turn), `CHG-`, `CLM-`, `RES-`, `DEC-`,
-`SUB-x`, `SUB-x/y` — return an error **naming the kind**, never a silent empty
-result. A kind that is not part of the scheme at all is named too, and
-distinguished from one that is merely unbuilt.
+`SES-` (with or without a `#T` turn), `CHG-`, `CLM-`, `RES-`, `DEC-` — return
+an error **naming the kind**, never a silent empty result. A kind that is not
+part of the scheme at all is named too, and distinguished from one that is
+merely unbuilt. `SUB-x` and `SUB-x/y` were on this list until issue #16.
 
 Errors reach the model as `ToolError`, which is the SDK's anticipated-failure
 type: the call comes back `is_error` with the message intact. Any other
