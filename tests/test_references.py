@@ -95,8 +95,22 @@ def test_parse_rejects_a_path_that_escapes_the_repository(ref):
         references.parse(ref)
 
 
-@pytest.mark.parametrize("ref", ["/etc/passwd", "/tmp/x"])
+@pytest.mark.parametrize("ref", ["/etc/passwd", "/tmp/x", "C:/Windows/x"])
 def test_parse_rejects_an_absolute_path(ref):
+    with pytest.raises(BadReference, match="not a repository-relative path"):
+        references.parse(ref)
+
+
+@pytest.mark.parametrize(
+    "ref", ["docs\\..\\..\\secrets", "..\\secrets", "a\\b"]
+)
+def test_parse_rejects_a_backslash_path(ref):
+    """One component here, three on Windows.
+
+    Treated as a filename, `docs\\..\\..\\secrets` is confined on Linux and
+    an escape on Windows - a rule that holds only on the developer's platform
+    is not a rule. No legitimate reference contains a backslash.
+    """
     with pytest.raises(BadReference, match="not a repository-relative path"):
         references.parse(ref)
 

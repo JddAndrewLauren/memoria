@@ -65,8 +65,17 @@ adapter, which is the duplication §40.1 exists to forbid.
 `SRC-` IDs are six digits, zero-padded. `SRC-184` is refused with a message
 saying so, rather than guessed at.
 
-Paths are repository-relative. An absolute path, or one containing `..`, is
-refused: reads are confined to the repository.
+Paths are repository-relative, and reads are confined to the repository by
+**two** checks, because one is not enough. The reference is refused if it says
+it leaves the tree — absolute, a drive letter, a `..` component, or any
+backslash (one component on POSIX, three on Windows, and a rule that holds
+only on the developer's platform is not a rule). The resolved path is then
+refused if it turns out to leave the tree, which is the case a symlink makes:
+the reference is an ordinary relative path and only the target escapes.
+
+A reference is treated as an ID only when its kind is upper case, as part 04
+§4 writes them. Without that, `open-problems.md` — a file in this repository —
+was answered with "unknown reference kind OPEN-".
 
 ### What it returns
 

@@ -1,0 +1,4 @@
+# The record format is LF (docs/normalized-record-schema.md). A CRLF checkout
+# made every normalized record unreadable, and the failure looked like missing
+# frontmatter rather than like line endings.
+* text=auto eol=lf

@@ -28,9 +28,10 @@ _ID = r"SRC-\d{6}"
 _ANCHOR = r"src-\d{6}-p\d+"
 
 _BARE_ID = re.compile(rf"^(?P<id>{_ID})$", re.IGNORECASE)
-# The prose citation form, "SRC-000184 P17" or "SRC-000184 17". The pilcrow is
-# what part 04 §4 writes; accept a plain space too, since a model retyping a
-# citation drops the character often enough to matter.
+# The prose citation form. The pilcrow is what part 04 §4 writes; `P` is
+# accepted alongside it because a model retyping a citation drops a non-ASCII
+# character often enough to matter. A bare number ("SRC-000184 17") is not
+# accepted - it is as easily a typo for a different ID as a paragraph.
 _ID_PARAGRAPH = re.compile(
     rf"^(?P<id>{_ID})\s*(?:¶|P)\s*(?P<n>\d+)$", re.IGNORECASE
 )
@@ -42,7 +43,14 @@ _FRAGMENT = re.compile(rf"^#?(?P<anchor>{_ANCHOR})$", re.IGNORECASE)
 # Anything shaped like a stable ID. Recognising by shape rather than by
 # enumerating kinds is what makes an unheard-of prefix an error naming itself
 # instead of being mistaken for a relative path.
-_ID_SHAPED = re.compile(r"^(?P<kind>[A-Za-z]{2,5})-")
+#
+# Upper case only, and that is load-bearing rather than tidy: part 04 §4 writes
+# every kind in caps, and this repository contains `open-problems.md` and
+# `tool-surface.md`. A case-insensitive rule answered "unknown reference kind
+# OPEN-" for a file that exists, which is worse than either correct answer.
+# Lower-case `src-000184-p17` still resolves, because the anchor forms are
+# matched before this.
+_ID_SHAPED = re.compile(r"^(?P<kind>[A-Z]{2,5})-")
 
 # Kinds part 04 §4 defines that nothing implements yet. Used only to tell
 # "not built yet" from "never heard of it" in the message; the mechanism that
@@ -100,7 +108,10 @@ def split_anchor(anchor_id: str) -> tuple[str, int]:
     match = _FRAGMENT.match(anchor_id)
     if match is None:
         raise BadReference(f"not a paragraph anchor: {anchor_id!r}")
-    record_id, _, number = match.group("anchor").rpartition("-p")
+    # Lower-cased first: the pattern is case-insensitive, so a retyped
+    # `#SRC-000184-P17` reaches here in caps and a case-sensitive split would
+    # hand the whole string to int().
+    record_id, _, number = match.group("anchor").lower().rpartition("-p")
     return record_id.upper(), int(number)
 
 
@@ -111,7 +122,7 @@ def parse(ref: str) -> Reference:
 
     ==================================  ===========================
     ``SRC-000184``                      the whole record
-    ``SRC-000184 P17`` / ``SRC-000184 17``  one paragraph
+    ``SRC-000184 ¶17`` / ``SRC-000184 P17``  one paragraph
     ``SRC-000184#src-000184-p17``       the markdown link form
     ``#src-000184-p17``                 the fragment alone
     ``src-000184-p17``                  a search result's anchor, verbatim
@@ -175,12 +186,32 @@ def parse(ref: str) -> Reference:
 def _repository_path(ref: str) -> PurePosixPath:
     """A repository-relative path, or a refusal.
 
-    Reads are confined to the repository. An absolute path or one that climbs
-    out of the tree is rejected here rather than resolved and checked later,
-    so no caller has to remember to check.
+    Reads are confined to the repository, and this is the first of the two
+    checks that make that true. It is a check on the *reference*: an absolute
+    path, a drive letter, or a `..` component is refused before anything
+    touches the filesystem, so no caller has to remember to check.
+
+    The second check is in ``records.read``, against the resolved path, and
+    both are needed. This one cannot see a symlink; that one cannot give as
+    good an error message, because by then the reference has become a path.
+
+    Backslashes are refused outright rather than normalized. `docs\\..\\x` is
+    one component here and three on Windows, so treating it as a filename
+    would confine the read on this machine and not on another - and a rule
+    that holds only on the developer's platform is not a rule. No legitimate
+    reference contains one: the repository's own link form (part 04 §4) is
+    POSIX, and so is every path in the record schema.
     """
+    if "\\" in ref:
+        raise BadReference(
+            f"not a repository-relative path: {ref!r} - use / as the separator"
+        )
     path = PurePosixPath(ref)
-    if path.is_absolute() or ref.startswith("\\") or ":" in path.parts[0]:
+    if not path.parts:
+        # `.` and `./` parse to no components at all. A directory is not a
+        # readable reference, and indexing parts[0] here would crash.
+        raise BadReference(f"not a file: {ref!r}")
+    if path.is_absolute() or ":" in path.parts[0]:
         raise BadReference(f"not a repository-relative path: {ref!r}")
     if ".." in path.parts:
         raise BadReference(f"path escapes the repository: {ref!r}")

@@ -88,3 +88,31 @@ def test_validate_exits_nonzero_when_normalized_record_has_dangling_src_id(
 
     assert result.returncode != 0
     assert "SRC-999999" in result.stdout
+
+
+def test_validate_refuses_clearly_when_no_corpus_is_configured(tmp_path):
+    """The point-of-use rule: only the commands that read evidence demand it.
+
+    There is no default any more - one used to point at a sibling checkout
+    that was correct only when run from beside it - so the refusal has to name
+    the variable and say why there is nothing to fall back to.
+    """
+    env = {k: v for k, v in os.environ.items() if k != "MEMORIA_EVIDENCE_ROOT"}
+
+    result = run_cli("validate", env=env)
+
+    assert result.returncode == 1
+    assert "MEMORIA_EVIDENCE_ROOT" in result.stderr
+    assert "no default" in result.stderr
+
+
+def test_rebuild_needs_no_corpus_at_all(tmp_path):
+    """It reads this repo's own records, so it must not demand an evidence
+    root it never uses."""
+    (tmp_path / "pyproject.toml").write_text("")
+    env = {k: v for k, v in os.environ.items() if k != "MEMORIA_EVIDENCE_ROOT"}
+
+    result = run_cli("rebuild", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "no normalizer is wired in" in result.stdout

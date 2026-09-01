@@ -23,7 +23,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
@@ -78,7 +78,23 @@ def record_to_markdown(record: NormalizedRecord) -> str:
     Frontmatter, then a run of anchored paragraphs. The inverse of this
     function is the read direction (#11); the two together are what makes
     the format round-trippable rather than merely writable.
+
+    **The format has no escaping**, so a paragraph containing the anchor
+    sequence is refused here rather than written. Written, it would be
+    indistinguishable from the separator: a paragraph holding
+    ``\n\n<a id="src-000001-p2"></a>\n\n`` reads back as *two* paragraphs,
+    re-serializes byte-identically, and so passes a round-trip check while
+    every citation index after it is silently wrong. Refusing to write it is
+    the only place that ambiguity can be caught with certainty, because by
+    read time the two cases are the same bytes.
     """
+    for number, paragraph in enumerate(record.paragraphs, start=1):
+        if _ANCHOR_TAG.search(paragraph):
+            raise ValueError(
+                f"{record.id} ¶{number} contains a paragraph anchor, which the "
+                "record format cannot represent - see "
+                "docs/normalized-record-schema.md"
+            )
     frontmatter = {
         "id": record.id,
         "source_type": record.source_type,
@@ -165,12 +181,31 @@ class ReadError(Exception):
 def parse_record(text: str, *, source: str = "<string>") -> NormalizedRecord:
     """Parse one record's Markdown back into a ``NormalizedRecord``.
 
-    The exact inverse of ``record_to_markdown``: for any record,
+    The inverse of ``record_to_markdown``: for any record it round-trips,
     ``record_to_markdown(parse_record(record_to_markdown(r))) ==
     record_to_markdown(r)``, paragraph bytes included.
 
+    **One input it refuses rather than round-trips.** The record format is
+    not escaped: a paragraph whose own text contains a literal
+    ``<a id="src-000001-p2"></a>`` is indistinguishable from the separator
+    the serializer writes. Such a record serializes, and parsing it back
+    raises here rather than silently splitting the paragraph in two. The
+    failure is loud on purpose - a corrupted read of evidence is worse than a
+    refused one - but it means the pair are inverses over the records a
+    normalizer produces, not over every string the dataclass will hold.
+    Escaping the anchor form would fix it and would change the on-disk
+    format, which is not this slice's to change.
+
     ``source`` names the file in error messages and is otherwise unused.
     """
+    if text.startswith("---\r\n"):
+        # Named rather than reported as missing frontmatter, which is what a
+        # CRLF checkout used to look like from here. The record format is LF;
+        # `.gitattributes` keeps the repository's own files that way.
+        raise ReadError(
+            f"{source}: record has CRLF line endings - the record format is "
+            "LF (see docs/normalized-record-schema.md)"
+        )
     if not text.startswith("---\n"):
         raise ReadError(f"{source}: not a normalized record - no frontmatter")
     end = text.find("\n---\n", 3)
@@ -206,26 +241,42 @@ def parse_record(text: str, *, source: str = "<string>") -> NormalizedRecord:
     record = NormalizedRecord(
         contemporaneous=_as_bool(fields.pop("contemporaneous"), source),
         paragraphs=_parse_paragraphs(body, source),
-        **{name: _as_text(value) for name, value in fields.items()},
+        **{
+            name: _as_text(value, name, source, required=name in _REQUIRED_FIELDS)
+            for name, value in fields.items()
+        },
     )
     _check_anchors(body, record, source)
     return record
 
 
-def _as_text(value: object) -> str | None:
+def _as_text(
+    value: object, name: str, source: str, *, required: bool
+) -> str | None:
     """Frontmatter scalars as the schema declares them: strings.
 
     A schema-legal ``event_date: 1845-10-22`` is a ``datetime.date`` by the
     time yaml is done with it, and would otherwise reach a field declared
     ``str``. Dates are rendered ISO-8601 rather than by ``str()`` so the
     round trip is stable.
+
+    A required field may not be null - ``id:`` with no value used to arrive as
+    ``None`` and crash somewhere downstream in ``anchor_id`` - and no field
+    may be a list or a mapping. Stringifying those would turn
+    ``recorded_date: [a, b]`` into ``"['a', 'b']"`` and call it evidence.
     """
     if value is None:
+        if required:
+            raise ReadError(f"{source}: {name!r} is required and must not be empty")
         return None
     if isinstance(value, (date, datetime)):
         return value.isoformat()
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, (list, dict, set, tuple)):
+        raise ReadError(
+            f"{source}: {name!r} must be a single value, got {type(value).__name__}"
+        )
     return str(value)
 
 
@@ -332,6 +383,25 @@ def read_all(repository: Repository) -> list[NormalizedRecord]:
     ]
 
 
+def _confined(repository: Repository, path: PurePosixPath) -> Path:
+    """Resolve a repository-relative path, refusing anything outside the root.
+
+    The second of the two confinement checks. ``references`` refuses a
+    reference that *says* it climbs out; this refuses one that turns out to,
+    which is the case a symlink makes - the reference is an ordinary relative
+    path and only the resolved target leaves the tree.
+
+    Both roots are resolved before comparison so that a symlinked repository
+    root - a worktree reached through one, say - is compared like with like
+    rather than being refused wholesale.
+    """
+    resolved = (repository.root / path).resolve()
+    root = repository.root.resolve()
+    if resolved != root and root not in resolved.parents:
+        raise ReadError(f"path escapes the repository: {path}")
+    return resolved
+
+
 @dataclass(frozen=True)
 class Read:
     """What one reference resolved to.
@@ -381,7 +451,7 @@ def read(repository: Repository, ref: str) -> Read:
         raise ReadError(_unknown_kind_message(reference))
 
     if isinstance(reference, references.PathReference):
-        path = repository.root / reference.path
+        path = _confined(repository, reference.path)
         if not path.is_file():
             raise ReadError(f"no such file in this repository: {reference.path}")
         return Read(

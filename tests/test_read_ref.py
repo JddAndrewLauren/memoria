@@ -8,6 +8,7 @@ substrings.
 """
 
 import pytest
+import yaml
 
 from memoria.records import (
     NORMALIZED_RELATIVE_PATH,
@@ -201,6 +202,24 @@ def test_reading_a_record_by_path_and_by_id_agree_byte_for_byte(tmp_path):
     assert by_id.text == by_path.text
 
 
+@pytest.mark.parametrize(
+    "ref",
+    ["SRC-000184#SRC-000184-P17", "#SRC-000184-P17", "SRC-000184 P1"],
+)
+def test_a_citation_retyped_in_capitals_still_resolves(tmp_path, ref):
+    """A model retyping a markdown citation will capitalise it.
+
+    The anchor patterns were always case-insensitive; taking the number off
+    the end was not, so these used to crash with a ValueError that escaped
+    the ReadError boundary and reached the model reason-stripped.
+    """
+    paragraph = 17 if "17" in ref else 1
+    record = _record(paragraphs=[f"Paragraph {n}." for n in range(1, 18)])
+    write_normalized_records([record], tmp_path / NORMALIZED_RELATIVE_PATH)
+
+    assert read(Repository(root=tmp_path), ref).paragraph == paragraph
+
+
 def test_a_search_result_anchor_reads_the_paragraph_that_matched(tmp_path):
     from memoria.index import build_index, search
 
@@ -261,9 +280,121 @@ def test_a_missing_repository_file_is_a_clear_error(tmp_path):
         read(Repository(root=tmp_path), "docs/absent.md")
 
 
-@pytest.mark.parametrize("ref", ["../escape", "/etc/passwd", "SRC-184", ""])
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "../escape",
+        "/etc/passwd",
+        "SRC-184",
+        "",
+        ".",                            # PurePosixPath('.').parts is empty
+        "./",
+        "docs\\..\\x",                  # backslash separators
+        "C:/Windows/x",
+    ],
+)
 def test_a_reference_that_cannot_be_parsed_is_a_read_error(tmp_path, ref):
     """One error type crosses the core boundary, so an adapter catching
     ReadError cannot miss a case and strip its message."""
     with pytest.raises(ReadError):
         read(_repo(tmp_path), ref)
+
+
+# --- reads stay inside the repository --------------------------------------
+
+
+def test_a_symlink_out_of_the_repository_is_refused(tmp_path):
+    """The case the reference check cannot see.
+
+    `link.md` is an ordinary relative path; only the resolved target leaves
+    the tree. Refusing it is what makes "reads are confined to the
+    repository" true rather than merely intended.
+    """
+    root = tmp_path / "repo"
+    root.mkdir()
+    secret = tmp_path / "outside-secret.txt"
+    secret.write_text("SECRET\n", encoding="utf-8")
+    (root / "link.md").symlink_to(secret)
+
+    with pytest.raises(ReadError, match="escapes the repository"):
+        read(Repository(root=root), "link.md")
+
+
+def test_a_symlink_inside_the_repository_still_reads(tmp_path):
+    """Confinement, not a ban on symlinks."""
+    root = tmp_path / "repo"
+    (root / "docs").mkdir(parents=True)
+    (root / "docs" / "real.md").write_text("# real\n", encoding="utf-8")
+    (root / "alias.md").symlink_to(root / "docs" / "real.md")
+
+    assert read(Repository(root=root), "alias.md").text == "# real\n"
+
+
+def test_a_symlinked_repository_root_is_not_refused_wholesale(tmp_path):
+    """Both roots resolve before comparison.
+
+    A worktree reached through a symlink would otherwise fail every read.
+    """
+    real = tmp_path / "real-repo"
+    real.mkdir()
+    (real / "note.md").write_text("# note\n", encoding="utf-8")
+    link = tmp_path / "via-link"
+    link.symlink_to(real)
+
+    assert read(Repository(root=link), "note.md").text == "# note\n"
+
+
+@pytest.mark.parametrize(
+    "paragraphs",
+    [
+        ['Quoting <a id="src-000184-p2"></a> inline.', "Second."],
+        # The dangerous shape: at a paragraph boundary this reads back as two
+        # paragraphs AND re-serializes byte-identically, so a round-trip
+        # assertion sees nothing wrong while every later citation index is off
+        # by one.
+        ['A\n\n<a id="src-000184-p2"></a>\n\nB'],
+    ],
+    ids=["inline", "at-a-boundary"],
+)
+def test_a_paragraph_containing_an_anchor_is_refused_at_write_time(paragraphs):
+    """The one input the format cannot represent.
+
+    The format has no escaping, so by read time the two cases are the same
+    bytes and cannot be told apart. Writing is therefore the only place the
+    ambiguity can be caught with certainty - which is why the refusal lives in
+    the serializer rather than the parser.
+    """
+    with pytest.raises(ValueError, match="contains a paragraph anchor"):
+        record_to_markdown(_record(paragraphs=paragraphs))
+
+
+def test_the_boundary_case_is_why_a_round_trip_assertion_is_not_enough():
+    """Guards the reasoning above, not just the behaviour.
+
+    If someone ever relaxes the write-time refusal, this records why a
+    round-trip test would not have caught the regression.
+    """
+    record = _record(paragraphs=['A\n\n<a id="src-000184-p2"></a>\n\nB'])
+    text = (
+        "---\n"
+        + yaml.safe_dump(
+            {
+                "id": record.id,
+                "source_type": record.source_type,
+                "recorded_date": record.recorded_date,
+                "event_date": record.event_date,
+                "date_confidence": record.date_confidence,
+                "contemporaneous": record.contemporaneous,
+                "original_file": record.original_file,
+                "original_locator": record.original_locator,
+            },
+            sort_keys=False,
+        )
+        + "---\n\n"
+        + f'<a id="src-000184-p1"></a>\n\n{record.paragraphs[0]}\n'
+    )
+
+    parsed = parse_record(text)
+
+    assert len(parsed.paragraphs) == 2          # not 1, as written
+    assert record_to_markdown(parsed) == text   # and the round trip agrees

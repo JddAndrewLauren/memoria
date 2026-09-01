@@ -62,6 +62,18 @@ record text. `NormalizedRecord.anchor_id(n)` is the single source of this
 `f"{id.lower()}-p{n}"` form — downstream slices citing a paragraph should
 call it rather than re-deriving the anchor string independently.
 
+**No paragraph may contain the anchor sequence itself.** The format has no
+escaping, so `<a id="...">` inside a paragraph's own text is indistinguishable
+from the separator: at a paragraph boundary it reads back as two paragraphs,
+re-serializes byte-identically, and shifts every citation index after it while
+looking correct. A normalizer must not emit one, and `record_to_markdown`
+refuses to write one rather than leaving the ambiguity on disk — by read time
+the two cases are the same bytes and cannot be told apart.
+
+**Records are LF.** The parser names CRLF as the problem rather than reporting
+missing frontmatter, and `.gitattributes` keeps the repository's own files
+that way.
+
 ## Whitespace policy
 
 **Evidence text is sacred: normalization never reflows it.** A paragraph is

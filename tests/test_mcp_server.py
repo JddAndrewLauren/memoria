@@ -67,6 +67,15 @@ def _repo(tmp_path):
     return Repository(root=tmp_path)
 
 
+@pytest.fixture(autouse=True)
+def _restore_server_repository():
+    """`server._repository` is a module global; leaking it across tests would
+    make them order-dependent."""
+    original = server._repository
+    yield
+    server._repository = original
+
+
 # --- the adapter reaches nothing on its own --------------------------------
 
 
@@ -81,11 +90,16 @@ def test_the_mcp_package_imports_only_the_core_and_opens_no_file_itself():
     stronger and is a trap - it is order-dependent inside a shared pytest
     session, and it would start failing on correct code the day #12 lands.
 
+    It also cannot see `__import__("sqlite3")` or a `getattr`-assembled
+    attribute name, which evade the call check below by the same token. Those
+    are defeatable by anyone deliberately trying; the test is a guard against
+    drift, not an adversary.
+
     So the claim this makes is the honest one: the adapter's own source
     reaches nothing but the two core modules it is allowed to reach, and
     performs no file access of its own.
     """
-    sources = sorted(MCP_PACKAGE.glob("*.py"))
+    sources = sorted(MCP_PACKAGE.rglob("*.py"))
     assert sources, "no MCP package sources found - has the package moved?"
 
     for path in sources:
@@ -105,7 +119,7 @@ def test_the_mcp_package_imports_only_the_core_and_opens_no_file_itself():
 
 
 def test_the_mcp_package_performs_no_file_access_of_its_own():
-    for path in sorted(MCP_PACKAGE.glob("*.py")):
+    for path in sorted(MCP_PACKAGE.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -119,7 +133,7 @@ def test_the_mcp_package_performs_no_file_access_of_its_own():
 
 def test_the_adapter_declares_no_sqlite_dependency():
     text = "\n".join(
-        path.read_text(encoding="utf-8") for path in MCP_PACKAGE.glob("*.py")
+        path.read_text(encoding="utf-8") for path in MCP_PACKAGE.rglob("*.py")
     )
     assert "sqlite3" not in text
 
