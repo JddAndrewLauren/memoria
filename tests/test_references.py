@@ -12,7 +12,10 @@ from memoria.index import INDEX_RELATIVE_PATH, build_index, search
 from memoria.records import NormalizedRecord
 from memoria.references import (
     BadReference,
+    ChangeReference,
+    ChapterReference,
     PathReference,
+    SectionReference,
     SourceReference,
     SubjectReference,
     UnknownReference,
@@ -22,6 +25,56 @@ from memoria.repository import Repository
 
 def test_parse_resolves_a_bare_src_id():
     assert references.parse("SRC-000184") == SourceReference("SRC-000184", None)
+
+
+def test_parse_resolves_a_bare_chapter_id():
+    assert references.parse("CHP-0001") == ChapterReference("CHP-0001")
+
+
+def test_parse_resolves_a_bare_section_id():
+    assert references.parse("SEC-0001") == SectionReference("SEC-0001")
+
+
+def test_parse_is_case_insensitive_for_chapter_and_section_ids():
+    assert references.parse("chp-0001") == ChapterReference("CHP-0001")
+    assert references.parse("sec-0001") == SectionReference("SEC-0001")
+
+
+def test_a_malformed_chapter_id_says_so_rather_than_claiming_the_kind_is_unknown():
+    with pytest.raises(BadReference, match="four-digit"):
+        references.parse("CHP-1")
+
+
+def test_a_malformed_section_id_says_so_rather_than_claiming_the_kind_is_unknown():
+    with pytest.raises(BadReference, match="four-digit"):
+        references.parse("SEC-1")
+
+
+def test_format_citation_for_chapter_and_section_references():
+    assert references.format_citation(ChapterReference("CHP-0001")) == "CHP-0001"
+    assert references.format_citation(SectionReference("SEC-0001")) == "SEC-0001"
+
+
+# --- CHG- change ids (ADR-0008) ----------------------------------------------
+
+
+def test_parse_resolves_a_bare_change_id():
+    assert references.parse("CHG-20261014-003") == ChangeReference("CHG-20261014-003")
+
+
+def test_parse_is_case_insensitive_for_change_ids():
+    assert references.parse("chg-20261014-003") == ChangeReference("CHG-20261014-003")
+
+
+def test_a_malformed_change_id_says_so_rather_than_claiming_the_kind_is_unknown():
+    """The old `HHMM` form (part 04 §4, amended 2026-09-01) is no longer a
+    change id at all - a per-day sequence, three digits, like RES-."""
+    with pytest.raises(BadReference, match="CHG-YYYYMMDD-NNN"):
+        references.parse("CHG-20261014-0917")
+
+
+def test_format_citation_for_a_change_reference():
+    assert references.format_citation(ChangeReference("CHG-20261014-003")) == "CHG-20261014-003"
 
 
 @pytest.mark.parametrize(
@@ -54,7 +107,6 @@ def test_parse_resolves_a_repository_path():
     [
         ("SES-20260912-1432", "SES"),
         ("SES-20260912-1432#T017", "SES"),
-        ("CHG-20261014-0917", "CHG"),
         ("CLM-0041", "CLM"),
         ("RES-20261018-003", "RES"),
         ("DEC-0088", "DEC"),

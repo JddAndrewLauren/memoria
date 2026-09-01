@@ -10,6 +10,7 @@ substrings.
 import pytest
 import yaml
 
+from memoria.manuscript import create_chapter, create_section
 from memoria.records import (
     NORMALIZED_RELATIVE_PATH,
     NormalizedRecord,
@@ -231,6 +232,53 @@ def test_a_search_result_anchor_reads_the_paragraph_that_matched(tmp_path):
     assert read(repository, hit.anchor).text == AWKWARD[0]
 
 
+# --- chapters and sections resolve by stable ID (#35) -----------------------
+
+
+def test_read_resolves_a_chapter_by_its_stable_id(tmp_path):
+    repository = Repository(root=tmp_path)
+    chapter = create_chapter(repository, "This chapter covers 1839 to 1841.")
+
+    result = read(repository, chapter.brief.id)
+
+    assert result.text == (tmp_path / "chapters" / "01" / "chapter.md").read_text(
+        encoding="utf-8"
+    )
+    assert result.citation == chapter.brief.id
+
+
+def test_read_resolves_a_section_by_its_stable_id(tmp_path):
+    repository = Repository(root=tmp_path)
+    chapter = create_chapter(repository, "Chapter.")
+    section = create_section(repository, chapter.number, "The section's own brief.")
+
+    result = read(repository, section.brief.id)
+
+    assert "The section's own brief." in result.text
+
+
+def test_a_chapter_reference_still_resolves_after_a_reorder(tmp_path):
+    """The stable ID, not the directory position, is what read(ref) uses."""
+    from memoria.manuscript import reorder_chapters
+
+    repository = Repository(root=tmp_path)
+    first = create_chapter(repository, "First.")
+    second = create_chapter(repository, "Second.")
+
+    reorder_chapters(repository, [second.brief.id, first.brief.id])
+
+    assert read(repository, first.brief.id).text.endswith("First.\n")
+    assert read(repository, second.brief.id).text.endswith("Second.\n")
+
+
+def test_reading_an_unresolvable_chapter_or_section_id_names_it(tmp_path):
+    repository = Repository(root=tmp_path)
+    with pytest.raises(ReadError, match="CHP-0001"):
+        read(repository, "CHP-0001")
+    with pytest.raises(ReadError, match="SEC-0001"):
+        read(repository, "SEC-0001")
+
+
 # --- errors name what went wrong -------------------------------------------
 
 
@@ -239,7 +287,6 @@ def test_a_search_result_anchor_reads_the_paragraph_that_matched(tmp_path):
     [
         ("SES-20260912-1432", "SES"),
         ("SES-20260912-1432#T017", "SES"),
-        ("CHG-20261014-0917", "CHG"),
         ("CLM-0041", "CLM"),
         ("RES-20261018-003", "RES"),
         ("DEC-0088", "DEC"),

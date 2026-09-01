@@ -28,6 +28,23 @@ _ID = r"SRC-\d{6}"
 _ANCHOR = r"src-\d{6}-p\d+"
 
 _BARE_ID = re.compile(rf"^(?P<id>{_ID})$", re.IGNORECASE)
+
+# Chapter and section stable IDs (#35). Part 04 §4 says only that chapters and
+# sections "carry stable IDs in frontmatter so file renames do not destroy
+# identity" - it does not name a form, so this picks one in the four-digit
+# style CLM-0041 already uses. Directory numbers (chapters/08/) are a
+# different axis entirely: they renumber on reorder, the ID never does.
+_CHAPTER_ID = r"CHP-\d{4}"
+_SECTION_ID = r"SEC-\d{4}"
+_BARE_CHAPTER_ID = re.compile(rf"^(?P<id>{_CHAPTER_ID})$", re.IGNORECASE)
+_BARE_SECTION_ID = re.compile(rf"^(?P<id>{_SECTION_ID})$", re.IGNORECASE)
+
+# A human-authored commit (ADR-0008): a per-day sequence, not the `HHMM` form
+# part 04 §4 originally showed - minute resolution collides once writes
+# through the app are frequent.
+_CHANGE_ID = r"CHG-\d{8}-\d{3}"
+_BARE_CHANGE_ID = re.compile(rf"^(?P<id>{_CHANGE_ID})$", re.IGNORECASE)
+
 # The prose citation form. The pilcrow is what part 04 §4 writes; `P` is
 # accepted alongside it because a model retyping a citation drops a non-ASCII
 # character often enough to matter. A bare number ("SRC-000184 17") is not
@@ -54,10 +71,10 @@ _ID_SHAPED = re.compile(r"^(?P<kind>[A-Z]{2,5})-")
 
 # Kinds part 04 §4 defines that nothing implements yet. Used only to tell
 # "not built yet" from "never heard of it" in the message; the mechanism that
-# rejects them is the shape rule above, not this list. `SUB` is not here: it
-# is implemented, below, and needs its own malformed-reference message rather
-# than the generic "not resolvable in this build yet" one.
-NOT_YET_IMPLEMENTED_KINDS = ("SES", "CHG", "CLM", "RES", "DEC")
+# rejects them is the shape rule above, not this list. `CHG` and `SUB` are not
+# here: they are implemented, below, and need their own malformed-reference
+# messages rather than the generic "not resolvable in this build yet" one.
+NOT_YET_IMPLEMENTED_KINDS = ("SES", "CLM", "RES", "DEC")
 
 # A subject or entry slug: lowercase, directory-name shaped (part 04 §2's
 # `subjects/people/bob.md`). Uppercase is refused rather than folded, the
@@ -85,6 +102,30 @@ class PathReference:
 
 
 @dataclass(frozen=True)
+class ChapterReference:
+    """A chapter, addressed by its stable ``CHP-`` ID rather than its
+    (renumberable) directory (#35)."""
+
+    chapter_id: str
+
+
+@dataclass(frozen=True)
+class SectionReference:
+    """A section, addressed by its stable ``SEC-`` ID rather than its
+    (renumberable) directory (#35)."""
+
+    section_id: str
+
+
+@dataclass(frozen=True)
+class ChangeReference:
+    """A human-authored commit, addressed by its stable ``CHG-`` id
+    (ADR-0008)."""
+
+    change_id: str
+
+
+@dataclass(frozen=True)
 class SubjectReference:
     """A subject, or one entry under it (part 04 §4's ``SUB-x`` / ``SUB-x/y``).
 
@@ -108,7 +149,15 @@ class UnknownReference:
     known: bool
 
 
-Reference = SourceReference | SubjectReference | PathReference | UnknownReference
+Reference = (
+    SourceReference
+    | SubjectReference
+    | PathReference
+    | ChapterReference
+    | SectionReference
+    | ChangeReference
+    | UnknownReference
+)
 
 
 class BadReference(Exception):
@@ -166,6 +215,18 @@ def parse(ref: str) -> Reference:
     if match:
         return SourceReference(match.group("id").upper())
 
+    match = _BARE_CHAPTER_ID.match(ref)
+    if match:
+        return ChapterReference(match.group("id").upper())
+
+    match = _BARE_SECTION_ID.match(ref)
+    if match:
+        return SectionReference(match.group("id").upper())
+
+    match = _BARE_CHANGE_ID.match(ref)
+    if match:
+        return ChangeReference(match.group("id").upper())
+
     match = _ID_PARAGRAPH.match(ref)
     if match:
         return SourceReference(match.group("id").upper(), int(match.group("n")))
@@ -205,6 +266,21 @@ def parse(ref: str) -> Reference:
                 f"malformed source reference: {ref!r} - expected a six-digit "
                 "ID like SRC-000184, optionally with a paragraph "
                 "(SRC-000184 P17 or #src-000184-p17)"
+            )
+        if kind.upper() == "CHP":
+            raise BadReference(
+                f"malformed chapter reference: {ref!r} - expected a "
+                "four-digit ID like CHP-0001"
+            )
+        if kind.upper() == "SEC":
+            raise BadReference(
+                f"malformed section reference: {ref!r} - expected a "
+                "four-digit ID like SEC-0001"
+            )
+        if kind.upper() == "CHG":
+            raise BadReference(
+                f"malformed change reference: {ref!r} - expected a "
+                "CHG-YYYYMMDD-NNN ID like CHG-20261014-003"
             )
         if kind.upper() == "SUB":
             # Same call as SRC above: this is a subject reference, and it is
@@ -269,4 +345,10 @@ def format_citation(reference: Reference) -> str:
         return f"{reference.subject_id}/{reference.entry_slug}"
     if isinstance(reference, PathReference):
         return str(reference.path)
+    if isinstance(reference, ChapterReference):
+        return reference.chapter_id
+    if isinstance(reference, SectionReference):
+        return reference.section_id
+    if isinstance(reference, ChangeReference):
+        return reference.change_id
     return f"{reference.kind}-"

@@ -3,11 +3,13 @@
 import argparse
 import sys
 
+from memoria import changes
 from memoria.index import INDEX_RELATIVE_PATH, rebuild
 from memoria.normalize import normalize as run_normalize
 from memoria.records import NORMALIZED_RELATIVE_PATH
 from memoria.repository import NoEvidenceRoot, from_env, require_evidence_root
 from memoria.validate import validate
+from memoria.write import Checkpointed, checkpoint
 
 # Where the repository is, and where evidence is, are `memoria.repository`'s
 # to answer (ADR-0004). The CLI held both until the core grew a read side; it
@@ -24,6 +26,10 @@ def main(argv=None):
     subparsers.add_parser(
         "rebuild",
         help="Delete and regenerate the search index from the normalized records",
+    )
+    subparsers.add_parser(
+        "checkpoint",
+        help="Commit any outside edits to durable files under one CHG- id",
     )
     normalize_parser = subparsers.add_parser(
         "normalize",
@@ -86,6 +92,19 @@ def main(argv=None):
                 "normalize` to produce them, or choose an evidence corpus "
                 "(see docs/open-problems.md 2.4)"
             )
+        change_ids = changes.rebuild(repository)
+        print(
+            f"rebuild: wrote {len(change_ids)} change projection(s) to "
+            f"{repository.root / changes.CHANGES_RELATIVE_PATH}"
+        )
+        return 0
+
+    if args.command == "checkpoint":
+        result = checkpoint(repository)
+        if isinstance(result, Checkpointed):
+            print(f"checkpoint: committed {len(result.files)} file(s) as {result.change_id}")
+        else:
+            print("checkpoint: nothing to checkpoint, tree is clean")
         return 0
 
     parser.print_help()

@@ -263,3 +263,35 @@ to be re-applied. It asks whether this file changed since it was read — a diff
 question from whether the file holds uncommitted human work, which is what the
 [[human-touched flag]]'s companion dirty-tree rule asks, and neither answers the other.
 _Avoid_: Version, revision, lock, etag, generation
+
+**Human checkpoint**:
+The commit Memoria makes of the author's uncommitted work when that work was done outside
+a surface — in Obsidian, in an editor — so the edit is in git before anything else reads
+it. Two triggers, both explicit: automatically, before any machine actor writes to durable
+files, and on demand with `memoria checkpoint`. It takes tracked, modified files under a
+durable state class, never untracked files and never derived state, and is one commit
+carrying one [[change ID]]. It is the moment a file passes from the dirty-tree rule's
+protection to the [[human-touched flag]]'s. Nothing watches for it: there is no daemon and
+no editing burst to detect.
+_Avoid_: Watcher, sync layer, snapshot, autosave, editing burst
+
+**Change ID**:
+The identity every human-authored commit carries, `CHG-YYYYMMDD-NNN` — a per-day sequence,
+in the form a `RES-` ID already uses rather than a clock time. Human-authored means the
+author acted, whether through a surface's [[write path]] or in Obsidian and caught by a
+[[human checkpoint]]; which editor was open is a surface accident. Curator and AI
+manuscript commits carry none and are told apart by their own trailers. The ID is in the
+commit message, and git history is its own ledger — no file maps IDs to commits, so a
+rebase cannot strand one. It is what an AI manuscript commit's `triggered-by:` names and
+what `read(CHG-…)` resolves.
+_Avoid_: Commit ID, revision, checkpoint ID, change number, SHA
+
+**Changes projection**:
+The readable view of a human-authored commit — its date, the commit it names, the files it
+touched and the diff — served by `read(CHG-…)` and written to `changes/CHG-*.md` by
+`memoria rebuild`, so the repository stays understandable without Memoria-specific
+software. One function renders it and both callers use that one, so the served view and
+the file always agree. Git stays canonical: the files are derived and gitignored, the read
+path never consults them, and nothing serves them for editing, so no [[staleness token]]
+attaches and the projection has no staleness semantics at all.
+_Avoid_: Changelog, change log, changes ledger, history file, audit trail

@@ -6,6 +6,7 @@
 <!-- §8.2 revised again 2026-08-31: match terms are the only alias store (part 05 §7). -->
 <!-- §8.3 and §8.4 revised 2026-08-31: gathered-set recall and the promotion miss -->
 <!-- rate are harness numbers (poc-plan §3, part 15 §43.14). -->
+<!-- §9.2's CHG- example amended 2026-09-01 to a per-day sequence. ADR-0008. -->
 
 # 8. The Subject System
 
@@ -574,7 +575,7 @@ or:
 
 ```markdown
 [author] The conflict should be framed primarily around autonomy.
-— [CHG-20261014-0917](...)
+— [CHG-20261014-003](...)
 ```
 
 The Curator must not turn the AI's suggestion into an `[author]` position merely
