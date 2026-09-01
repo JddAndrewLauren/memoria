@@ -77,16 +77,30 @@ class RawSourceResponse(BaseModel):
 
 
 class SearchResultOut(BaseModel):
-    """One search hit: the ``SRC-`` ID and paragraph anchor, and nothing
-    else. ``memoria.index.SearchResult`` carries no text; this route serves
-    none either, for the same reason ``search_text`` (#12) does not - see
-    ``docs/tool-surface.md``'s "search_text(query, filters)" section,
-    "What it returns", which is where that constraint is actually recorded.
+    """One search hit: the ``SRC-`` ID, the paragraph anchor, and a snippet.
+
+    ``memoria.index.SearchResult`` carries no paragraph text and this route
+    serves none either, for the same reason ``search_text`` (#12) does not -
+    see ``docs/tool-surface.md``'s "search_text(query, filters)" section,
+    "What it returns", which is where that constraint is recorded.
+
+    ``snippet`` is not that text. It is the match locator #95 settled on: a
+    truncated fragment of the index's copy, matched terms wrapped in
+    ``index.SNIPPET_MATCH_START``/``_END``, for drawing a hit row (part 19
+    §19.8). A client splits on those marks; it never renders the snippet as
+    markup, and it never feeds it to ``read``. Evidence arrives when the
+    reader clicks the hit and the slide-over reads ``anchor`` (§19.9).
+
+    Every field of ``index.SearchResult`` has a counterpart here, and
+    ``test_web_app.py`` fails if one stops having one - the generated-types
+    check cannot see a field the core has and this model dropped, because
+    the schema stays self-consistent, just impoverished.
     """
 
     src_id: str
     anchor: str
     source_type: str
+    snippet: str | None = None
 
 
 class SearchResponse(BaseModel):

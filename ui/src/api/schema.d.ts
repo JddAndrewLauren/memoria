@@ -80,6 +80,11 @@ export interface paths {
          *     only to carry the query params across the boundary, and every hit is
          *     ``memoria.index.search``'s own result, unmodified - no hydration, no SQL,
          *     written in this package (#64's acceptance criteria).
+         *
+         *     ``snippet=True`` is the one thing this route asks for that the MCP tool
+         *     does not: the search dialog draws a fragment per hit (part 19 §19.8) and
+         *     the core computes it, so the adapter still opens no database and reads no
+         *     evidence. It is a locator, not evidence - #95.
          */
         get: operations["search_api_search_get"];
         put?: never;
@@ -132,11 +137,24 @@ export interface components {
         };
         /**
          * SearchResultOut
-         * @description One search hit: the ``SRC-`` ID and paragraph anchor, and nothing
-         *     else. ``memoria.index.SearchResult`` carries no text; this route serves
-         *     none either, for the same reason ``search_text`` (#12) does not - see
-         *     ``docs/tool-surface.md``'s "search_text(query, filters)" section,
-         *     "What it returns", which is where that constraint is actually recorded.
+         * @description One search hit: the ``SRC-`` ID, the paragraph anchor, and a snippet.
+         *
+         *     ``memoria.index.SearchResult`` carries no paragraph text and this route
+         *     serves none either, for the same reason ``search_text`` (#12) does not -
+         *     see ``docs/tool-surface.md``'s "search_text(query, filters)" section,
+         *     "What it returns", which is where that constraint is recorded.
+         *
+         *     ``snippet`` is not that text. It is the match locator #95 settled on: a
+         *     truncated fragment of the index's copy, matched terms wrapped in
+         *     ``index.SNIPPET_MATCH_START``/``_END``, for drawing a hit row (part 19
+         *     §19.8). A client splits on those marks; it never renders the snippet as
+         *     markup, and it never feeds it to ``read``. Evidence arrives when the
+         *     reader clicks the hit and the slide-over reads ``anchor`` (§19.9).
+         *
+         *     Every field of ``index.SearchResult`` has a counterpart here, and
+         *     ``test_web_app.py`` fails if one stops having one - the generated-types
+         *     check cannot see a field the core has and this model dropped, because
+         *     the schema stays self-consistent, just impoverished.
          */
         SearchResultOut: {
             /** Src Id */
@@ -145,6 +163,8 @@ export interface components {
             anchor: string;
             /** Source Type */
             source_type: string;
+            /** Snippet */
+            snippet?: string | null;
         };
         /**
          * SourceDetail

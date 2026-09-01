@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from pathlib import Path
 
 from memoria.records import NormalizedRecord, read_all
 from memoria.repository import Repository
@@ -30,9 +29,45 @@ INDEX_RELATIVE_PATH = ".memoria/index.db"
 
 @dataclass
 class SearchResult:
+    """One hit: where the match is, and optionally what it looks like.
+
+    ``snippet`` is a **match locator, not evidence** (#95). It is a truncated,
+    marked-up fragment of the FTS5 copy of the paragraph - the same category
+    of thing as the line ``grep`` prints - and it is served only when a caller
+    asks for it. Evidence is read through ``read(ref)`` with ``anchor``, which
+    reads the record file itself; the index is derived state that carries no
+    authority (part 04 §42), so a snippet out of it is a pointer that may go
+    stale, never a quotation that may go wrong. Nothing ledgers a snippet as
+    served (``memoria.ledger``), and ``references.parse`` does not accept one.
+    """
+
     src_id: str
     anchor: str
     source_type: str
+    snippet: str | None = None
+
+
+# The marks FTS5 puts around matched terms inside a snippet. C0 control
+# characters, because a normalized record is prose and never contains one:
+# any printable marker could also be the evidence's own punctuation, and
+# brackets - the obvious choice - are real editorial syntax in this schema
+# (docs/normalized-record-schema.md's bracketed spans). A client splits on
+# these; nothing interpolates them into markup, so evidence text can never
+# be mistaken for the marker or for HTML.
+SNIPPET_MATCH_START = "\x01"
+SNIPPET_MATCH_END = "\x02"
+
+# The ellipsis FTS5 puts where it truncated, which is what keeps a snippet
+# visibly partial - a fragment that looked whole would be a quotation.
+SNIPPET_ELLIPSIS = "..."
+
+# How much of the paragraph a snippet may show, in FTS5 tokens (64 is the
+# maximum the function accepts).
+SNIPPET_TOKENS = 30
+
+# ``text`` is the fourth column of the ``records`` FTS5 table, and
+# ``snippet()`` takes that index rather than the column name.
+_SNIPPET_TEXT_COLUMN = 3
 
 
 @dataclass
@@ -53,8 +88,13 @@ class SearchFilters:
     contemporaneous: bool | None = None
 
 
-def build_index(db_path: Path, records: list[NormalizedRecord]) -> None:
-    """(Re)build the FTS5 index at ``db_path`` from ``records``.
+def build_index(repository: Repository, records: list[NormalizedRecord]) -> None:
+    """(Re)build the FTS5 index in ``repository`` from ``records``.
+
+    Takes the frozen ``Repository`` value, like ``search`` and every other
+    core function that names a location (ADR-0004): the index path is a fact
+    about a repository, not an argument a caller composes. This was the last
+    place in the module still taking a bare ``db_path``.
 
     Each record is indexed under its own ``source_type``, which is what
     ``SearchFilters.source_type`` filters on - an editorial record is a
@@ -67,7 +107,7 @@ def build_index(db_path: Path, records: list[NormalizedRecord]) -> None:
     clean regeneration rather than an incremental update - derived state
     has no authority of its own (§42).
     """
-    db_path = Path(db_path)
+    db_path = repository.root / INDEX_RELATIVE_PATH
     db_path.parent.mkdir(parents=True, exist_ok=True)
     if db_path.exists():
         db_path.unlink()
@@ -149,7 +189,11 @@ def filter_predicate(filters: SearchFilters | None) -> tuple[str, list]:
 
 
 def search(
-    repository: Repository, query: str, filters: SearchFilters | None = None
+    repository: Repository,
+    query: str,
+    filters: SearchFilters | None = None,
+    *,
+    snippet: bool = False,
 ) -> list[SearchResult]:
     """Full-text search the index, returning matching records with their
     ``SRC-`` ID and the paragraph anchor that matched, ranked by relevance.
@@ -164,6 +208,14 @@ def search(
     the web API (#64) and cross-layer search (#24) - without a second,
     divergent copy in any of them (§40.1).
 
+    ``snippet`` is opt-in and off by default, so a hit carries identifiers
+    and nothing else unless a caller asks otherwise (#95). It is a match
+    locator rather than evidence - see ``SearchResult`` - which is why the
+    default is off: ``search_text`` (#12) leaves it off and keeps rendering
+    and ledgering anchors alone, and the web adapter turns it on to draw the
+    search dialog's hit rows (part 19 §19.8). No caller gets paragraph text
+    out of this function; that is what ``read(ref)`` is for.
+
     A missing index - every fresh clone, since ``.memoria/`` is gitignored -
     returns no results rather than raising or creating the database file:
     "the corpus is not built" is an answer, not a driver exception.
@@ -174,12 +226,28 @@ def search(
     con = sqlite3.connect(db_path)
     try:
         predicate, predicate_params = filter_predicate(filters)
+        # The snippet is computed by FTS5 over the row it already matched,
+        # in the query that already runs - it costs a column, not a second
+        # pass and not a file read.
+        columns = "records.src_id, records.anchor, records.source_type"
+        params: list = []
+        if snippet:
+            columns += ", snippet(records, ?, ?, ?, ?, ?)"
+            params.extend(
+                [
+                    _SNIPPET_TEXT_COLUMN,
+                    SNIPPET_MATCH_START,
+                    SNIPPET_MATCH_END,
+                    SNIPPET_ELLIPSIS,
+                    SNIPPET_TOKENS,
+                ]
+            )
         sql = (
-            "SELECT records.src_id, records.anchor, records.source_type "
+            f"SELECT {columns} "
             "FROM records JOIN paragraphs ON paragraphs.anchor = records.anchor "
             "WHERE records MATCH ?"
         )
-        params: list = [query]
+        params.append(query)
         if predicate:
             sql += f" AND {predicate}"
             params.extend(predicate_params)
@@ -187,7 +255,15 @@ def search(
         rows = con.execute(sql, params).fetchall()
     finally:
         con.close()
-    return [SearchResult(src_id=r[0], anchor=r[1], source_type=r[2]) for r in rows]
+    return [
+        SearchResult(
+            src_id=r[0],
+            anchor=r[1],
+            source_type=r[2],
+            snippet=r[3] if snippet else None,
+        )
+        for r in rows
+    ]
 
 
 def rebuild(repository: Repository) -> list[NormalizedRecord]:
@@ -211,5 +287,5 @@ def rebuild(repository: Repository) -> list[NormalizedRecord]:
     Returns the records it indexed, which is an empty list when none exist.
     """
     records = read_all(repository)
-    build_index(repository.root / INDEX_RELATIVE_PATH, records)
+    build_index(repository, records)
     return records

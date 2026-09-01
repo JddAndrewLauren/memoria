@@ -177,7 +177,8 @@ here as evidence.
 `memoria.index.search(repository, query, filters)` takes the frozen
 `Repository` value, like every other core read (ADR-0004) — the point at
 which the function's `db_path` parameter was aligned to match, since #74 and
-#81 inherit the shape. `SearchFilters` carries the four filters that have
+#81 inherit the shape. `build_index` was aligned the same way by #95, so
+nothing in the module composes an index path from outside it. `SearchFilters` carries the four filters that have
 something to filter on at M1:
 
 - `event_date` — exact match against the record's verbatim frontmatter
@@ -214,13 +215,48 @@ function, exercised directly by `tests/test_index.py`.
 
 ### What it returns
 
-Each `SearchResult` carries `(src_id, anchor, source_type)` and **no text**.
-`search_text` renders one line per hit, ranked, giving both the `SRC-` ID and
-the paragraph anchor — the anchor is `SearchResult.anchor` verbatim, which
-`read(ref)` accepts with no reconstruction by the caller (the bare-anchor
-form in the `read(ref)` table above exists specifically for this). No
-snippets or ranked text are served by this tool; wanting them would be a
-change to `memoria.index`, not to the adapter.
+Each `SearchResult` carries `(src_id, anchor, source_type)` and **no paragraph
+text**. `search_text` renders one line per hit, ranked, giving both the `SRC-`
+ID and the paragraph anchor — the anchor is `SearchResult.anchor` verbatim,
+which `read(ref)` accepts with no reconstruction by the caller (the bare-anchor
+form in the `read(ref)` table above exists specifically for this).
+
+**A hit carries a match locator, not evidence** — settled 2026-09-01, issue
+#95. `search(repository, query, filters, snippet=True)` adds a `snippet` to
+each result: a truncated fragment of the *index's* copy of the paragraph, with
+matched terms wrapped in `index.SNIPPET_MATCH_START` / `SNIPPET_MATCH_END`
+(C0 control characters, so a mark can never be confused with the evidence's own
+punctuation — brackets are real editorial syntax in this schema — and nothing
+is ever interpolated as markup). It is the same category of thing as the line
+`grep` prints. It is computed by FTS5 inside the query that already runs, so it
+costs a column rather than a second pass or a file read.
+
+It is **off by default**, and `search_text` leaves it off: the model gets
+identifiers and reads evidence with `read(ref)`. The web adapter turns it on,
+because the search dialog draws a fragment per hit (part 19 §19.8) and the
+slide-over reads the full source when the reader clicks one (§19.9).
+
+Three things follow from a snippet being a locator rather than evidence, and
+each is held by a test:
+
+- **Nothing ledgers it.** `append_search` records anchors, so `served` keeps
+  meaning *supplied* and §33's manifest stays a record rather than a request.
+- **`read(ref)` does not accept it.** A snippet falls through to the path
+  fallback in `references.parse` and fails as a read; the anchor beside it is
+  what resolves.
+- **§42 is undisturbed.** The index is derived state carrying no authority, so
+  a snippet out of it is a pointer that may go stale, never a quotation that
+  may go wrong. Evidence always comes from the record file, through `read`.
+
+**Full paragraph hydration was rejected**, not deferred. It is cheap — the text
+is already in the FTS5 `records` table — but `search()` has no `LIMIT`, so
+hydrating would let one call dump every matching paragraph into a session's
+context, against part 11's tier list, which keeps "search results" and "full
+sources" as separate Tier 4 on-demand items. It would also serve evidence out
+of derived state and make the ledger's `served` line a lie by omission. If
+something later needs *authoritative* paragraph text for a result list — a
+plausible turn for `search_global` (#74) — the shape is a separately-ledgered
+hydration call over the record files, not a widened `search`.
 
 No match, and no built index yet — every fresh clone, since `.memoria/` is
 gitignored — both render `"No results."` rather than an empty string or a

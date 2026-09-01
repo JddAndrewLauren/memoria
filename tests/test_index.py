@@ -3,6 +3,9 @@ import time
 
 from memoria.index import (
     INDEX_RELATIVE_PATH,
+    SNIPPET_ELLIPSIS,
+    SNIPPET_MATCH_END,
+    SNIPPET_MATCH_START,
     SearchFilters,
     build_index,
     filter_predicate,
@@ -35,9 +38,9 @@ def _record(
 
 
 def _index(tmp_path, records):
-    db_path = tmp_path / INDEX_RELATIVE_PATH
-    build_index(db_path, records)
-    return Repository(root=tmp_path)
+    repository = Repository(root=tmp_path)
+    build_index(repository, records)
+    return repository
 
 
 def test_search_finds_a_record_by_its_paragraph_text(tmp_path):
@@ -285,3 +288,69 @@ def test_search_over_the_full_corpus_returns_well_under_a_second(tmp_path):
 
     assert results
     assert elapsed < 0.5
+
+
+# --- the snippet: a match locator, not evidence (#95) -----------------------
+
+
+def test_a_hit_carries_no_snippet_unless_one_is_asked_for(tmp_path):
+    """Off by default, so `search_text` and every existing caller are
+    unchanged: a hit is identifiers and nothing else."""
+    repository = _index(tmp_path, [_record("SRC-000184", ["A blue heron flew over."])])
+
+    (hit,) = search(repository, "heron")
+
+    assert hit.snippet is None
+    assert (hit.src_id, hit.anchor, hit.source_type) == (
+        "SRC-000184",
+        "src-000184-p1",
+        "journal",
+    )
+
+
+def test_a_snippet_marks_the_match_and_truncates_the_paragraph(tmp_path):
+    """A fragment with the matched term marked - the line `grep` prints, not
+    the paragraph. A snippet that came back whole would be a quotation."""
+    paragraph = " ".join(
+        ["The pond was still."] * 10
+        + ["A blue heron flew over."]
+        + ["The far bank was hidden."] * 10
+    )
+    repository = _index(tmp_path, [_record("SRC-000184", [paragraph])])
+
+    (hit,) = search(repository, "heron", snippet=True)
+
+    assert f"{SNIPPET_MATCH_START}heron{SNIPPET_MATCH_END}" in hit.snippet
+    assert SNIPPET_ELLIPSIS in hit.snippet
+    assert paragraph not in hit.snippet
+
+
+def test_the_snippet_marks_cannot_collide_with_evidence(tmp_path):
+    """The marks are C0 controls precisely so a paragraph cannot contain
+    them - brackets, the obvious alternative, are real editorial syntax."""
+    paragraph = "A blue heron [sic] flew over <mark>the pond</mark>."
+    repository = _index(tmp_path, [_record("SRC-000184", [paragraph])])
+
+    (hit,) = search(repository, "heron", snippet=True)
+
+    assert hit.snippet.count(SNIPPET_MATCH_START) == 1
+    assert hit.snippet.count(SNIPPET_MATCH_END) == 1
+
+
+def test_a_snippet_does_not_change_which_rows_match(tmp_path):
+    """Asking for a snippet is a column, not a different search - the same
+    hits in the same order, with the filters still applied."""
+    records = [
+        _record("SRC-000001", ["A heron by the pond."], source_type="journal"),
+        _record("SRC-000002", ["A heron, the editor notes."], source_type="editorial"),
+    ]
+    repository = _index(tmp_path, records)
+    filters = SearchFilters(source_type="journal")
+
+    thin = search(repository, "heron", filters)
+    with_snippet = search(repository, "heron", filters, snippet=True)
+
+    assert [(r.src_id, r.anchor) for r in with_snippet] == [
+        (r.src_id, r.anchor) for r in thin
+    ]
+    assert all(r.snippet for r in with_snippet)

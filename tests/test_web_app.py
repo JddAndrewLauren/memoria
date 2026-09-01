@@ -6,11 +6,17 @@ opening a file directly fails a test rather than drifting in unnoticed.
 """
 
 import ast
+import dataclasses
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from memoria.index import INDEX_RELATIVE_PATH, build_index
+from memoria.index import (
+    SNIPPET_MATCH_END,
+    SNIPPET_MATCH_START,
+    SearchResult,
+    build_index,
+)
 from memoria.records import (
     NORMALIZED_RELATIVE_PATH,
     NormalizedRecord,
@@ -18,6 +24,7 @@ from memoria.records import (
 )
 from memoria.repository import Repository
 from memoria.web.app import create_app
+from memoria.web.schemas import SearchResultOut
 
 WEB_PACKAGE = Path(__file__).resolve().parent.parent / "src" / "memoria" / "web"
 
@@ -247,30 +254,55 @@ def test_raw_source_with_a_missing_original_file_is_a_404(tmp_path):
 
 def _indexed(tmp_path, records):
     write_normalized_records(records, tmp_path / NORMALIZED_RELATIVE_PATH)
-    build_index(tmp_path / INDEX_RELATIVE_PATH, records)
-    return Repository(root=tmp_path)
+    repository = Repository(root=tmp_path)
+    build_index(repository, records)
+    return repository
 
 
-def test_search_returns_hits_with_no_hydrated_text(tmp_path):
-    """`SearchResult` carries no text (memoria.index); the route adds none.
+def test_search_returns_a_snippet_and_never_the_paragraph(tmp_path):
+    """A hit carries a match locator, never the evidence (#95).
 
-    #64's amendment: hydration is #12's job, not this layer's, and #12's
-    `search()` does not hydrate today - so search results here carry exactly
-    what `memoria.index.search` returns, unmodified.
+    The route asks for the snippet the search dialog draws (part 19 §19.8),
+    and that is all the text it ever serves: the paragraph itself arrives
+    through `read(ref)` on the anchor, which reads the record file rather
+    than the index's derived copy.
     """
-    repository = _indexed(
-        tmp_path, [_record(paragraphs=["A blue heron flew over the pond."])]
+    paragraph = (
+        "A blue heron flew over the pond, and I watched it until the far bank "
+        "hid it from me entirely, which took the better part of a minute."
     )
+    repository = _indexed(tmp_path, [_record(paragraphs=[paragraph])])
     client = _client(repository)
 
     body = client.get("/api/search", params={"q": "heron"}).json()
 
     (result,) = body["results"]
-    assert result == {
-        "src_id": "SRC-000184",
-        "anchor": "src-000184-p1",
-        "source_type": "journal",
-    }
+    assert result["src_id"] == "SRC-000184"
+    assert result["anchor"] == "src-000184-p1"
+    assert result["source_type"] == "journal"
+
+    # The matched term is marked, and the paragraph is not served whole.
+    assert f"{SNIPPET_MATCH_START}heron{SNIPPET_MATCH_END}" in result["snippet"]
+    assert paragraph not in result["snippet"]
+    assert set(result) == {"src_id", "anchor", "source_type", "snippet"}
+
+
+def test_every_core_search_result_field_has_a_response_field():
+    """The generated-types check cannot catch a field this layer dropped.
+
+    `SearchResultOut` enumerates its fields, so a field added to
+    `index.SearchResult` is served only if someone remembers this model too -
+    and `test_web_types.py` stays green either way, because the schema
+    remains self-consistent, just impoverished. This is the check that does
+    not (the handoff that #95 closes, item 2).
+    """
+    core = {field.name for field in dataclasses.fields(SearchResult)}
+    served = set(SearchResultOut.model_fields)
+
+    assert core <= served, (
+        f"index.SearchResult fields not served by the web API: {core - served} - "
+        "add them to memoria.web.schemas.SearchResultOut and the /search route"
+    )
 
 
 def test_search_filters_compose(tmp_path):

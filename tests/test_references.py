@@ -8,7 +8,7 @@ caller.
 import pytest
 
 from memoria import references
-from memoria.index import INDEX_RELATIVE_PATH, build_index, search
+from memoria.index import build_index, search
 from memoria.records import NormalizedRecord
 from memoria.references import (
     BadReference,
@@ -176,7 +176,7 @@ def test_a_search_result_anchor_is_a_reference_with_no_reconstruction(tmp_path):
         paragraphs=["Nothing here.", "A blue heron flew over."],
     )
     repository = Repository(root=tmp_path)
-    build_index(repository.root / INDEX_RELATIVE_PATH, [record])
+    build_index(repository, [record])
 
     (hit,) = search(repository, "heron")
 

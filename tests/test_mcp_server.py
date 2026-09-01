@@ -278,10 +278,11 @@ def test_the_tool_surface_is_read_and_search_text():
 
 
 def _index(tmp_path, records):
-    from memoria.index import INDEX_RELATIVE_PATH, build_index
+    from memoria.index import build_index
 
-    build_index(tmp_path / INDEX_RELATIVE_PATH, records)
-    return Repository(root=tmp_path)
+    repository = Repository(root=tmp_path)
+    build_index(repository, records)
+    return repository
 
 
 def test_search_text_returns_the_src_id_and_anchor_of_each_hit(tmp_path):
@@ -295,6 +296,38 @@ def test_search_text_returns_the_src_id_and_anchor_of_each_hit(tmp_path):
 
     assert "SRC-000184" in rendered
     assert "src-000184-p1" in rendered
+
+
+def test_search_text_serves_no_snippet_and_ledgers_none(tmp_path):
+    """The snippet is the web adapter's, not the model's (#95).
+
+    `search()` can compute one, and this tool does not ask: the model gets
+    identifiers and reads evidence through `read(ref)`, so a search over an
+    unbounded result set can never dump the corpus into the context. What is
+    ledgered stays anchors, which is what keeps `served` meaning supplied.
+    """
+    from memoria.index import SNIPPET_MATCH_END, SNIPPET_MATCH_START
+    from memoria.ledger import event_path
+
+    repository = _index(
+        tmp_path,
+        [_record(paragraphs=["A blue heron flew over.", "Nothing to do with birds."])],
+    )
+    server._repository = repository
+    server._session_id = "SES-test"
+
+    rendered = server.search_text("heron")
+
+    assert SNIPPET_MATCH_START not in rendered
+    assert SNIPPET_MATCH_END not in rendered
+    assert "flew over" not in rendered
+
+    (line,) = (
+        event_path(repository, "SES-test").read_text(encoding="utf-8").splitlines()
+    )
+    event = json.loads(line)
+    assert event["served"] == ["src-000184-p1"]
+    assert "snippet" not in line
 
 
 def test_search_text_returns_no_results_rather_than_an_empty_string(tmp_path):
@@ -385,7 +418,7 @@ def test_several_served_tool_calls_reconstruct_exactly_what_the_server_returned(
     repo, then checks the ledger against what the server *actually*
     returned for each call, independently recomputed through the core.
     """
-    from memoria.index import INDEX_RELATIVE_PATH, build_index
+    from memoria.index import build_index
     from memoria.index import search as search_core
     from mcp.server.mcpserver.exceptions import ToolError
 
@@ -393,8 +426,8 @@ def test_several_served_tool_calls_reconstruct_exactly_what_the_server_returned(
         _record(paragraphs=["A blue heron flew over.", "Nothing to do with birds."])
     ]
     write_normalized_records(records, tmp_path / NORMALIZED_RELATIVE_PATH)
-    build_index(tmp_path / INDEX_RELATIVE_PATH, records)
     repository = Repository(root=tmp_path)
+    build_index(repository, records)
     server._repository = repository
     server._session_id = "SES-test"
 
