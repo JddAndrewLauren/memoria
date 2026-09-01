@@ -138,8 +138,14 @@ forbids.
   round trip out to a browser and back. `0003-durable-writes-go-through-one-path.md`
   settles that path's *mechanism* — the content hash, the path-scoped commit, the accepted
   TOCTOU window — and was decided concurrently with this one. The two compose: it says how
-  a write is gated, this says where the module sits and what it is handed. Its rule that
-  the token is minted from the file as read is the reason #66 waits on the record store.
+  a write is gated, this says where the module sits and what it is handed.
+
+  **The write path does not wait on the record store**, and an earlier draft of this ADR
+  said it did. ADR-0003 scopes writes by state class: Manuscript, Subjects, Claims,
+  Working state and Change record go through the path, and **Derived does not**. Normalized
+  records are Derived — gitignored, rebuildable, no authority (§42) — so nothing the record
+  store owns is ever written through it. The files that are written are entries and
+  manuscript prose, and the read that mints their token is #64's, not this one's.
 
 - **Nothing here is glossary material.** `CONTEXT.md` is unchanged: repository, record
   store and reference resolution are service-layer naming, not domain concepts.
