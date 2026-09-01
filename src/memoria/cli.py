@@ -6,6 +6,11 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from memoria.cross_references import (
+    CROSS_REFERENCES_RELATIVE_PATH,
+    extract_cross_references,
+    write_cross_references_table,
+)
 from memoria.editorial import (
     EDITORIAL_RELATIVE_PATH,
     extract_editorial_apparatus,
@@ -129,6 +134,14 @@ def main(argv=None):
             table, output_root / "recipients.yaml"
         )
         print(f"normalize: wrote {len(table)} recipients to {recipients_path}")
+        cross_references = extract_cross_references(editorial_records)
+        cross_references_path = write_cross_references_table(
+            cross_references, repo_root() / CROSS_REFERENCES_RELATIVE_PATH
+        )
+        print(
+            f"normalize: wrote {len(cross_references)} cross-references to "
+            f"{cross_references_path}"
+        )
         return 0
 
     if args.command == "rebuild":
