@@ -462,18 +462,28 @@ def read(repository: Repository, ref: str) -> Read:
         # Bare, undecorated, exactly what's on disk - the same full-source
         # contract as a bare SRC- read (#11), extended to SUB- and SUB-x/y
         # (#16).
-        if reference.entry_slug is None:
-            path = subjects.subject_path(repository, reference.subject_id)
-            if not path.is_file():
-                raise ReadError(f"no such subject: {reference.subject_id}")
-        else:
-            path = subjects.find_entry_path(
-                repository, reference.subject_id, reference.entry_slug
-            )
-            if path is None:
-                raise ReadError(
-                    f"no such entry: {reference.subject_id}/{reference.entry_slug}"
+        #
+        # One error type crosses this boundary, the same rule already
+        # applied to references.BadReference above: subjects.SubjectError is
+        # an internal exception of a different module, and a stray one must
+        # not reach a caller that catches ReadError alone (mcp/server.py's
+        # ToolError mapping, docs/tool-surface.md's "the adapter maps the
+        # core's one error type onto it").
+        try:
+            if reference.entry_slug is None:
+                path = subjects.subject_path(repository, reference.subject_id)
+                if not path.is_file():
+                    raise ReadError(f"no such subject: {reference.subject_id}")
+            else:
+                path = subjects.find_entry_path(
+                    repository, reference.subject_id, reference.entry_slug
                 )
+                if path is None:
+                    raise ReadError(
+                        f"no such entry: {reference.subject_id}/{reference.entry_slug}"
+                    )
+        except subjects.SubjectError as exc:
+            raise ReadError(str(exc)) from exc
         return Read(
             ref=ref, citation=citation, text=path.read_text(encoding="utf-8")
         )

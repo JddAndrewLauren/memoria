@@ -311,6 +311,12 @@ def find_entry_path(
     every entry in the subject directory for a frontmatter ``id`` match -
     which is what makes a renamed file still resolve (issue #16's "stable
     `SUB-x/y` IDs in frontmatter surviving file rename").
+
+    A file that fails to parse - a stray malformed entry that is not the one
+    being looked up - is skipped rather than left to blow up the search: this
+    function is a probe over every file in the directory, and one sibling's
+    bad match term must not stop it from finding another entry that renamed
+    cleanly.
     """
     subject_dir = repository.root / SUBJECTS_RELATIVE_PATH / _slug(subject_id)
     if not subject_dir.is_dir():
@@ -319,14 +325,20 @@ def find_entry_path(
 
     candidate = subject_dir / f"{entry_slug}.md"
     if candidate.is_file():
-        entry = parse_entry(candidate.read_text(encoding="utf-8"), source=str(candidate))
-        if entry.id == target_id:
+        try:
+            entry = parse_entry(candidate.read_text(encoding="utf-8"), source=str(candidate))
+        except SubjectError:
+            entry = None
+        if entry is not None and entry.id == target_id:
             return candidate
 
     for path in sorted(subject_dir.glob("*.md")):
         if path.name == "_subject.md" or path == candidate:
             continue
-        entry = parse_entry(path.read_text(encoding="utf-8"), source=str(path))
+        try:
+            entry = parse_entry(path.read_text(encoding="utf-8"), source=str(path))
+        except SubjectError:
+            continue
         if entry.id == target_id:
             return path
     return None

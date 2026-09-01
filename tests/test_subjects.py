@@ -301,3 +301,48 @@ def test_load_subject_raises_for_a_missing_subject(tmp_path):
     repository = Repository(root=tmp_path)
     with pytest.raises(SubjectError, match="no such subject"):
         load_subject(repository, "SUB-people")
+
+
+def test_find_entry_path_skips_an_unrelated_malformed_sibling(tmp_path):
+    """A stray bad entry elsewhere in the subject must not blow up the scan
+    for a different, validly renamed entry (reproduces PR #84 review round 1).
+    """
+    repository = Repository(root=tmp_path)
+    subjects_dir = tmp_path / "subjects" / "people"
+    subjects_dir.mkdir(parents=True)
+    # Unrelated, malformed - a typo'd match term.
+    (subjects_dir / "bob.md").write_text(
+        entry_to_markdown(
+            Entry(id="SUB-people/bob", match_terms=["SUB-People/Bob"], body="Bob.")
+        ),
+        encoding="utf-8",
+    )
+    # The one actually being looked up, validly renamed.
+    (subjects_dir / "renamed-carol.md").write_text(
+        entry_to_markdown(Entry(id="SUB-people/carol", body="Carol.")),
+        encoding="utf-8",
+    )
+
+    path = find_entry_path(repository, "SUB-people", "carol")
+
+    assert path == subjects_dir / "renamed-carol.md"
+
+
+def test_load_entry_skips_an_unrelated_malformed_sibling(tmp_path):
+    repository = Repository(root=tmp_path)
+    subjects_dir = tmp_path / "subjects" / "people"
+    subjects_dir.mkdir(parents=True)
+    (subjects_dir / "bob.md").write_text(
+        entry_to_markdown(
+            Entry(id="SUB-people/bob", match_terms=["SUB-People/Bob"], body="Bob.")
+        ),
+        encoding="utf-8",
+    )
+    (subjects_dir / "renamed-carol.md").write_text(
+        entry_to_markdown(Entry(id="SUB-people/carol", body="Carol.")),
+        encoding="utf-8",
+    )
+
+    entry = load_entry(repository, "SUB-people", "carol")
+
+    assert entry.id == "SUB-people/carol"

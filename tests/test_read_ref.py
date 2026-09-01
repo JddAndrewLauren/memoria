@@ -462,3 +462,55 @@ def test_a_missing_entry_names_the_entry(tmp_path):
 
     with pytest.raises(ReadError, match="no such entry: SUB-people/nonesuch"):
         read(repository, "SUB-people/nonesuch")
+
+
+def test_reading_a_renamed_entry_survives_an_unrelated_malformed_sibling(tmp_path):
+    """Reproduces PR #84 review round 1: a typo'd match term in a sibling
+    file must not stop read() from finding a validly renamed entry."""
+    from memoria.subjects import Entry, entry_to_markdown, write_builtin_subjects
+
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    subjects_dir = tmp_path / "subjects" / "people"
+    (subjects_dir / "bob.md").write_text(
+        entry_to_markdown(
+            Entry(id="SUB-people/bob", match_terms=["SUB-People/Bob"], body="Bob.")
+        ),
+        encoding="utf-8",
+    )
+    carol_path = subjects_dir / "renamed-carol.md"
+    carol_path.write_text(
+        entry_to_markdown(Entry(id="SUB-people/carol", body="Carol.")),
+        encoding="utf-8",
+    )
+
+    result = read(repository, "SUB-people/carol")
+
+    assert result.text.encode("utf-8") == carol_path.read_bytes()
+
+
+def test_a_malformed_entry_file_reaches_read_as_a_readerror_not_a_subjecterror(
+    tmp_path,
+):
+    """A SubjectError from the subjects module must never cross read()'s
+    boundary - the same rule already enforced for references.BadReference,
+    and load-bearing at the MCP tool boundary, which catches ReadError
+    alone (docs/tool-surface.md)."""
+    from memoria.subjects import SubjectError, write_builtin_subjects
+
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    subjects_dir = tmp_path / "subjects" / "people"
+    (subjects_dir / "bob.md").write_text(
+        "---\nid: SUB-people/bob\nmatch_terms: [SUB-People/Bob]\n---\n\nBob.\n",
+        encoding="utf-8",
+    )
+
+    try:
+        read(repository, "SUB-people/bob")
+        raised = None
+    except Exception as exc:
+        raised = exc
+
+    assert isinstance(raised, ReadError)
+    assert not isinstance(raised, SubjectError)
