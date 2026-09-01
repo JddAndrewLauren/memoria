@@ -15,10 +15,12 @@ through here.
 
 **What this deliberately does not do**, so it is not later mistaken for an
 omission: no locking, no queue, no reconciliation, no merge, no multi-file
-atomicity. A write applies to the file the client read, whole, or it is
-rejected and says so. A residual TOCTOU window between the staleness check
-and the write is knowingly accepted (ADR-0003) - closing it needs a lock,
-and Obsidian will never take one.
+atomicity, and no creation - a token is minted from a file that exists, so
+a path with no file behind it never matches one, and a new durable file
+is not this issue's to bring into being. A write applies to the file the
+client read, whole, or it is rejected and says so. A residual TOCTOU window
+between the staleness check and the write is knowingly accepted (ADR-0003)
+- closing it needs a lock, and Obsidian will never take one.
 """
 
 from __future__ import annotations
@@ -36,8 +38,9 @@ from memoria.repository import Repository
 # named by their repository-relative path prefixes. Evidence (`sources/`),
 # Interaction record (`sessions/`) and Derived state (`sources/normalized/`,
 # `.memoria/`, `changes/`) are deliberately absent - see the module
-# docstring. Enumerated here, in one place, so a test can assert nothing
-# else in the codebase writes under them.
+# docstring. Enumerated here, in one place: `serve` and `write` refuse a
+# path outside them, and a test asserts nothing else in the codebase writes
+# a file at all.
 DURABLE_PATHS = (
     "book.md",
     "chapters/",
@@ -51,7 +54,8 @@ DURABLE_PATHS = (
 
 class WriteError(Exception):
     """Raised for a write that cannot be attempted at all - a path escaping
-    the repository, or the underlying git commit failing.
+    the repository or naming something outside the durable classes, or the
+    underlying git commit failing.
 
     Distinct from a stale token, which is not exceptional: it is the normal
     ``Rejected`` outcome the caller is expected to see and handle (decision
@@ -164,6 +168,8 @@ def _confined(repository: Repository, path: PurePosixPath) -> Path:
     root = repository.root.resolve()
     if resolved != root and root not in resolved.parents:
         raise WriteError(f"path escapes the repository: {path}")
+    if not str(path).startswith(DURABLE_PATHS):
+        raise WriteError(f"not a durable state class path: {path}")
     return resolved
 
 
@@ -188,11 +194,18 @@ def _commit(repository: Repository, relative_path: str, actor: Actor) -> None:
         "GIT_COMMITTER_NAME": actor.name,
         "GIT_COMMITTER_EMAIL": actor.email,
     }
-    # `add` before `commit`, explicitly, so a brand-new file is picked up
-    # too - `git commit <pathspec>` alone only re-stages a path git already
-    # tracks. Both calls are scoped to `relative_path` and nothing else, so
-    # another dirty file already staged is neither committed nor cleaned.
+    # `add` before `commit`, explicitly, so a file git does not track yet -
+    # on disk but never committed - is picked up too; `git commit
+    # <pathspec>` alone only re-stages a path git already tracks. Every call
+    # is scoped to `relative_path` and nothing else, so another dirty file
+    # already staged is neither committed nor cleaned.
     _git(repository, ["add", "--", relative_path], env=env)
+    # Saving the bytes that were read is an ordinary save, not an error:
+    # the file was replaced with itself and there is nothing to record, so
+    # no commit - `git commit` would exit 1 on `nothing to commit`.
+    if _git(repository, ["diff", "--cached", "--quiet", "--", relative_path],
+            env=env, ok=(0, 1)) == 0:
+        return
     _git(
         repository,
         ["commit", "-m", f"write: {relative_path}", "--", relative_path],
@@ -200,7 +213,12 @@ def _commit(repository: Repository, relative_path: str, actor: Actor) -> None:
     )
 
 
-def _git(repository: Repository, args: list[str], *, env: dict) -> None:
+def _git(
+    repository: Repository, args: list[str], *, env: dict, ok: tuple[int, ...] = (0,)
+) -> int:
+    """Run git, returning its exit code if it is one of `ok`. Any other is a
+    `WriteError` quoting both streams - git reports some failures on
+    stdout, not stderr."""
     result = subprocess.run(
         ["git", *args],
         cwd=repository.root,
@@ -208,5 +226,7 @@ def _git(repository: Repository, args: list[str], *, env: dict) -> None:
         capture_output=True,
         text=True,
     )
-    if result.returncode != 0:
-        raise WriteError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
+    if result.returncode not in ok:
+        reason = " ".join(part.strip() for part in (result.stdout, result.stderr) if part.strip())
+        raise WriteError(f"git {' '.join(args)} failed: {reason}")
+    return result.returncode

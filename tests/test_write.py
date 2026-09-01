@@ -202,6 +202,46 @@ def test_the_commit_is_attributed_to_the_actor(tmp_path):
     assert author == "Curator <curator@memoria.test>"
 
 
+def test_saving_unchanged_bytes_is_written_and_makes_no_commit(tmp_path):
+    """An editor's save button saving what it read is ordinary, not an
+    error: the token matches, the file is replaced with itself, and there is
+    nothing for git to record."""
+    repository = _repo(tmp_path, {"subjects/people/bob.md": "Bob\n"})
+    served = write.serve(repository, "subjects/people/bob.md")
+    before = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+
+    result = write.write(repository, "subjects/people/bob.md", served.token, "Bob\n", AUTHOR)
+
+    after = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert result == Written(path="subjects/people/bob.md")
+    assert after == before
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert status == ""
+
+
+def test_a_failed_git_call_reports_what_git_printed_on_either_stream(tmp_path, monkeypatch):
+    """git reports some failures on stdout (`nothing to commit` is one), so
+    an error that quoted stderr alone would carry an empty reason."""
+    repository = _repo(tmp_path, {"subjects/people/bob.md": "Bob\n"})
+
+    def _fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args, returncode=1, stdout="on stdout\n", stderr="on stderr\n"
+        )
+
+    monkeypatch.setattr(write.subprocess, "run", _fake_run)
+
+    with pytest.raises(write.WriteError, match="on stdout") as excinfo:
+        write._git(repository, ["commit"], env={})
+    assert "on stderr" in str(excinfo.value)
+
+
 # --- one module owns every durable write ------------------------------------
 
 # The two pre-existing writers ADR-0003 and ADR-0004 scope outside this
@@ -209,13 +249,34 @@ def test_the_commit_is_attributed_to_the_actor(tmp_path):
 # `sources/normalized/`, and `index` is the index maintainer, writing
 # `.memoria/index.db`. Both are Derived state (§42), not a durable class.
 ALLOWED_WRITERS = {"write.py", "records.py", "index.py"}
-FILE_WRITING_CALLS = {"write_text", "write_bytes"}
+FILE_WRITING_CALLS = {
+    "write_text", "write_bytes",
+    "replace", "rename", "copy", "copy2", "copyfile", "copyfileobj", "move",
+}
+WRITE_MODES = set("wax+")
+
+
+def _writes_a_file(node: ast.Call) -> str | None:
+    """The name of the file-writing call `node` makes, or None."""
+    name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+    if name in FILE_WRITING_CALLS:
+        return name
+    if name == "open":
+        mode = next(
+            (kw.value for kw in node.keywords if kw.arg == "mode"),
+            node.args[1] if len(node.args) > 1 else None,
+        )
+        if not isinstance(mode, ast.Constant) or WRITE_MODES & set(str(mode.value)):
+            return "open"
+    return None
 
 
 def test_no_other_module_writes_a_file():
     """The durable-class paths are enumerated in `write.DURABLE_PATHS`; this
     is the other half - nothing outside the allowlist above writes a file at
-    all, so nothing can write under them by another route."""
+    all, so nothing can write under them by another route. Caught: the
+    pathlib and shutil writers, `os.replace`/`rename`, and `open()` in any
+    mode that is not a read-only literal."""
     for path in sorted(SRC_ROOT.rglob("*.py")):
         if path.name in ALLOWED_WRITERS:
             continue
@@ -223,23 +284,33 @@ def test_no_other_module_writes_a_file():
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
-            name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
-            assert name not in FILE_WRITING_CALLS, (
+            name = _writes_a_file(node)
+            assert name is None, (
                 f"{path.relative_to(SRC_ROOT)} calls {name}(): a durable write "
                 "goes through memoria.write"
             )
 
 
-def test_durable_paths_cover_the_state_classes_the_write_path_scopes_to():
+def test_durable_paths_name_the_state_classes_and_nothing_derived_or_immutable():
     """Manuscript, Subjects, Claims and Working state (part 04 §3) - Change
     record has no path of its own, since it is realised as the commit every
     write already makes, not a directory this module writes into."""
-    assert write.DURABLE_PATHS == (
-        "book.md",
-        "chapters/",
-        "subjects/",
-        "claims/",
-        "decisions.md",
-        "questions.md",
-        "research/",
-    )
+    assert {"book.md", "chapters/", "subjects/", "claims/"} <= set(write.DURABLE_PATHS)
+    assert {"decisions.md", "questions.md", "research/"} <= set(write.DURABLE_PATHS)
+    for excluded in ("sources/", "sessions/", ".memoria/", "changes/"):
+        assert excluded not in write.DURABLE_PATHS
+
+
+@pytest.mark.parametrize(
+    "relative_path", ["sources/2024/letter.md", ".memoria/index.db", "changes/CHG-1.md"]
+)
+def test_the_write_path_refuses_a_path_outside_the_durable_classes(tmp_path, relative_path):
+    """Evidence is immutable and Derived state is regenerated; neither is
+    this module's to write, and the constant is what says so."""
+    repository = _repo(tmp_path, {relative_path: "not ours\n"})
+
+    with pytest.raises(write.WriteError, match="not a durable"):
+        write.serve(repository, relative_path)
+    with pytest.raises(write.WriteError, match="not a durable"):
+        write.write(repository, relative_path, "any", "x\n", AUTHOR)
+    assert (tmp_path / relative_path).read_text() == "not ours\n"
