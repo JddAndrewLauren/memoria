@@ -15,8 +15,9 @@ Events, Themes, Arcs, and others the author adds. It is both a check the Curator
 performs on new manuscript prose and an index a writing agent reads instead of the
 corpus. Its prompt carries three things: what counts as a match, the matching hazards,
 and **the audit questions this subject asks of new prose**. Every audit question in
-the system belongs to some subject; there is no central list. On screen the three trees are `MANUSCRIPT` / `SUBJECTS` / `SOURCES`, and a
-new one is added with `+ New subject`.
+the system belongs to some subject; there is no central list.
+On screen the three trees are `MANUSCRIPT` / `SUBJECTS` / `SOURCES`, and a new
+subject is added with `+ New subject`.
 _Avoid_: Axis, group, category, object type, dimension, lens
 
 **Entry**:

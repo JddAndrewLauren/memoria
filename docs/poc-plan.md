@@ -270,7 +270,7 @@ interface.
    targets, but nothing with a brief, a declared scope, or a passage written from
    something. §43.2's resumption test is now the manuscript layer's central claim and
    can only be exercised on the authorship track's own piece.
-6. **§1.12 remains the governing risk.** The failure condition is Memoria
+7. **§1.12 remains the governing risk.** The failure condition is Memoria
    advancing while no book does. The authorship track exists partly to keep that
    honest during development.
 

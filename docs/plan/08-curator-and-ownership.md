@@ -186,9 +186,11 @@ Stripping a badge is the inverse act: the author claims the statement rather tha
 removing it (part 06 §8.6).
 
 This is the same mechanism as the subject system's curated overlay. An **exclusion**
-from a gathered set, a **dismissed finding** and a **settlement** are all boundaries
-of this kind, and a finding's disagreement set is what makes the boundary
-identifiable without minting an ID. See part 06 §§8.3, 8.7, 8.10.
+from a gathered set and a **settlement** are boundaries of this kind, and a finding's
+disagreement set is what makes a settled disagreement identifiable without minting an
+ID. A *declined finding* is deliberately not stored (part 09 §18, part 04 §4.1): a
+decline worth remembering becomes craft direction in the brief; the rest recur by
+design. See part 06 §§8.3, 8.7, 8.10.
 
 Materially new evidence may justify resurfacing the possibility, but it should appear explicitly as something previously rejected or removed.
 

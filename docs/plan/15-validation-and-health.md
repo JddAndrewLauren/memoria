@@ -22,7 +22,9 @@ checks for:
 - `[inferred]` assertions without a basis;
 - AI manuscript writes without an identifiable authorization — **including writes to a
   brief**, which is manuscript-class and has an AI write path of its own (§2.1);
-- derived summaries that introduce unsupported claims;
+- derived summaries that introduce unsupported claims — the one check here that
+  needs a model; it belongs to a requested audit rather than to `memoria validate`'s
+  mechanical pass (recorded 2026-08-31);
 - provenance chains that terminate in another derived artifact instead of original material.
 
 Curator commits should fail validation when they introduce malformed provenance.
@@ -82,7 +84,7 @@ Can each be traced to legitimate terminal provenance?
 
 ## 43.8 Broken-link test
 
-Do all cited source, session, change, and impact references resolve?
+Do all cited source, session, and change references resolve?
 
 ## 43.9 Human-edit test
 
@@ -120,7 +122,7 @@ Memoria should periodically be able to report:
 - sections whose brief is still **unconfirmed**;
 - old unresolved questions;
 - themes with substantial new evidence but no recent review;
-- arcs whose current interpretation conflicts with recent manuscript changes;
+- arcs whose cached judgements have gone stale against recent manuscript changes;
 - human/Curator conflicts;
 - unsupported interpretation statements;
 - broken provenance;

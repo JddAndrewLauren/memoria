@@ -422,6 +422,8 @@ hash:
 ```text
 key    = the three above
        + hash(gathered-set membership, pins and exclusions applied)
+value  = clear, or a finding: the disagreement-set members, the prose
+         stating how they disagree, and a confidence (§8.10)
 ```
 
 Membership, not content: evidence is immutable (Invariant 3), so only *which* sources

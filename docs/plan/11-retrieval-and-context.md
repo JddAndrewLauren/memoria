@@ -17,7 +17,6 @@ read_source(id)
 read_session(id)
 read_change(id)
 read_claim(id)
-read_impact(id)
 read(path)
 
 expand(chunk_id)
@@ -233,7 +232,7 @@ Tier 2 — the declared scope, resolved
 
 Tier 3 — structural neighborhood
     previous section ending
-    next section outline
+    the next section's brief
     chapter digest
 
 Tier 4 — on demand

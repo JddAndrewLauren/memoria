@@ -85,7 +85,7 @@ Memoria may create or update:
 
 ```text
 subjects/themes/control.md
-arcs/...
+subjects/arcs/...
 claims/...
 ```
 
@@ -330,6 +330,13 @@ Next step
 Rewrite the final three paragraphs using only contemporaneous
 evidence.
 ```
+
+> **Superseded in part, 2026-08-31.** Three blocks of the screen above no longer
+> exist as stored state: `Checkpoint` and `Next step` were removed with §39's
+> seventeen-field record (part 12 — resumption is the brief, the draft and an audit
+> on request), and `Unresolved manuscript impacts` cannot accumulate (part 09 §17 —
+> findings are recomputed, never stored). The screen is kept as originally written;
+> read those three blocks as what a live audit and git would compose, not as fields.
 
 The author can open this view on a desktop browser or phone and press **Resume**.
 

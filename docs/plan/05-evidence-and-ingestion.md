@@ -131,7 +131,7 @@ my brother-in-law
 A canonical alias map lives in:
 
 ```text
-people/_aliases.yaml
+subjects/people/_aliases.yaml
 ```
 
 Alias resolution is one of the few curation activities where ambiguity should normally be surfaced to the author.
