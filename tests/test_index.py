@@ -96,7 +96,10 @@ def test_rebuild_writes_normalized_records_and_builds_a_searchable_index(tmp_pat
     rebuild(evidence_root, repo_root)
 
     normalized = list((repo_root / "sources" / "normalized").glob("SRC-*.md"))
-    assert len(normalized) == 558
+    # 558 journal records + 130 letter records (issue #6 review round 1:
+    # rebuild() used to call normalize_journals alone, silently deleting
+    # every letter record on a rebuild).
+    assert len(normalized) == 688
 
     db_path = repo_root / ".memoria" / "index.db"
     assert db_path.is_file()
@@ -131,21 +134,38 @@ def test_rebuild_after_deleting_the_index_reproduces_identical_search_results(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
 )
-def test_rebuild_resolves_years_and_never_leaves_a_record_unresolved(tmp_path):
+def test_rebuild_resolves_years_and_never_leaves_a_journal_record_unresolved(
+    tmp_path,
+):
     # Regression test (PR #50 review round 1): rebuild() re-derives
     # normalized records from evidence via normalize_journals alone, which
     # produces date_confidence: unresolved - it must also call
     # resolve_years(), or every rebuild silently discards year resolution
     # (docs/normalized-record-schema.md's date_confidence contract, and
     # rebuild()'s own "losing nothing" (§42) docstring).
+    #
+    # Scoped to journal records deliberately (issue #6 review round 1):
+    # resolve_years() only ever touches journal records (it filters by
+    # original_file against JOURNAL_VOLUMES), so every letter keeps
+    # date_confidence: unresolved after rebuild - not a gap in rebuild(),
+    # since letters-specific year resolution is out of issue #6's scope
+    # (see docs/normalized-record-schema.md's Letters section).
     evidence_root = os.environ[EVIDENCE_ROOT_ENV_VAR]
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
     records = rebuild(evidence_root, repo_root)
+    journal_records = [r for r in records if r.source_type == "journal"]
+    letter_records = [r for r in records if r.source_type == "letter"]
 
-    assert all(r.date_confidence != "unresolved" for r in records)
-    assert {r.date_confidence for r in records} <= {"exact", "inferred", "chapter-only"}
+    assert all(r.date_confidence != "unresolved" for r in journal_records)
+    assert {r.date_confidence for r in journal_records} <= {
+        "exact",
+        "inferred",
+        "chapter-only",
+    }
+    assert letter_records, "rebuild() must not drop the letter records"
+    assert all(r.date_confidence == "unresolved" for r in letter_records)
 
 
 @pytest.mark.skipif(

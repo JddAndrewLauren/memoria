@@ -143,6 +143,96 @@ matched heading is preceded by a blank line, no line-initial
 check that would have caught the regex bug above automatically), and no
 entry carries back-matter markers — rather than a count in isolation.
 
+## Letters (issue #6)
+
+The second source type: the 130 letters of *Familiar Letters*
+(`raw/gutenberg/43523-familiar-letters/pg43523.txt`), `source_type: letter`.
+`normalize_letters` splits on the line-initial `TO <recipient>.` heading
+RECON.md §5 documents — re-verified directly against the raw corpus: exactly
+130 headings, 43 distinct verbatim strings, matching RECON's own counts
+exactly. IDs continue the journals' `SRC-` sequence (`start_id`, default
+`len(journal_records) + 1` when the CLI combines both source types — part
+04 §4's "volume order, then entry order").
+
+### Letter-specific frontmatter fields
+
+Alongside the shared fields journals also carry, a letter record's
+frontmatter adds three structured fields the acceptance criteria name
+(`recipient`, `dateline`, `salutation`) — `NormalizedRecord.recipient` /
+`.dateline` / `.salutation`, `None` and omitted from frontmatter for
+journal records:
+
+| Field | Meaning |
+|---|---|
+| `recipient` | The heading text after `TO `, preserved **verbatim** — no stripping, no merging. This is deliberate: R. W. Emerson's four location forms (`(AT CONCORD)`, `(AT NEW YORK)`, `(IN ENGLAND)`, no location) and the Thoreau family's shared surname are the corpus's alias-resolution hazard material (§7), and merging them here would destroy it before M2 ever sees it. |
+| `dateline` | The letter's indented dateline paragraph (e.g. `CONCORD, October 27, 1837.`) — the first substantive paragraph after the heading (skipping a leading editorial annotation like `[The first of many letters.]`), if and only if it is indented; empty when the letter has none, rather than scanning further and risking its closing signature block instead (review round 1 on PR #52's blocking defect 1: `SRC-000002`/`SRC-000129` used to get `"TAHATAWAN."`/`"Yrs. in great haste, HENRY D. THOREAU."`). Unlike the journals, letter datelines already carry an explicit year — still landing here verbatim rather than parsed, since year resolution is a separate M0 step (part 16) from letters parsing. |
+| `salutation` | The opening address (`DEAR HELEN,--`, `MR. BLAKE,--`), extracted non-destructively from the body's first paragraph — the body keeps that paragraph in full, so nothing is lost by also exposing this field. |
+
+`recorded_date` / `event_date` land as the dateline text, same as `dateline`
+(the journals' pattern of landing the heading text verbatim). `contemporaneous`
+is `true` — a letter, like a diary entry, is evidence contemporaneous with
+when it was written. `date_confidence` is `unresolved` for every letter
+record this slice produces, the same value the journals slice produces and
+for the same reason: parsing the dateline's already-explicit year into a
+resolved date is year-resolution work, scoped to a later M0 step (part 16),
+not this one.
+
+### Scope: editorial narrative between letters is left inline
+
+Sanborn's connective prose between two letters (`This singular letter was
+addressed to John Thoreau...`) is not segregated out of the preceding
+letter's body in this slice — the same scope decision issue #3 made for
+footnote markers and bracketed editorial spans within journal entries
+("left inline for this slice"). Segregating all editorial voice into
+separate retrospective-editorial records is part 16's dedicated
+"editorial-voice segregation" build step, distinct from "letters parsing."
+**Sanborn's Introduction itself is different** and is excluded by
+construction: everything before the first `TO ` heading is discarded, the
+same way the journals discard everything before their first date heading.
+
+### Back matter: the General Index and trailing footnotes
+
+The volume's General Index (`GENERAL INDEX`, after the last letter) is cut
+the same way the journals cut `END OF VOLUME` back matter —
+`_extract_body_lines` takes a `back_matter_marker` parameter so both
+volumes share the same START/END-marker-and-cut logic. A `FOOTNOTES:`
+block — Sanborn's endnotes for the preceding stretch of letters — can land
+inside an entry's own lines the same way the journals' back matter used to
+land inside their last entry (PR #48 review round 1); `_split_letters`
+trims every letter's lines at a trailing `FOOTNOTES:` marker, not just the
+last letter's, since a footnote block is never part of the letter itself
+wherever it lands.
+
+**"Editorial narrative is left inline" is not uniformly true**, and #5
+should not assume it is (review round 1 on PR #52): `_trim_trailing_footnotes`
+cuts a letter's lines at its first `FOOTNOTES:` marker, so any connective
+narrative that happens to fall *after* a `FOOTNOTES:` block within that
+same span is silently dropped along with the footnotes, while narrative
+falling *before* one (the ordinary case — narrative between two letters
+elsewhere in the volume) is kept. This is a side effect of trimming at the
+first marker found, not a deliberate distinction between two kinds of
+narrative.
+
+## Recipients table (issue #6)
+
+`recipients_table(records)` maps each verbatim `recipient` string to the
+`SRC-` IDs of the letters naming them — "a real, checkable table ... not a
+list in a comment" (issue #6). `memoria normalize` writes it as YAML to
+`sources/normalized/recipients.yaml` via `write_recipients_table`. It has
+43 entries against the real corpus, matching RECON.md §5's "43 distinct
+recipients" exactly.
+
+**Not person-level ground truth on its own.** The 43 rows are 43 distinct
+verbatim *strings*, over roughly 25 actual people — they include artefacts
+of the source text alongside genuine location-form variants: a stray-comma
+duplicate (`DANIEL RICKETSON, (AT NEW BEDFORD).` vs `DANIEL RICKETSON (AT
+NEW BEDFORD).`), an `(AT MILTON)` / `(IN MILTON)` preposition variant, and
+two footnote-marked Emerson headings alongside his three genuine location
+forms. This is correct as issue #6 specifies it (verbatim, unmerged — the
+alias-resolution hazard material §7 wants intact), but M2's
+promotion-miss-rate scoring will need an alias layer on top of this table
+before it is ground truth at the level of a *person*, not a heading string.
+
 ## Weekday checksum: reconciled against RECON.md (issue #4)
 
 RECON.md §3 estimates "roughly 100 headings carry a weekday." Mechanically

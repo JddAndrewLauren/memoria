@@ -12,7 +12,13 @@ from memoria.editorial import (
     write_editorial_records,
 )
 from memoria.index import INDEX_RELATIVE_PATH, rebuild
-from memoria.normalize import normalize_journals, write_normalized_records
+from memoria.normalize import (
+    normalize_journals,
+    normalize_letters,
+    recipients_table,
+    write_normalized_records,
+    write_recipients_table,
+)
 from memoria.validate import NORMALIZED_RELATIVE_PATH, validate
 from memoria.year_resolution import resolve_years
 
@@ -46,7 +52,10 @@ def main(argv=None):
     )
     subparsers.add_parser(
         "normalize",
-        help="Normalize the journal volumes into per-entry sources/normalized/ records",
+        help=(
+            "Normalize the journal and letters volumes into per-entry "
+            "sources/normalized/ records"
+        ),
     )
     subparsers.add_parser(
         "rebuild",
@@ -65,11 +74,37 @@ def main(argv=None):
         return 0
 
     if args.command == "normalize":
-        records = normalize_journals(evidence_root())
-        warnings = resolve_years(records, evidence_root())
+        journal_records = normalize_journals(evidence_root())
+        # Order matters (issue #6 review round 3, in response to #5 review
+        # round 1's note that this sequence was undocumented):
+        # resolve_years() reads only record.recorded_date and re-parses
+        # the raw file directly for headings/chapters - it never reads
+        # record.paragraphs - so it is unaffected by whether
+        # extract_editorial_apparatus() has already stripped that record's
+        # paragraphs. Running it first anyway is deliberate pipeline
+        # discipline, not accidental: it is the "read-mostly" mutation
+        # (recorded_date/event_date/date_confidence only), while editorial
+        # extraction is the more invasive one (rewrites/drops paragraphs
+        # outright) - doing the narrower mutation first keeps the sequence
+        # easy to reason about and guards against a future resolve_years
+        # change that starts reading paragraph text landing after its
+        # apparatus has already been stripped out from under it.
+        #
+        # Both operate on journal_records only, before letter_records
+        # exist - each filters internally by JOURNAL_VOLUMES /
+        # original_file and would leave letter records untouched even
+        # called on the combined list, but keeping letters out of both
+        # calls entirely is one fewer thing to reason about.
+        warnings = resolve_years(journal_records, evidence_root())
         for warning in warnings:
             print(f"normalize: {warning}")
-        editorial_records = extract_editorial_apparatus(evidence_root(), records)
+        editorial_records = extract_editorial_apparatus(
+            evidence_root(), journal_records
+        )
+        letter_records = normalize_letters(
+            evidence_root(), start_id=len(journal_records) + 1
+        )
+        records = journal_records + letter_records
         output_root = repo_root() / NORMALIZED_RELATIVE_PATH
         written = write_normalized_records(records, output_root)
         editorial_output_root = repo_root() / EDITORIAL_RELATIVE_PATH
@@ -78,13 +113,22 @@ def main(argv=None):
         )
         counts = Counter(record.date_confidence for record in records)
         counts_text = ", ".join(
-            f"{level}={counts[level]}" for level in ("exact", "inferred", "chapter-only")
+            f"{level}={counts[level]}"
+            for level in ("exact", "inferred", "chapter-only", "unresolved")
+            if counts[level]
         )
-        print(f"normalize: wrote {len(written)} records to {output_root} ({counts_text})")
+        print(
+            f"normalize: wrote {len(written)} records to {output_root} ({counts_text})"
+        )
         print(
             f"normalize: wrote {len(editorial_written)} editorial records to "
             f"{editorial_output_root}"
         )
+        table = recipients_table(letter_records)
+        recipients_path = write_recipients_table(
+            table, output_root / "recipients.yaml"
+        )
+        print(f"normalize: wrote {len(table)} recipients to {recipients_path}")
         return 0
 
     if args.command == "rebuild":

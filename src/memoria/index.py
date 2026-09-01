@@ -23,7 +23,10 @@ from memoria.editorial import (
 from memoria.normalize import (
     NormalizedRecord,
     normalize_journals,
+    normalize_letters,
+    recipients_table,
     write_normalized_records,
+    write_recipients_table,
 )
 from memoria.validate import NORMALIZED_RELATIVE_PATH
 from memoria.year_resolution import resolve_years
@@ -33,7 +36,7 @@ INDEX_RELATIVE_PATH = ".memoria/index.db"
 # Editorial records (issue #5's EditorialRecord - footnotes, bracketed
 # asides, interpolations, introductions) are indexed under this
 # source_type, distinct from any NormalizedRecord's own source_type
-# ("journal" for this slice), so exclude_editorial actually excludes them.
+# ("journal" or "letter"), so exclude_editorial actually excludes them.
 EDITORIAL_SOURCE_TYPES = frozenset({"editorial"})
 
 
@@ -128,27 +131,60 @@ def search(
 
 def rebuild(evidence_root: Path, repo_root: Path) -> list[NormalizedRecord]:
     """Delete and regenerate all derived state - the normalized records,
-    the editorial records, and the FTS5 index - from evidence, losing
-    nothing (§42).
+    the recipients table, the editorial records, and the FTS5 index -
+    from evidence, losing nothing (§42).
 
     Normalized records are themselves rebuildable derived state (see
     ``docs/normalized-record-schema.md``): this re-derives them from
     evidence before indexing, rather than trusting whatever is already on
     disk under ``sources/normalized/``, so rebuild is correct whether that
     directory is absent, stale, or up to date. Editorial apparatus
-    (issue #5) is extracted out of those records - and the editorial
-    records it produces written and indexed - in the same pass, so a
-    plain ``rebuild()`` never regresses back to unstripped, unsearchable-
-    exclusion evidence the way calling ``normalize_journals`` +
-    ``build_index`` directly would.
+    (issue #5) is extracted out of the journal records - and the
+    editorial records it produces written and indexed - in the same pass,
+    so a plain ``rebuild()`` never regresses back to unstripped,
+    unsearchable-exclusion evidence the way calling ``normalize_journals``
+    + ``build_index`` directly would. Must also produce exactly what
+    ``memoria normalize`` produces for the letters (issue #6 review round
+    1: rebuild used to call ``normalize_journals`` alone, silently
+    deleting every letter record on a rebuild and leaving a stale
+    ``recipients.yaml`` behind) - ``tests/test_cli.py``'s
+    ``test_rebuild_produces_byte_identical_output_to_normalize`` is the
+    regression test for the whole class of defect, not just this instance.
+
+    Letters do not get year resolution or editorial extraction here:
+    ``resolve_years`` and ``extract_editorial_apparatus`` both filter by
+    ``original_file`` against ``JOURNAL_VOLUMES`` and leave letter records
+    untouched, so every letter keeps ``date_confidence: unresolved`` after
+    both ``memoria normalize`` and ``memoria rebuild`` - deliberately, not
+    a gap this function is meant to close. A letter's dateline already
+    carries an explicit year as text (unlike a journal heading), but
+    turning that into a resolved ``event_date``/``date_confidence`` is
+    letters-specific year-resolution work issue #6 scoped out (part 16:
+    "year resolution" and "letters parsing" are separate M0 build steps),
+    not something to grow inside ``rebuild()`` unasked.
     """
     evidence_root = Path(evidence_root)
     repo_root = Path(repo_root)
 
-    records = normalize_journals(evidence_root)
-    resolve_years(records, evidence_root)
-    editorial_records = extract_editorial_apparatus(evidence_root, records)
-    write_normalized_records(records, repo_root / NORMALIZED_RELATIVE_PATH)
+    journal_records = normalize_journals(evidence_root)
+    # Order matters (see cli.py's matching comment on `memoria normalize`,
+    # which this function must stay in lockstep with): resolve_years()
+    # reads only recorded_date and the raw file, never record.paragraphs,
+    # so it is unaffected by extract_editorial_apparatus()'s paragraph
+    # rewrite either way - run first anyway as the narrower, read-mostly
+    # mutation before the more invasive one.
+    resolve_years(journal_records, evidence_root)
+    editorial_records = extract_editorial_apparatus(evidence_root, journal_records)
+    letter_records = normalize_letters(
+        evidence_root, start_id=len(journal_records) + 1
+    )
+    records = journal_records + letter_records
+
+    output_root = repo_root / NORMALIZED_RELATIVE_PATH
+    write_normalized_records(records, output_root)
+    write_recipients_table(
+        recipients_table(letter_records), output_root / "recipients.yaml"
+    )
     write_editorial_records(editorial_records, repo_root / EDITORIAL_RELATIVE_PATH)
     build_index(repo_root / INDEX_RELATIVE_PATH, records, editorial_records)
     return records
