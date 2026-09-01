@@ -539,8 +539,10 @@ def _extract_dateline(entry_lines: list[str]) -> str:
 # ("DEAR HELEN,--", "MR. BLAKE,--", "MY DEAR FRIEND,--"). Matched
 # generically on punctuation rather than a fixed vocabulary, since the
 # corpus's salutations vary widely (RECON.md §5 examples plus "MR. X,--",
-# "FRIEND X,--", "MY FRIEND X,--", even Latin "CARA SOROR,--").
-_SALUTATION_RE = re.compile(r"^(.*?,--)")
+# "FRIEND X,--", "MY FRIEND X,--", even Latin "CARA SOROR,--"). An optional
+# footnote marker may sit between the comma and the dashes (SRC-000092,
+# "MR. WILEY,[75]--").
+_SALUTATION_RE = re.compile(r"^(.*?,(?:\[\d+\])?--)")
 
 # A letter's dateline already carries its own explicit year as text (issue
 # #6), unlike the journals' headings - no chapter to infer from and no
@@ -570,15 +572,18 @@ def _extract_salutation(entry_lines: list[str]) -> str:
     paragraph), which the body itself keeps in full - this is a
     non-destructive read of it, not a split. A second or third letter
     bundled under one recipient heading sometimes continues without a
-    fresh greeting; falls back to that paragraph's first line rather than
-    an empty field.
+    fresh greeting (SRC-000045, SRC-000049, SRC-000050, SRC-000129 in the
+    real corpus): that paragraph's opening prose is not a salutation, so
+    a letter with none gets an empty string rather than an invented one
+    (issue #58, the same shape-not-presence remedy #52 applied to
+    `dateline`).
     """
     for paragraph in _raw_paragraphs(entry_lines[1:]):
         if _is_editorial_annotation(paragraph) or _is_indented_paragraph(paragraph):
             continue
         first_line = paragraph.splitlines()[0].strip()
         match = _SALUTATION_RE.match(first_line)
-        return match.group(1) if match else first_line
+        return match.group(1) if match else ""
     return ""
 
 

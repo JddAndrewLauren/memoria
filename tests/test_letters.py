@@ -146,6 +146,45 @@ def test_normalize_letters_with_no_dateline_gets_an_empty_dateline_not_a_signatu
     assert records[2].recorded_date == ""
 
 
+def test_normalize_letters_with_no_salutation_gets_an_empty_salutation_not_prose(
+    tmp_path,
+):
+    # A letter that continues without a fresh greeting (SRC-000045,
+    # SRC-000049, SRC-000050, SRC-000129 in the real corpus) must not have
+    # its opening body prose picked up as `salutation` - an empty
+    # salutation is correct when a letter has none, per the issue #58
+    # brief.
+    evidence_root = tmp_path / "thoreau-evidence"
+    text = _FAKE_LETTERS_TEXT.replace(
+        "DEAR FRIEND,--I write to you now about the pond.\r\n",
+        "I write to you now about the pond, with no salutation at all.\r\n",
+    )
+    _write_fake_letters_volume(evidence_root, text)
+
+    records = normalize_letters(evidence_root)
+
+    assert records[2].salutation == ""
+    assert "pond" in "\n".join(records[2].paragraphs)
+
+
+def test_normalize_letters_recognises_a_salutation_with_a_footnote_marker(
+    tmp_path,
+):
+    # SRC-000092 in the real corpus: "MR. WILEY,[75]--" carries a footnote
+    # marker between the comma and the dashes, so the plain ",--" pattern
+    # missed it and fell through to the (now-removed) prose fallback.
+    evidence_root = tmp_path / "thoreau-evidence"
+    text = _FAKE_LETTERS_TEXT.replace(
+        "DEAR FRIEND,--I write to you now about the pond.\r\n",
+        "MR. WILEY,[75]--I write to you now about the pond.\r\n",
+    )
+    _write_fake_letters_volume(evidence_root, text)
+
+    records = normalize_letters(evidence_root)
+
+    assert records[2].salutation == "MR. WILEY,[75]--"
+
+
 def test_normalize_letters_skips_a_leading_editorial_annotation_for_dateline(
     tmp_path,
 ):
@@ -420,9 +459,32 @@ class TestAgainstTheRealEvidenceCorpus:
         empty_ids = {r.id for r in records if not r.dateline}
         assert empty_ids == {"SRC-000002", "SRC-000129"}, empty_ids
 
-    def test_every_letter_has_a_nonempty_salutation(self, records):
+    def test_every_letters_salutation_is_plausibly_shaped_or_empty(self, records):
+        # Recall/shape check (issue #58): a presence-only check cannot
+        # fail on the defect where `_extract_salutation` fell back to the
+        # body's opening prose - `salutation` was never empty, just wrong
+        # (SRC-000045, SRC-000049, SRC-000050, SRC-000129 each got a
+        # sentence of body text). This checks the shape of what was
+        # extracted (short, ends in the address's trailing "--") and,
+        # independently, exactly which letters have no salutation in the
+        # raw text at all - a regression that made `_extract_salutation`
+        # timid (returning "" for a letter that does have one) would
+        # silently grow that set without this failing. Restoring the old
+        # prose fallback fails this test: the fallback text does not end
+        # in "--".
         for record in records:
-            assert record.salutation, record.id
+            if not record.salutation:
+                continue
+            assert record.salutation.endswith("--"), (record.id, record.salutation)
+            assert len(record.salutation) <= 60, (record.id, record.salutation)
+        empty_ids = {r.id for r in records if not r.salutation}
+        assert empty_ids == {
+            "SRC-000002",
+            "SRC-000045",
+            "SRC-000049",
+            "SRC-000050",
+            "SRC-000129",
+        }, empty_ids
 
     def test_no_salutation_is_an_editorial_annotation(self, records):
         # Non-blocking finding, review round 1 on PR #52: SRC-000049 fell
