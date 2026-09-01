@@ -2,7 +2,9 @@
 
 Forces `docs/open-problems.md` §6's "the normalized record schema, and how
 editorial apparatus is represented" for the PoC's first source type
-(journals). Implemented by `src/memoria/normalize.py`.
+(journals). Implemented by `src/memoria/normalize.py`, with year resolution
+(the `recorded_date`/`event_date`/`date_confidence` fields below) by
+`src/memoria/year_resolution.py` (issue #4).
 
 ## What a normalized record is
 
@@ -18,8 +20,8 @@ record gets a stable `SRC-` ID (part 04 §4) and stable paragraph anchors
 id: SRC-000184
 source_type: journal
 recorded_date: Oct. 22.
-event_date: Oct. 22.
-date_confidence: unresolved
+event_date: Oct. 22., 1845
+date_confidence: inferred
 contemporaneous: true
 original_file: raw/gutenberg/57393-journal-01/pg57393.txt
 original_locator: "Journal I, entry dated Oct. 22."
@@ -30,8 +32,9 @@ original_locator: "Journal I, entry dated Oct. 22."
 |---|---|
 | `id` | Stable `SRC-NNNNNN` identifier (six digits, zero-padded — part 04 §4's `SRC-000184` form; the `SRC-0184` seen in the desktop mockup is a noted divergence, part 19 §19.11). Assigned sequentially: volume order, then entry order within the volume. Stable across re-runs over unchanged input because the assignment is a deterministic function of that input, not a hash or a counter file. |
 | `source_type` | `journal` for this slice. Other source types (letter, email, ...) are later slices. |
-| `recorded_date` / `event_date` | **This slice does not resolve years** (part 16's M0 scopes year resolution as a separate, later build step — RECON.md's chapter/weekday-checksum work). The date heading text lands here verbatim, exactly as the brief specifies: "Dates land as whatever the heading says; the year arrives in the next slice." Journals have no retrospective/contemporaneous date split within one entry, so `recorded_date` and `event_date` are identical for now. |
-| `date_confidence` | `unresolved` for every record this slice produces — a fourth value alongside the plan's `exact` / `inferred` / `chapter-only` (part 16 M0), signaling "year resolution has not run yet" rather than any of those three outcomes. The year-resolution slice is expected to overwrite this field. |
+| `recorded_date` | The date heading text, verbatim, exactly as it appears in the source — never rewritten by year resolution. |
+| `event_date` | `recorded_date` with its resolved year appended (`"Oct. 22., 1845"`), or unchanged from `recorded_date` where the heading already states its own year, or where no year could be resolved at all (`date_confidence: chapter-only` — no invented date). Journals have no retrospective/contemporaneous date split within one entry, so before year resolution `recorded_date` and `event_date` were identical; year resolution (`src/memoria/year_resolution.py`, issue #4) is what makes them diverge. |
+| `date_confidence` | `exact` only where a weekday in the heading confirmed the resolved year against a real calendar; `inferred` where the year came from an unambiguous chapter heading, an explicit year in the entry heading itself, or position within a multi-year chapter, without a weekday to confirm it; `chapter-only` where no chapter marker precedes the entry at all, so no year context exists (RECON.md §3's description of J02 Chapter I's undated opening fragments — none of the corpus's 558 records currently exercise this branch, since `normalize_journals` discards those fragments before this stage; see "Known data loss" below). A weekday that does not match any candidate year is never silently accepted as `exact`; `memoria normalize` prints it as a warning instead. |
 | `contemporaneous` | `true` for journal entries — a diary entry is contemporaneous evidence by definition (part 05 §6). |
 | `original_file` | Path to the raw source, relative to the evidence root (`MEMORIA_EVIDENCE_ROOT`) — the same convention `manifest.yaml` and `memoria validate` use, e.g. `raw/gutenberg/57393-journal-01/pg57393.txt`. |
 | `original_locator` | Human-readable pointer into the original, e.g. `"Journal I, entry dated Oct. 22."`. |
