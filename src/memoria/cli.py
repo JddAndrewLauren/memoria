@@ -16,6 +16,20 @@ def evidence_root() -> Path:
     return Path(os.environ.get(EVIDENCE_ROOT_ENV_VAR, DEFAULT_EVIDENCE_ROOT))
 
 
+def repo_root() -> Path:
+    """Locate the Memoria repo root by walking up from the current
+    directory looking for pyproject.toml, so `memoria validate` and
+    `memoria normalize` find sources/normalized/ regardless of which
+    subdirectory they are run from. Falls back to the current directory
+    (rather than raising) if no pyproject.toml is found above it.
+    """
+    candidate = Path.cwd()
+    for directory in (candidate, *candidate.parents):
+        if (directory / "pyproject.toml").is_file():
+            return directory
+    return candidate
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="memoria")
     subparsers = parser.add_subparsers(dest="command")
@@ -30,7 +44,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     if args.command == "validate":
-        errors = validate(evidence_root(), Path("."))
+        errors = validate(evidence_root(), repo_root())
         for error in errors:
             print(error)
         if errors:
@@ -40,8 +54,9 @@ def main(argv=None):
 
     if args.command == "normalize":
         records = normalize_journals(evidence_root())
-        written = write_normalized_records(records, Path(NORMALIZED_RELATIVE_PATH))
-        print(f"normalize: wrote {len(written)} records to {NORMALIZED_RELATIVE_PATH}")
+        output_root = repo_root() / NORMALIZED_RELATIVE_PATH
+        written = write_normalized_records(records, output_root)
+        print(f"normalize: wrote {len(written)} records to {output_root}")
         return 0
 
     parser.print_help()

@@ -99,4 +99,4 @@ def test_normalize_writes_records_under_sources_normalized(tmp_path):
 
     assert result.returncode == 0
     written = list((tmp_path / "sources" / "normalized").glob("SRC-*.md"))
-    assert len(written) == 554
+    assert len(written) == 558

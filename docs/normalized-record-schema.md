@@ -49,18 +49,41 @@ I called Bob that evening...
 
 Anchors are stable across re-runs for the same reason IDs are: paragraph
 splitting (on blank-line boundaries) is a deterministic function of the
-entry text.
+entry text. `NormalizedRecord.anchor_id(n)` is the single source of this
+`f"{id.lower()}-p{n}"` form — downstream slices citing a paragraph should
+call it rather than re-deriving the anchor string independently.
 
 ## Entry boundaries
 
-Journal entries open with a line-initial italic date heading — RECON.md §3's
-closed set of forms (`_Oct 22._`, `_Jan. 24. Sunday._`, `_Sept. 29, 1842._`,
-`_May 3-4._`, and the two bare `_Dec._` / `_Jan._` month-only headings).
+Journal entries open with a line-initial italic date heading — re-verified
+directly against the raw corpus (see "Deviation from RECON.md's date-heading
+count" below) rather than trusted from RECON.md §3's summary. The closed set
+of forms matched: `_Oct 22._`, `_Jan. 24. Sunday._`, `_Sept. 29, 1842._`,
+`_May 3-4._`, `_July 10 to 12._` (a "to"-range), `_Dec. 16, 17, 18._` (a
+comma list), the two bare `_Dec._` / `_Jan._` month-only headings, and a
+trailing qualifier that is either a weekday, a place (`_Nov. 29.
+Cambridge._`), or a weekday plus a lowercase second word (`_July 20. Sunday
+morning._`).
+
 `normalize_journals` splits the raw text at every line matching that form,
-after first stripping the Gutenberg license boilerplate, Transcriber's Note,
-Torrey's Introduction, Contents/Illustrations lists (all of it front matter
-preceding the first date heading, discarded by construction) and the
-Gutenberg trailing license (outside the `*** END OF ... ***` marker).
+after first stripping:
+
+- the Gutenberg license boilerplate, Transcriber's Note, Torrey's
+  Introduction, Contents/Illustrations lists — all of it front matter
+  preceding the first date heading, discarded by construction;
+- the Gutenberg trailing license (outside the `*** END OF ... ***` marker);
+- each volume's **back matter** — the printer's colophon and Torrey's
+  editorial footnote apparatus, between the `END OF VOLUME` line and the
+  Gutenberg END marker. Without this cut, the volume's *last* entry
+  absorbed the entire back matter (500+ footnotes) as `contemporaneous:
+  true` — a defect caught in review round 1 on PR #48 and fixed here.
+
+A paragraph that is nothing but chapter apparatus — a bare Roman numeral
+(`II`), a bare year or year range (`1838`, `1845-1847`), or an age marker
+(`(ÆT. 20-21)`) — is filtered out of entry bodies. These land inside an
+entry's raw lines because a chapter boundary falls *between* two entries,
+not at one, so without the filter the marker attaches to the trailing
+paragraphs of the preceding chapter's last entry.
 
 **Editorial apparatus** (footnote markers, bracketed editorial spans,
 running section titles like `SOLITUDE`) is left inline for this slice —
@@ -70,18 +93,49 @@ straight ASCII) so a search phrase matches regardless of which volume's
 convention produced it (RECON.md §6.1: J01/Familiar Letters use straight
 quotes, J02 uses curly).
 
+## Known data loss: J02's undated opening fragments
+
+Everything before a volume's first date heading is discarded by
+construction (see above). For J01 that is genuinely front matter. For J02
+it also deletes ~1,000 lines of undated Thoreau transcript-book extracts
+that open Chapter I (RECON.md §3: "J02 Chapter I ... opens ... with undated
+fragments separated by `*   *   *   *   *` dividers ... transcript-book
+extracts, not dated entries," needing `date_confidence: chapter-only`).
+Normalizing those fragments into their own records is out of scope for this
+slice (dividers, not date headings, delimit them, and RECON explicitly
+scopes their `chapter-only` confidence to year resolution). Named here so
+it is not silently assumed away.
+
 ## Deviation from RECON.md's date-heading count
 
 RECON.md §3 states 299 (J01) and 149 (J02) date headings — 448 total.
 Mechanically re-implementing RECON's own stated detection rule (line-initial
-italic date, closed set of month/weekday forms) against the raw corpus
-finds more: 399 (J01) and 155 (J02) — 554 total. Manual spot-checking of the
-extra headings turned up no false positives, and one concrete
-counter-example to RECON's own claim: J02's Chapter I (RECON.md §3, "has no
-date headings at all") in fact contains 22 line-initial date headings within
-RECON's own stated line range for that chapter (June–Nov 1850 entries after
-the undated opening fragments). See the finding posted on issue #3 for the
-full evidence. `tests/test_normalize.py`'s
-`TestAgainstTheRealEvidenceCorpus.test_date_headings_found_are_reconciled_against_recon`
-asserts the actual, mechanically verified count (554) rather than RECON's
-summary figure (448).
+italic date, closed set of month/weekday/qualifier forms) against the raw
+corpus finds more: **401 (J01) and 157 (J02) — 558 total.**
+
+This was checked twice, independently:
+
+- **Implementer's pass (554 total).** Manual spot-checking of every extra
+  heading found no false positives, and one concrete counter-example to
+  RECON's own claim: J02's Chapter I (RECON.md §3, "has no date headings at
+  all") in fact contains 22 line-initial date headings within RECON's own
+  stated line range for that chapter (June–Nov 1850 entries after the
+  undated opening fragments noted above).
+- **Independent review pass, round 1 on PR #48 (558 total).** Confirmed the
+  implementer's finding mechanically — every match is preceded by a blank
+  line, RECON's own J02 `_Mon. N._` count matches exactly, and the gap
+  traces to RECON's counter requiring an abbreviating period and so missing
+  unabbreviated months (`May`, `June`, `July`, `March`, `April`) — and
+  independently reproduced the Chapter I falsification. The review also
+  caught a **recall bug in the implementer's regex**: `_July 10 to 12._`,
+  `_Nov. 29. Cambridge._`, `_July 20. Sunday morning._`, and `_July 28.
+  Monday morning._` are genuine headings the "to"-range, place-qualifier,
+  and "weekday + second word" forms above were added to cover, taking the
+  count from 554 to 558.
+
+`tests/test_normalize.py`'s `TestAgainstTheRealEvidenceCorpus` asserts the
+mechanically verified count (558) alongside structural invariants — every
+matched heading is preceded by a blank line, no line-initial
+`^_<Month>`-prefixed line in the raw body is left unmatched (the recall
+check that would have caught the regex bug above automatically), and no
+entry carries back-matter markers — rather than a count in isolation.

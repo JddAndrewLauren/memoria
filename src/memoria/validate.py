@@ -11,7 +11,7 @@ import yaml
 MANIFEST_RELATIVE_PATH = "raw/gutenberg/manifest.yaml"
 NORMALIZED_RELATIVE_PATH = "sources/normalized"
 
-_SRC_ID_RE = re.compile(r"SRC-\d{6}")
+_SRC_ID_RE = re.compile(r"SRC-\d{6}", re.IGNORECASE)
 
 
 def validate(evidence_root: Path, repo_root: Path | None = None) -> list[str]:
@@ -56,7 +56,11 @@ def _validate_normalized_src_ids(repo_root: Path) -> list[str]:
     errors = []
     for path in record_paths:
         content = path.read_text(encoding="utf-8")
-        for referenced_id in sorted(set(_SRC_ID_RE.findall(content))):
+        # Case-insensitive: a citation like [SRC-000184 ¶17](...#src-000184-p17)
+        # carries the same ID in both an uppercase frontmatter/prose form and
+        # a lowercase anchor-fragment form; both must resolve.
+        referenced_ids = {match.upper() for match in _SRC_ID_RE.findall(content)}
+        for referenced_id in sorted(referenced_ids):
             if referenced_id not in known_ids:
                 errors.append(
                     f"unresolved SRC- ID: {referenced_id} referenced in "
