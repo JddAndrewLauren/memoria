@@ -94,6 +94,7 @@ obscurely.
 .venv/bin/memoria --help
 .venv/bin/memoria validate
 .venv/bin/memoria rebuild
+.venv/bin/memoria checkpoint
 ```
 
 `memoria validate` verifies that every raw file in the evidence corpus matches
@@ -103,13 +104,22 @@ record under `sources/normalized/` for a `SRC-` ID reference that does not
 resolve to an actual record.
 
 `memoria rebuild` deletes and regenerates all derived state — the normalized
-records under `sources/normalized/` and the SQLite FTS5 full-text search index at
-`.memoria/index.db` (both gitignored) — from evidence, losing nothing (§42:
-derived state carries no authority and can always be thrown away).
+records under `sources/normalized/`, the SQLite FTS5 full-text search index at
+`.memoria/index.db`, and the `changes/` projection of `CHG-` commits (all
+gitignored) — from evidence and git history, losing nothing (§42: derived
+state carries no authority and can always be thrown away).
 
 **`rebuild` has no normalizer to call.** With the corpus retired it regenerates
 the index from whatever records are already on disk and reports that no producer
 is wired in. Restoring it is part of choosing a corpus, not a gap to patch.
+
+`memoria checkpoint` commits tracked, durable files with uncommitted
+modifications — outside edits made in Obsidian or another editor, never
+untracked files or Derived state — as one commit under one `CHG-` id
+(ADR-0008). It also runs automatically before a machine actor (the Curator,
+an AI write) writes to durable files, since that is the moment the dirty-tree
+rule stops shielding a file the author left uncommitted. On a clean tree it
+makes no commit and says so.
 
 Use `memoria.index.search(db_path, query)` to query the index; pass
 `exclude_editorial=True` to search evidence records only, excluding editorial

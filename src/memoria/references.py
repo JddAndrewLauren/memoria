@@ -39,6 +39,12 @@ _SECTION_ID = r"SEC-\d{4}"
 _BARE_CHAPTER_ID = re.compile(rf"^(?P<id>{_CHAPTER_ID})$", re.IGNORECASE)
 _BARE_SECTION_ID = re.compile(rf"^(?P<id>{_SECTION_ID})$", re.IGNORECASE)
 
+# A human-authored commit (ADR-0008): a per-day sequence, not the `HHMM` form
+# part 04 §4 originally showed - minute resolution collides once writes
+# through the app are frequent.
+_CHANGE_ID = r"CHG-\d{8}-\d{3}"
+_BARE_CHANGE_ID = re.compile(rf"^(?P<id>{_CHANGE_ID})$", re.IGNORECASE)
+
 # The prose citation form. The pilcrow is what part 04 §4 writes; `P` is
 # accepted alongside it because a model retyping a citation drops a non-ASCII
 # character often enough to matter. A bare number ("SRC-000184 17") is not
@@ -66,7 +72,7 @@ _ID_SHAPED = re.compile(r"^(?P<kind>[A-Z]{2,5})-")
 # Kinds part 04 §4 defines that nothing implements yet. Used only to tell
 # "not built yet" from "never heard of it" in the message; the mechanism that
 # rejects them is the shape rule above, not this list.
-NOT_YET_IMPLEMENTED_KINDS = ("SES", "CHG", "CLM", "RES", "DEC", "SUB")
+NOT_YET_IMPLEMENTED_KINDS = ("SES", "CLM", "RES", "DEC", "SUB")
 
 
 @dataclass(frozen=True)
@@ -101,6 +107,14 @@ class SectionReference:
 
 
 @dataclass(frozen=True)
+class ChangeReference:
+    """A human-authored commit, addressed by its stable ``CHG-`` id
+    (ADR-0008)."""
+
+    change_id: str
+
+
+@dataclass(frozen=True)
 class UnknownReference:
     """A reference whose kind this build cannot resolve.
 
@@ -114,7 +128,12 @@ class UnknownReference:
 
 
 Reference = (
-    SourceReference | PathReference | ChapterReference | SectionReference | UnknownReference
+    SourceReference
+    | PathReference
+    | ChapterReference
+    | SectionReference
+    | ChangeReference
+    | UnknownReference
 )
 
 
@@ -181,6 +200,10 @@ def parse(ref: str) -> Reference:
     if match:
         return SectionReference(match.group("id").upper())
 
+    match = _BARE_CHANGE_ID.match(ref)
+    if match:
+        return ChangeReference(match.group("id").upper())
+
     match = _ID_PARAGRAPH.match(ref)
     if match:
         return SourceReference(match.group("id").upper(), int(match.group("n")))
@@ -222,6 +245,11 @@ def parse(ref: str) -> Reference:
             raise BadReference(
                 f"malformed section reference: {ref!r} - expected a "
                 "four-digit ID like SEC-0001"
+            )
+        if kind.upper() == "CHG":
+            raise BadReference(
+                f"malformed change reference: {ref!r} - expected a "
+                "CHG-YYYYMMDD-NNN ID like CHG-20261014-003"
             )
         return UnknownReference(
             kind=kind.upper(), known=kind.upper() in NOT_YET_IMPLEMENTED_KINDS
@@ -277,4 +305,6 @@ def format_citation(reference: Reference) -> str:
         return reference.chapter_id
     if isinstance(reference, SectionReference):
         return reference.section_id
+    if isinstance(reference, ChangeReference):
+        return reference.change_id
     return f"{reference.kind}-"
