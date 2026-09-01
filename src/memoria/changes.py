@@ -26,6 +26,12 @@ from memoria.repository import Repository
 CHANGE_ID_TRAILER = "change-id"
 CHANGES_RELATIVE_PATH = "changes"
 
+# The two ways `git log` fails that mean "there is no history here yet"
+# rather than "this repository is broken": no repository at all, and a
+# repository before its first commit. ADR-0008 requires both to succeed with
+# nothing (`rebuild` on a bare clone); everything else has to be reported.
+_NO_HISTORY = ("not a git repository", "does not have any commits yet")
+
 _CHANGE_ID_LINE = re.compile(
     rf"^{CHANGE_ID_TRAILER}: (CHG-\d{{8}}-\d{{3}})$", re.MULTILINE
 )
@@ -133,7 +139,10 @@ def _ledger(repository: Repository) -> list[tuple[str, str, str, str]]:
 
     Empty for a repository with no git history at all - not a real
     repository yet, or a bare clone before its first commit - which is what
-    lets ``rebuild`` succeed with nothing to render instead of failing.
+    lets ``rebuild`` succeed with nothing to render instead of failing. Any
+    *other* git failure is a ``ChangesError`` quoting both streams, the
+    idiom ``write._git`` already uses: a repository git cannot read is not a
+    history that happens to hold no changes.
     """
     result = subprocess.run(
         [
@@ -147,6 +156,11 @@ def _ledger(repository: Repository) -> list[tuple[str, str, str, str]]:
         text=True,
     )
     if result.returncode != 0:
+        reason = " ".join(
+            part.strip() for part in (result.stdout, result.stderr) if part.strip()
+        )
+        if not any(phrase in reason for phrase in _NO_HISTORY):
+            raise ChangesError(f"git log failed: {reason}")
         return []
     entries = []
     for block in result.stdout.split("\x1e"):

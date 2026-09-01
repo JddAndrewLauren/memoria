@@ -167,16 +167,19 @@ def write(
     and attributed to `actor` - never `git add -A`, so an unrelated dirty
     file is neither committed nor cleaned.
 
-    ADR-0008: a machine actor triggers a checkpoint first, before anything
-    else here - the moment the dirty-tree rule (#32) stops shielding a file
-    and the human-touched flag has to take over. `actor` is never the
-    checkpoint's author; the checkpoint is of edits *outside* this write.
+    ADR-0008: a machine actor triggers a checkpoint - the moment the
+    dirty-tree rule (#32) stops shielding a file and the human-touched flag
+    has to take over. `actor` is never the checkpoint's author; the
+    checkpoint is of edits *outside* this write. It happens once the write
+    is known to be going ahead but before the machine touches the file, so
+    a human edit is always committed as theirs first and a write that is
+    rejected or refused leaves no commit behind at all.
     """
-    if not actor.human:
-        checkpoint(repository)
     path = _confined(repository, PurePosixPath(relative_path))
     if _current_token(path) != token:
         return Rejected(outcome="stale", path=relative_path)
+    if not actor.human:
+        checkpoint(repository)
     _replace_atomically(path, content)
     _commit(repository, relative_path, actor)
     return Written(path=relative_path)
@@ -204,7 +207,11 @@ def _confined(repository: Repository, path: PurePosixPath) -> Path:
     root = repository.root.resolve()
     if resolved != root and root not in resolved.parents:
         raise WriteError(f"path escapes the repository: {path}")
-    if not str(path).startswith(DURABLE_PATHS):
+    # Against the resolved path too, not the string the caller wrote:
+    # `chapters/../sources/x.md` never leaves the repository, so the escape
+    # check passes it, and its raw string starts with `chapters/` - only
+    # what it normalizes to shows the durable class it actually names.
+    if not resolved.relative_to(root).as_posix().startswith(DURABLE_PATHS):
         raise WriteError(f"not a durable state class path: {path}")
     return resolved
 

@@ -366,6 +366,82 @@ def test_a_machine_write_checkpoints_other_dirty_files_first(tmp_path):
     assert "checkpoint" in subjects
 
 
+
+def test_a_rejected_machine_write_leaves_no_checkpoint_commit(tmp_path):
+    """The checkpoint is of the human edits a machine write is about to
+    write over (ADR-0008). A write that never happens has nothing to shield,
+    so a stale token must leave history exactly as it found it."""
+    repository = _repo(
+        tmp_path,
+        {"subjects/people/bob.md": "Bob\n", "subjects/people/alice.md": "Alice\n"},
+    )
+    (tmp_path / "subjects/people/alice.md").write_text("Alice (edited in Obsidian)\n")
+    before = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+
+    result = write.write(
+        repository, "subjects/people/bob.md", "not-a-real-token", "Bob Smith\n", CURATOR
+    )
+
+    after = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert result == Rejected(outcome="stale", path="subjects/people/bob.md")
+    assert after == before
+
+
+def test_a_refused_machine_write_leaves_no_checkpoint_commit(tmp_path):
+    """The same, for the write that cannot be attempted at all: a path
+    outside the durable classes is a `WriteError`, not a reason to commit."""
+    repository = _repo(
+        tmp_path,
+        {"subjects/people/bob.md": "Bob\n", "subjects/people/alice.md": "Alice\n"},
+    )
+    (tmp_path / "subjects/people/alice.md").write_text("Alice (edited in Obsidian)\n")
+    before = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+
+    with pytest.raises(write.WriteError):
+        write.write(repository, "sources/raw/notes.md", "any-token", "x\n", CURATOR)
+
+    after = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert after == before
+
+
+def test_a_machine_write_still_checkpoints_before_it_writes(tmp_path):
+    """The checkpoint moved after validation, not after the write: the
+    human's own edit to the file being written must be committed as theirs
+    first, or the machine's commit would swallow it."""
+    repository = _repo(tmp_path, {"subjects/people/bob.md": "Bob\n"})
+    (tmp_path / "subjects/people/bob.md").write_text("Bob (edited in Obsidian)\n")
+    served = write.serve(repository, "subjects/people/bob.md")
+
+    result = write.write(
+        repository, "subjects/people/bob.md", served.token, "Bob Smith\n", CURATOR
+    )
+
+    assert result == Written(path="subjects/people/bob.md")
+    subjects = subprocess.run(
+        ["git", "log", "--format=%s"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout.splitlines()
+    assert subjects[:2] == ["write: subjects/people/bob.md", "checkpoint"]
+
+
+def test_a_traversing_path_that_leaves_a_durable_class_is_refused(tmp_path):
+    """`chapters/../sources/x.md` stays inside the repository, so the escape
+    check passes it - and its raw string starts with `chapters/`. Only the
+    normalized path shows what it actually names."""
+    repository = _repo(tmp_path, {"chapters/01.md": "one\n"})
+    (tmp_path / "sources").mkdir()
+    (tmp_path / "sources/x.md").write_text("evidence\n", encoding="utf-8")
+
+    with pytest.raises(write.WriteError, match="not a durable state class path"):
+        write.serve(repository, "chapters/../sources/x.md")
+
 # --- one module owns every durable write ------------------------------------
 
 # The pre-existing writers ADR-0003 and ADR-0004 scope outside this module:

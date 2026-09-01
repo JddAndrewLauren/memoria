@@ -206,3 +206,26 @@ def test_a_checkpoints_change_id_resolves_through_read(tmp_path):
 
     read_result = read(repository, result.change_id)
     assert "+Bob (edited in Obsidian)" in read_result.text
+
+
+# --- an unreadable repository is not an empty ledger -------------------------
+
+
+def test_a_repository_with_no_commits_has_an_empty_ledger(tmp_path):
+    """The case the empty result exists for: a real repository, nothing
+    committed to it yet."""
+    repository = _repo(tmp_path)
+
+    assert changes._ledger(repository) == []
+
+
+def test_a_corrupt_repository_is_not_read_as_an_empty_ledger(tmp_path):
+    """A repository git cannot read is a failure, not a history with no
+    changes in it - the two were indistinguishable while any non-zero exit
+    returned []."""
+    repository = _repo(tmp_path)
+    _commit(tmp_path, "checkpoint\n\nchange-id: CHG-20261014-001", {"a.md": "a\n"})
+    (tmp_path / ".git" / "HEAD").write_text("0" * 40 + "\n", encoding="utf-8")
+
+    with pytest.raises(changes.ChangesError, match="bad object"):
+        changes._ledger(repository)
