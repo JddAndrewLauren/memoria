@@ -27,7 +27,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from memoria import references
+from memoria import manuscript, references
 from memoria.repository import Repository
 
 # Where normalized records live inside the book repository. Here rather than
@@ -435,8 +435,8 @@ def read(repository: Repository, ref: str) -> Read:
     mistaken for omissions: it does not decorate with the curated overlay
     (#20, which owes a ``raw`` parameter when it does, since undecorated is
     currently what every read is), it does not ledger (#13), and it resolves
-    no reference kind but ``SRC-`` and repository paths - the rest exist as a
-    named error, not as silence.
+    no reference kind but ``SRC-``, ``CHP-``, ``SEC-`` and repository paths -
+    the rest exist as a named error, not as silence.
     """
     try:
         reference = references.parse(ref)
@@ -456,6 +456,24 @@ def read(repository: Repository, ref: str) -> Read:
             raise ReadError(f"no such file in this repository: {reference.path}")
         return Read(
             ref=ref, citation=citation, text=path.read_text(encoding="utf-8")
+        )
+
+    if isinstance(reference, references.ChapterReference):
+        try:
+            entry = manuscript.resolve_chapter(repository, reference.chapter_id)
+        except manuscript.ManuscriptError as exc:
+            raise ReadError(str(exc)) from exc
+        return Read(
+            ref=ref, citation=citation, text=entry.path.read_text(encoding="utf-8")
+        )
+
+    if isinstance(reference, references.SectionReference):
+        try:
+            entry = manuscript.resolve_section(repository, reference.section_id)
+        except manuscript.ManuscriptError as exc:
+            raise ReadError(str(exc)) from exc
+        return Read(
+            ref=ref, citation=citation, text=entry.path.read_text(encoding="utf-8")
         )
 
     record = load(repository, reference.record_id)
