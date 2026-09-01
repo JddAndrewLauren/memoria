@@ -30,6 +30,12 @@ def test_help_lists_normalize():
     assert "normalize" in result.stdout
 
 
+def test_help_lists_rebuild():
+    result = run_cli("--help")
+    assert result.returncode == 0
+    assert "rebuild" in result.stdout
+
+
 def _make_valid_corpus(tmp_path):
     rel_path = "raw/gutenberg/57393-journal-01/pg57393.txt"
     evidence_root = tmp_path / "thoreau-evidence"
@@ -100,3 +106,18 @@ def test_normalize_writes_records_under_sources_normalized(tmp_path):
     assert result.returncode == 0
     written = list((tmp_path / "sources" / "normalized").glob("SRC-*.md"))
     assert len(written) == 558
+
+
+@pytest.mark.skipif(
+    EVIDENCE_ROOT_ENV_VAR not in os.environ,
+    reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
+)
+def test_rebuild_writes_normalized_records_and_the_index(tmp_path):
+    env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=os.environ[EVIDENCE_ROOT_ENV_VAR])
+
+    result = run_cli("rebuild", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0
+    written = list((tmp_path / "sources" / "normalized").glob("SRC-*.md"))
+    assert len(written) == 558
+    assert (tmp_path / ".memoria" / "index.db").is_file()
