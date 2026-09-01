@@ -1,23 +1,19 @@
-"""Validate the raw evidence corpus against its acquisition manifest, and
-the repo's own normalized source records for dangling SRC- ID references.
+"""Validate the raw evidence corpus against its evidence manifest - which is
+also the SRC- ID ledger (ADR-0006, ``memoria.manifest``) - and the repo's own
+normalized source records for dangling SRC- ID references and stale
+``raw_sha256`` provenance.
 """
 
 import hashlib
 import re
 from pathlib import Path
 
-import yaml
-
+from memoria.manifest import DEFAULT_MANIFEST_RELATIVE_PATH, check_ledger, load_manifest
 from memoria.records import NORMALIZED_RELATIVE_PATH
 from memoria.subjects import SUBJECTS_RELATIVE_PATH, SubjectError, parse_entry, parse_subject
 
-# Where the acquisition manifest sits inside the evidence repo. A default,
-# not a constant of the system: it was "raw/gutenberg/manifest.yaml" while the
-# corpus was Thoreau's Gutenberg texts, and a different archive will lay
-# itself out differently. Override per call.
-DEFAULT_MANIFEST_RELATIVE_PATH = "raw/manifest.yaml"
-
 _SRC_ID_RE = re.compile(r"SRC-\d{6}", re.IGNORECASE)
+_RAW_SHA256_RE = re.compile(r"^raw_sha256:\s*(\S+)\s*$", re.MULTILINE)
 
 
 def validate(
@@ -25,12 +21,18 @@ def validate(
     repo_root: Path | None = None,
     manifest_relative_path: str = DEFAULT_MANIFEST_RELATIVE_PATH,
 ) -> list[str]:
-    """Verify every raw file listed in the manifest matches its recorded hash,
-    and that every SRC- ID referenced in a normalized record resolves to an
-    actual record.
+    """Verify every raw unit listed in the manifest matches its recorded
+    hash, that the ledger itself is dense, monotonic and free of duplicate
+    IDs (ADR-0006), that every SRC- ID referenced in a normalized record
+    resolves to an actual record, and that every record's ``raw_sha256``
+    still matches what the manifest records for its raw unit.
 
     Returns a list of human-readable error messages; an empty list means the
     corpus matches the manifest exactly and no SRC- ID is left unresolved.
+
+    A raw unit marked ``deleted`` in the ledger is not checked against disk -
+    its number stays reserved, and its absence is exactly what deletion
+    means (ADR-0006) - so a deleted unit's gap is accepted, not reported.
 
     The answer-key staleness check that used to run here is gone with the
     answer key itself (docs/open-problems.md §2.4).
@@ -39,23 +41,53 @@ def validate(
     repo_root = Path(repo_root) if repo_root is not None else Path(".")
 
     manifest_path = evidence_root / manifest_relative_path
-    manifest = yaml.safe_load(manifest_path.read_text())
+    entries = load_manifest(manifest_path)
 
     errors = []
-    for entry in manifest["files"]:
+    for entry in entries:
+        if entry.deleted:
+            continue
         # path: entries are relative to the evidence repo root, not the
         # manifest's own directory.
-        file_path = evidence_root / entry["path"]
+        file_path = evidence_root / entry.path
         if not file_path.is_file():
-            errors.append(f"missing: {entry['path']}")
+            errors.append(f"missing: {entry.path}")
             continue
         actual = hashlib.sha256(file_path.read_bytes()).hexdigest()
-        if actual != entry["sha256"]:
-            errors.append(f"hash mismatch: {entry['path']}")
+        if actual != entry.sha256:
+            errors.append(f"hash mismatch: {entry.path}")
 
+    errors.extend(check_ledger(entries))
     errors.extend(_validate_normalized_src_ids(repo_root))
+    errors.extend(_validate_raw_sha256_matches_manifest(repo_root, entries))
     errors.extend(_validate_subjects(repo_root))
 
+    return errors
+
+
+def _validate_raw_sha256_matches_manifest(repo_root: Path, entries) -> list[str]:
+    normalized_dir = repo_root / NORMALIZED_RELATIVE_PATH
+    if not normalized_dir.is_dir():
+        return []
+
+    manifest_by_id = {entry.id: entry for entry in entries if not entry.deleted}
+
+    errors = []
+    for path in sorted(normalized_dir.glob("*.md")):
+        entry = manifest_by_id.get(path.stem)
+        if entry is None:
+            continue
+        match = _RAW_SHA256_RE.search(path.read_text(encoding="utf-8"))
+        if match is None:
+            # No raw_sha256 field at all: a record that predates the ledger
+            # convention, not a staleness this check can speak to.
+            continue
+        record_hash = match.group(1)
+        if record_hash != entry.sha256:
+            errors.append(
+                f"raw_sha256 mismatch: {path.name} says {record_hash!r}, "
+                f"manifest says {entry.sha256!r}"
+            )
     return errors
 
 

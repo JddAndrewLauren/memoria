@@ -1,6 +1,7 @@
 import hashlib
 
 
+from memoria.manifest import format_id
 from memoria.subjects import Entry, Subject, entry_to_markdown, subject_to_markdown
 from memoria.validate import validate
 
@@ -18,9 +19,12 @@ def _make_subject(**overrides):
 
 
 def _write_manifest(evidence_root, entries):
-    lines = ["base: raw", "files:"]
-    for entry in entries:
-        lines.append(f"  - path: {entry}")
+    """A manifest ledger listing each of ``entries`` (paths relative to
+    ``evidence_root``) with sequential IDs, in the order given."""
+    lines = ["units:"]
+    for number, entry in enumerate(entries, start=1):
+        lines.append(f"  - id: {format_id(number)}")
+        lines.append(f"    path: {entry}")
         content = (evidence_root / entry).read_bytes()
         digest = hashlib.sha256(content).hexdigest()
         lines.append(f"    sha256: {digest}")
@@ -144,6 +148,77 @@ def test_validate_fails_and_names_a_dangling_src_id_reference(tmp_path):
     assert len(errors) == 1
     assert "SRC-999999" in errors[0]
     assert "SRC-000001.md" in errors[0]
+
+
+def test_validate_rejects_a_duplicate_id_in_the_manifest_ledger(tmp_path):
+    evidence_root = _make_corpus(
+        tmp_path,
+        {"raw/a.txt": "one", "raw/b.txt": "two"},
+    )
+    manifest_dir = evidence_root / "raw"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    digest_a = hashlib.sha256((evidence_root / "raw/a.txt").read_bytes()).hexdigest()
+    digest_b = hashlib.sha256((evidence_root / "raw/b.txt").read_bytes()).hexdigest()
+    (manifest_dir / "manifest.yaml").write_text(
+        "units:\n"
+        f"  - id: SRC-000001\n    path: raw/a.txt\n    sha256: {digest_a}\n"
+        f"  - id: SRC-000001\n    path: raw/b.txt\n    sha256: {digest_b}\n"
+    )
+
+    errors = validate(evidence_root)
+
+    assert any("duplicate" in e and "SRC-000001" in e for e in errors)
+
+
+def test_validate_rejects_an_out_of_order_id_in_the_manifest_ledger(tmp_path):
+    evidence_root = _make_corpus(
+        tmp_path,
+        {"raw/a.txt": "one", "raw/b.txt": "two"},
+    )
+    manifest_dir = evidence_root / "raw"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    digest_a = hashlib.sha256((evidence_root / "raw/a.txt").read_bytes()).hexdigest()
+    digest_b = hashlib.sha256((evidence_root / "raw/b.txt").read_bytes()).hexdigest()
+    (manifest_dir / "manifest.yaml").write_text(
+        "units:\n"
+        f"  - id: SRC-000002\n    path: raw/a.txt\n    sha256: {digest_a}\n"
+        f"  - id: SRC-000001\n    path: raw/b.txt\n    sha256: {digest_b}\n"
+    )
+
+    errors = validate(evidence_root)
+
+    assert any("dense and monotonic" in e for e in errors)
+
+
+def test_validate_accepts_a_deleted_units_reserved_gap(tmp_path):
+    evidence_root = _make_corpus(tmp_path, {"raw/b.txt": "still here"})
+    manifest_dir = evidence_root / "raw"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    digest_b = hashlib.sha256((evidence_root / "raw/b.txt").read_bytes()).hexdigest()
+    (manifest_dir / "manifest.yaml").write_text(
+        "units:\n"
+        "  - id: SRC-000001\n    path: raw/a.txt\n    sha256: deadbeef\n    deleted: true\n"
+        f"  - id: SRC-000002\n    path: raw/b.txt\n    sha256: {digest_b}\n"
+    )
+
+    errors = validate(evidence_root)
+
+    assert errors == []
+
+
+def test_validate_fails_when_a_records_raw_sha256_is_stale(tmp_path):
+    evidence_root = _make_corpus(tmp_path, {"raw/a.txt": "current content"})
+    _write_manifest(evidence_root, ["raw/a.txt"])
+    repo_root = tmp_path / "repo"
+    normalized_dir = repo_root / "sources" / "normalized"
+    normalized_dir.mkdir(parents=True)
+    (normalized_dir / "SRC-000001.md").write_text(
+        "---\nid: SRC-000001\nsource_type: journal\nraw_sha256: stale-hash\n---\n\n"
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert any("raw_sha256 mismatch" in e and "SRC-000001.md" in e for e in errors)
 
 
 # --- subject prompts: `memoria validate` fails one missing any of the four -

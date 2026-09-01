@@ -385,6 +385,8 @@ def test_the_boundary_case_is_why_a_round_trip_assertion_is_not_enough():
                 "contemporaneous": record.contemporaneous,
                 "original_file": record.original_file,
                 "original_locator": record.original_locator,
+                "raw_sha256": record.raw_sha256,
+                "converter": record.converter,
             },
             sort_keys=False,
         )
