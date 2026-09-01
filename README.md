@@ -29,9 +29,9 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 ```
 
-`[dev]` pulls in the `[mcp]` extra, so the MCP server below is importable and
-its tests run. `pip install memoria` on its own installs the core and the CLI
-only — the MCP SDK brings a web-server stack with it, and the core's own
+`[dev]` pulls in the `[mcp]` and `[web]` extras, so the MCP server and the
+FastAPI app below are both importable and their tests run. `pip install
+memoria` on its own installs the core and the CLI only — the core's own
 runtime dependency is PyYAML alone.
 
 ## Running the tests
@@ -87,6 +87,41 @@ It speaks JSON-RPC over stdio, so it is not interactive — a client drives it.
 **There are no records to read on a fresh checkout**, because nothing produces
 them (see *No evidence corpus* above). `read` says so rather than failing
 obscurely.
+
+## The FastAPI app
+
+The third adapter over the core (#64, `docs/adr/0002-ui-is-a-react-client.md`),
+serving JSON under `/api` for the React client at `ui/` (#24). Same rule the
+MCP server keeps: domain logic stays in `memoria.*`, and this app calls it and
+shapes the result — it opens no SQLite database and reads no evidence file
+directly.
+
+```
+.venv/bin/python -m uvicorn memoria.web.app:create_app --factory --reload
+```
+
+Four reads exist today: list sources (`GET /api/sources`, filterable by
+`source_type`, `date_confidence` and `contemporaneous`, paginated), read one
+source (`GET /api/sources/{id}`), the raw un-normalized file behind one
+(`GET /api/sources/{id}/raw`), and search (`GET /api/search`, wrapping
+`memoria.index.search`). See `docs/tool-surface.md` for what each filter
+means and `src/memoria/web/schemas.py` for the response shapes.
+
+No auth, HTTPS or remote-access code exists — localhost, one machine
+(`docs/poc-plan.md` §5).
+
+### Regenerating the TypeScript client types
+
+```
+scripts/generate-web-types.sh
+```
+
+Writes `ui/src/api/schema.d.ts` from the app's OpenAPI schema. Run it after
+changing a route or a response model in `src/memoria/web/`, and commit the
+result — `tests/test_web_types.py` fails the suite when the committed file
+goes stale against the schema, which is the mitigation the ADR names for a
+two-language stack in a repo with no CI: a backend field rename becomes a
+compile error in `ui/`, not a runtime surprise nobody sees.
 
 ## CLI
 

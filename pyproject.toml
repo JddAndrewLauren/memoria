@@ -32,9 +32,18 @@ memoria-mcp = "memoria.mcp.server:main"
 mcp = [
     "mcp>=2.1,<3",
 ]
+# The FastAPI adapter (#64), the third over the core. Same reasoning as
+# `mcp` above: the core stays PyYAML-only, and `dev` pulling this extra in
+# is what keeps a route importable in every test rather than skipped.
+web = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30",
+]
 dev = [
     "pytest>=8.0",
+    "httpx>=0.27",
     "memoria[mcp]",
+    "memoria[web]",
 ]
 
 [tool.setuptools.packages.find]

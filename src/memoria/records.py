@@ -28,7 +28,7 @@ from pathlib import Path, PurePosixPath
 import yaml
 
 from memoria import references, subjects
-from memoria.repository import Repository
+from memoria.repository import Repository, require_evidence_root
 
 # Where normalized records live inside the book repository. Here rather than
 # in validate.py so that the module owning the record format owns the path to
@@ -395,6 +395,36 @@ def read_all(repository: Repository) -> list[NormalizedRecord]:
     ]
 
 
+def list_sources(
+    repository: Repository,
+    *,
+    source_type: str | None = None,
+    date_confidence: str | None = None,
+    contemporaneous: bool | None = None,
+) -> list[NormalizedRecord]:
+    """Every record on disk, filtered by the §25 list filters (#64).
+
+    Built on ``read_all`` - it inherits the same empty-corpus behaviour, so a
+    fresh clone with no ``sources/normalized/`` renders as no sources rather
+    than an error (ADR-0004). Filtering lives here, next to ``read_all``,
+    rather than in an adapter: it is a rule over the record schema, and
+    §40.1's "one core service layer" is what keeps a filter written once
+    from becoming a filter written differently by the web layer and a future
+    caller.
+
+    All three filters are optional and compose (ANDed together), matching
+    ``index.SearchFilters``'s discipline over the same fields.
+    """
+    records = read_all(repository)
+    if source_type is not None:
+        records = [r for r in records if r.source_type == source_type]
+    if date_confidence is not None:
+        records = [r for r in records if r.date_confidence == date_confidence]
+    if contemporaneous is not None:
+        records = [r for r in records if r.contemporaneous == contemporaneous]
+    return records
+
+
 def _confined(repository: Repository, path: PurePosixPath) -> Path:
     """Resolve a repository-relative path, refusing anything outside the root.
 
@@ -407,11 +437,54 @@ def _confined(repository: Repository, path: PurePosixPath) -> Path:
     root - a worktree reached through one, say - is compared like with like
     rather than being refused wholesale.
     """
-    resolved = (repository.root / path).resolve()
-    root = repository.root.resolve()
+    return _confined_to(repository.root, path)
+
+
+def _confined_to(root: Path, path: PurePosixPath) -> Path:
+    """``_confined``'s check, generalized to an arbitrary root.
+
+    ``read_raw_source`` confines to ``evidence_root`` rather than
+    ``repository.root`` - a different tree, the same escape the check
+    guards against.
+    """
+    resolved = (root / path).resolve()
+    root = root.resolve()
     if resolved != root and root not in resolved.parents:
         raise ReadError(f"path escapes the repository: {path}")
     return resolved
+
+
+@dataclass(frozen=True)
+class RawSource:
+    """The un-normalized file a record was normalized from, verbatim.
+
+    ``memoria.web``'s "Open original" read (#64/#25): the raw bytes at
+    ``original_file``, plus the ``original_locator`` a person follows to
+    find the passage within them. Never parsed, per
+    ``docs/normalized-record-schema.md``.
+    """
+
+    text: str
+    original_locator: str
+
+
+def read_raw_source(repository: Repository, record_id: str) -> RawSource:
+    """Serve the un-normalized file ``record_id`` was normalized from.
+
+    Raises ``ReadError`` for an unknown record or a missing file, and
+    ``NoEvidenceRoot`` (``memoria.repository``) when no evidence corpus is
+    configured - the same refusal every evidence read gives, rather than a
+    guessed default (``Repository.evidence_root``'s own docstring).
+    """
+    record = load(repository, record_id)
+    evidence_root = require_evidence_root(repository)
+    path = _confined_to(evidence_root, PurePosixPath(record.original_file))
+    if not path.is_file():
+        raise ReadError(f"no such original file: {record.original_file}")
+    return RawSource(
+        text=path.read_text(encoding="utf-8"),
+        original_locator=record.original_locator,
+    )
 
 
 @dataclass(frozen=True)
