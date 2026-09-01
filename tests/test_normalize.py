@@ -11,6 +11,7 @@ from memoria.normalize import (
     _extract_body_lines,
     normalize_journals,
     normalize_quotes,
+    normalize_targets,
     write_normalized_records,
 )
 
@@ -563,3 +564,103 @@ class TestAgainstTheRealEvidenceCorpus:
             for paragraph in record.paragraphs:
                 assert not divider.match(paragraph), (record.id, paragraph)
                 assert not paragraph.startswith("1850 (ÆT."), record.id
+
+
+@pytest.mark.skipif(
+    EVIDENCE_ROOT_ENV_VAR not in os.environ,
+    reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
+)
+class TestTargetNormalization:
+    """The two audit-target books (issue #9).
+
+    These exist so the answer key has a stable ``SRC-`` ID and paragraph
+    anchor to name on the target side. Every assertion here is either a
+    count the corpus itself declares (each volume's own Contents block) or
+    a defect found while building the splitter.
+    """
+
+    @pytest.fixture(scope="class")
+    @staticmethod
+    def records():
+        return normalize_targets(
+            os.environ[EVIDENCE_ROOT_ENV_VAR], start_id=718
+        )
+
+    def test_one_record_per_chapter_declared_in_each_volumes_contents(
+        self, records
+    ):
+        # A Week's 8 chapters + Walden's 18 + the Civil Disobedience essay
+        # Gutenberg 205 carries in the same file.
+        assert len(records) == 27
+        assert [r.chapter for r in records if r.work == "Week"] == [
+            "CONCORD RIVER",
+            "SATURDAY",
+            "SUNDAY",
+            "MONDAY",
+            "TUESDAY",
+            "WEDNESDAY",
+            "THURSDAY",
+            "FRIDAY",
+        ]
+        walden = [r.chapter for r in records if r.work == "Walden"]
+        assert len(walden) == 19
+        assert walden[0] == "Economy"
+        assert walden[-1] == "ON THE DUTY OF CIVIL DISOBEDIENCE"
+
+    def test_a_poem_title_in_capitals_is_not_taken_for_a_chapter(self, records):
+        # pg4232.txt:8936 is "THE INWARD MORNING", a poem title, flush left
+        # and in capitals exactly like A Week's eight real chapter headings.
+        # A generic "line is all capitals" rule would split a ninth chapter
+        # here; matching a closed set in document order does not.
+        assert not any(r.chapter == "THE INWARD MORNING" for r in records)
+        wednesday = next(r for r in records if r.chapter == "WEDNESDAY")
+        assert any(
+            "inward morning" in p.lower() for p in wednesday.paragraphs
+        ), "the poem stayed inside WEDNESDAY rather than starting a chapter"
+
+    def test_the_title_page_line_does_not_start_civil_disobedience_early(
+        self, records
+    ):
+        # "ON THE DUTY OF CIVIL DISOBEDIENCE" appears flush left twice in
+        # pg205.txt: on the title page (line 36) and as the real heading
+        # (line 9421). Order-sensitive matching takes the second, so
+        # Walden's own 18 chapters are not swallowed into the essay.
+        essay = next(
+            r for r in records if r.chapter == "ON THE DUTY OF CIVIL DISOBEDIENCE"
+        )
+        assert essay.paragraphs[0].startswith("I heartily accept the motto")
+        economy = next(r for r in records if r.chapter == "Economy")
+        assert economy.paragraphs[0].startswith("When I wrote the following pages")
+
+    def test_the_printers_end_line_is_not_prose(self, records):
+        # "THE END" sits between Walden's last paragraph and the essay's
+        # heading, so it lands inside Conclusion's lines rather than being
+        # cut as back matter.
+        conclusion = next(r for r in records if r.chapter == "Conclusion")
+        assert "THE END" not in conclusion.paragraphs
+        assert conclusion.paragraphs[-1].startswith("I do not say that John or Jonathan")
+
+    def test_books_are_retrospective_and_dated_by_publication(self, records):
+        # part 05 §6: the books are what Thoreau built *from* the journals.
+        # A date-leakage test can only tell the two sides apart if this
+        # flag is right on every target record.
+        assert all(r.contemporaneous is False for r in records)
+        assert all(r.source_type == "book" for r in records)
+        assert all(r.date_confidence == "published" for r in records)
+        assert all(r.recorded_date == "" for r in records)
+        years = {r.work: r.event_date for r in records}
+        assert years == {"Week": "1849", "Walden": "1854"}
+
+    def test_src_ids_continue_the_sequence_without_moving_an_existing_one(
+        self, records
+    ):
+        # The books come last precisely so adding them renumbers nothing.
+        assert [r.id for r in records] == [
+            f"SRC-{n:06d}" for n in range(718, 745)
+        ]
+
+    def test_no_record_carries_gutenberg_front_or_back_matter(self, records):
+        for record in records:
+            for paragraph in record.paragraphs:
+                assert "Project Gutenberg" not in paragraph, record.id
+                assert not paragraph.startswith("Contents"), record.id

@@ -80,6 +80,82 @@ LETTERS_VOLUME = {
 # be trusted against a second letters volume with different formatting.
 _LETTER_HEADING_RE = re.compile(r"^TO .+")
 
+# The two audit targets (issue #9): the published works the journals'
+# cross-references point at, held in the corpus as Gutenberg text
+# (manifest role ``audit_target``). Normalized so that the answer key has a
+# stable ``SRC-`` ID and paragraph anchor to name on the target side - the
+# journals and letters had one from #3 and #6, the books had none.
+#
+# One record per chapter. A chapter is the natural documentary boundary
+# here (part 05 §5.2) the way a dated entry is for a journal: it is what
+# the work itself declares in its own Contents.
+#
+# ``chapters`` is a closed set taken from each volume's own Contents block,
+# matched **in document order** - the same discipline DATE_HEADING_RE
+# applies to date headings, and necessary for the same reason. A generic
+# "line is all capitals" rule would take Week's poem title THE INWARD
+# MORNING (pg4232.txt:8936) for a ninth chapter, and Walden's title-page
+# line "ON THE DUTY OF CIVIL DISOBEDIENCE" (pg205.txt:36) for the start of
+# its last chapter, 9,385 lines early.
+TARGET_VOLUMES = [
+    {
+        "source_type": "book",
+        "raw_path": "raw/gutenberg/4232-a-week/pg4232.txt",
+        "volume_label": "A Week on the Concord and Merrimack Rivers",
+        "work": "Week",
+        "published_year": "1849",
+        "chapters": [
+            "CONCORD RIVER",
+            "SATURDAY",
+            "SUNDAY",
+            "MONDAY",
+            "TUESDAY",
+            "WEDNESDAY",
+            "THURSDAY",
+            "FRIDAY",
+        ],
+    },
+    {
+        "source_type": "book",
+        "raw_path": "raw/gutenberg/205-walden/pg205.txt",
+        "volume_label": "Walden",
+        "work": "Walden",
+        "published_year": "1854",
+        "chapters": [
+            "Economy",
+            "Where I Lived, and What I Lived For",
+            "Reading",
+            "Sounds",
+            "Solitude",
+            "Visitors",
+            "The Bean-Field",
+            "The Village",
+            "The Ponds",
+            "Baker Farm",
+            "Higher Laws",
+            "Brute Neighbors",
+            "House-Warming",
+            "Former Inhabitants and Winter Visitors",
+            "Winter Animals",
+            "The Pond in Winter",
+            "Spring",
+            "Conclusion",
+            # Gutenberg 205 is "Walden, and On The Duty Of Civil
+            # Disobedience": one file, two works. The essay is carried as a
+            # final chapter rather than dropped, so the file normalizes
+            # whole - no cross-reference cites it.
+            "ON THE DUTY OF CIVIL DISOBEDIENCE",
+        ],
+    },
+]
+
+# The printer's end-of-work line, which sits between Walden's last
+# paragraph and the Civil Disobedience heading. Not prose.
+_THE_END_RE = re.compile(r"^THE END$")
+
+# No back matter to cut in the audit-target files.
+_NEVER_RE = re.compile(r"(?!)")
+
 # Familiar Letters' back matter (RECON.md §5): the General Index that
 # follows the last letter. Analogous to the journals' END OF VOLUME cut -
 # excluded by construction rather than swallowed into the last letter.
@@ -157,6 +233,10 @@ class NormalizedRecord:
     recipient: str | None = None
     dateline: str | None = None
     salutation: str | None = None
+    # Book-specific structured fields (issue #9). None for journal and
+    # letter records; always set for the audit-target book records.
+    work: str | None = None
+    chapter: str | None = None
 
     def anchor_id(self, paragraph_number: int) -> str:
         """The stable anchor id for this record's Nth paragraph (1-based).
@@ -531,6 +611,98 @@ def normalize_letters(
     return records
 
 
+def _split_chapters(
+    body_lines: list[str], chapters: list[str]
+) -> list[tuple[str, list[str]]]:
+    """Split a book's body lines into (chapter_title, chapter_lines).
+
+    Headings are matched **in document order** against ``chapters``: a line
+    is the next chapter's heading only if, stripped of trailing whitespace,
+    it equals the next title still expected and is flush left. Ordering is
+    what makes the closed set safe - a title that also appears in the
+    volume's own Contents block or on its title page is passed over,
+    because at that point in the file the expected title is a different one.
+
+    Everything before the first chapter heading - title page, Contents,
+    epigraphs - is front matter and is discarded, the same way
+    ``_split_entries`` discards everything before the first date heading.
+    """
+    remaining = list(chapters)
+    starts: list[tuple[str, int]] = []
+    for i, line in enumerate(body_lines):
+        if not remaining:
+            break
+        if line.rstrip() == remaining[0]:
+            starts.append((remaining.pop(0), i))
+    if remaining:
+        raise ValueError(f"chapter headings not found in order: {remaining}")
+
+    bounds = [i for _, i in starts] + [len(body_lines)]
+    return [
+        (title, body_lines[start + 1 : bounds[n + 1]])
+        for n, (title, start) in enumerate(starts)
+    ]
+
+
+def normalize_targets(
+    evidence_root: Path, start_id: int = 1
+) -> list[NormalizedRecord]:
+    """Normalize the two audit-target books into per-chapter records.
+
+    ``start_id`` continues the ``SRC-`` sequence after the journals' and
+    letters' records, the same convention ``normalize_letters`` uses, so
+    adding the books moves no ID that already exists.
+
+    These are **not** contemporaneous evidence (part 05 §6): A Week (1849)
+    and Walden (1854) are published works Thoreau built *from* the journals,
+    which is exactly the relation the cross-references label and the
+    benchmark scores. Marking them ``contemporaneous: false`` is what keeps
+    a date-leakage test able to tell the two sides apart.
+    """
+    evidence_root = Path(evidence_root)
+    records: list[NormalizedRecord] = []
+    counter = start_id
+    for volume in TARGET_VOLUMES:
+        raw_path = evidence_root / volume["raw_path"]
+        raw_text = raw_path.read_text(encoding="utf-8")
+        # No back-matter cut: these files end at the Gutenberg END marker
+        # with nothing between it and the last chapter but the trailing
+        # licence, which _extract_body_lines already excludes. Walden's
+        # "THE END" is *not* usable as the marker - it sits before Civil
+        # Disobedience, not after it - so it is dropped per paragraph below.
+        body_lines = _extract_body_lines(raw_text, back_matter_marker=_NEVER_RE)
+        for title, chapter_lines in _split_chapters(body_lines, volume["chapters"]):
+            paragraphs = [
+                normalize_quotes(p)
+                for p in _paragraphs(chapter_lines)
+                if not _THE_END_RE.match(p)
+            ]
+            src_id = f"SRC-{counter:06d}"
+            counter += 1
+            records.append(
+                NormalizedRecord(
+                    id=src_id,
+                    source_type=volume["source_type"],
+                    # A book has no date heading to quote. Its date is the
+                    # year of publication - a documentary fact about the
+                    # volume, not a date resolved out of the text - which
+                    # is what date_confidence: published records.
+                    recorded_date="",
+                    event_date=volume["published_year"],
+                    date_confidence="published",
+                    contemporaneous=False,
+                    original_file=volume["raw_path"],
+                    original_locator=(
+                        f"{volume['volume_label']}, chapter \"{title}\""
+                    ),
+                    paragraphs=paragraphs,
+                    work=volume["work"],
+                    chapter=title,
+                )
+            )
+    return records
+
+
 def recipients_table(records: list[NormalizedRecord]) -> dict[str, list[str]]:
     """Map each verbatim recipient string to the SRC- IDs of the letters
     naming them (issue #6: "a real, checkable table ... not a list in a
@@ -572,6 +744,11 @@ def _record_to_markdown(record: NormalizedRecord) -> str:
         frontmatter["dateline"] = record.dateline
     if record.salutation is not None:
         frontmatter["salutation"] = record.salutation
+    # Book-specific fields (issue #9), same "only when set" rule.
+    if record.work is not None:
+        frontmatter["work"] = record.work
+    if record.chapter is not None:
+        frontmatter["chapter"] = record.chapter
     # Paragraph anchors (part 05 §5.3): stable across re-runs because they
     # are positional within a record whose own ID is itself stable.
     body = "\n\n".join(

@@ -20,6 +20,7 @@ from memoria.index import INDEX_RELATIVE_PATH, rebuild
 from memoria.normalize import (
     normalize_journals,
     normalize_letters,
+    normalize_targets,
     recipients_table,
     write_normalized_records,
     write_recipients_table,
@@ -109,7 +110,13 @@ def main(argv=None):
         letter_records = normalize_letters(
             evidence_root(), start_id=len(journal_records) + 1
         )
-        records = journal_records + letter_records
+        # The audit targets (issue #9) come last in the SRC- sequence, so
+        # adding them moves no existing ID.
+        target_records = normalize_targets(
+            evidence_root(),
+            start_id=len(journal_records) + len(letter_records) + 1,
+        )
+        records = journal_records + letter_records + target_records
         output_root = repo_root() / NORMALIZED_RELATIVE_PATH
         written = write_normalized_records(records, output_root)
         editorial_output_root = repo_root() / EDITORIAL_RELATIVE_PATH
@@ -119,7 +126,13 @@ def main(argv=None):
         counts = Counter(record.date_confidence for record in records)
         counts_text = ", ".join(
             f"{level}={counts[level]}"
-            for level in ("exact", "inferred", "chapter-only", "unresolved")
+            for level in (
+                "exact",
+                "inferred",
+                "chapter-only",
+                "unresolved",
+                "published",
+            )
             if counts[level]
         )
         print(

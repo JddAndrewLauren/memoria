@@ -96,10 +96,10 @@ def test_rebuild_writes_normalized_records_and_builds_a_searchable_index(tmp_pat
     rebuild(evidence_root, repo_root)
 
     normalized = list((repo_root / "sources" / "normalized").glob("SRC-*.md"))
-    # 587 journal records + 130 letter records (issue #6 review round 1:
+    # 587 journal + 130 letter + 27 book records (issue #6 review round 1:
     # rebuild() used to call normalize_journals alone, silently deleting
     # every letter record on a rebuild).
-    assert len(normalized) == 717
+    assert len(normalized) == 744
 
     db_path = repo_root / ".memoria" / "index.db"
     assert db_path.is_file()

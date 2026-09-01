@@ -29,6 +29,7 @@ from memoria.normalize import (
     NormalizedRecord,
     normalize_journals,
     normalize_letters,
+    normalize_targets,
     recipients_table,
     write_normalized_records,
     write_recipients_table,
@@ -183,7 +184,10 @@ def rebuild(evidence_root: Path, repo_root: Path) -> list[NormalizedRecord]:
     letter_records = normalize_letters(
         evidence_root, start_id=len(journal_records) + 1
     )
-    records = journal_records + letter_records
+    target_records = normalize_targets(
+        evidence_root, start_id=len(journal_records) + len(letter_records) + 1
+    )
+    records = journal_records + letter_records + target_records
 
     output_root = repo_root / NORMALIZED_RELATIVE_PATH
     write_normalized_records(records, output_root)
@@ -195,5 +199,16 @@ def rebuild(evidence_root: Path, repo_root: Path) -> list[NormalizedRecord]:
         repo_root / CROSS_REFERENCES_RELATIVE_PATH,
     )
     write_editorial_records(editorial_records, repo_root / EDITORIAL_RELATIVE_PATH)
-    build_index(repo_root / INDEX_RELATIVE_PATH, records, editorial_records)
+    # The audit targets are deliberately **not** indexed. The index is the
+    # evidence retrieval surface; the books are the query side of the
+    # benchmark (a probe is a book paragraph, part 06 §8.3). Indexing them
+    # would let a search for a book paragraph return that same paragraph as
+    # its own top hit, which is the self-agreement failure the answer key
+    # exists to prevent. Appearances over the audit targets (part 06 §8.11)
+    # are M2's, and get their own structure.
+    build_index(
+        repo_root / INDEX_RELATIVE_PATH,
+        journal_records + letter_records,
+        editorial_records,
+    )
     return records
