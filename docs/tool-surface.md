@@ -143,9 +143,6 @@ the core's one error type onto it.
 
 ### What is deliberately still missing
 
-- **No ledger.** `events.jsonl` is issue #13. Until it lands, a served read
-  is not recorded anywhere, and the §7 constraint is met only in part. The
-  routing hook's message says only what is true today for the same reason.
 - **No overlay.** Decoration with entry links, exclusions and citing
   settlements is issue #20, at M2.
 - **No `raw` parameter.** Every read is undecorated today, so the
@@ -236,6 +233,45 @@ answers "the corpus is not built" rather than raising
 
 Search over the full corpus returns in well under a second — a test asserts
 it against a synthetic multi-thousand-paragraph index.
+
+## `events.jsonl` — the read ledger, forced 2026-09-01, issue #13
+
+Every `read(ref)` and `search_text(query, filters)` call this server
+**serves** appends one JSON line to `sessions/<session_id>/events.jsonl`
+(part 04 §2), in `memoria.ledger` — core, not the adapter, since a future
+caller (#64's web app) ledgers through the same function rather than opening
+its own file. Each line carries the reference or query, the filters, the
+records served (by `SRC-` ID or paragraph anchor — the same identifier
+`read(ref)` accepts verbatim), a timestamp, and the session it belongs to.
+The file is opened in append mode and written one line at a time; nothing
+here ever reads it back to rewrite it.
+
+**Only what was served is ledgered.** A `ToolError` — an unresolvable kind,
+a missing record, an un-normalized corpus, a bad query — supplies nothing,
+so nothing is appended on that path. `CONTEXT.md`'s *Supplied context* is
+explicit that the account is of what Memoria *supplied*, and that is the
+definition #29's manifest is built on; an account of what was *asked for*
+would be a different, broader ledger than this one is.
+
+**The undecorated path is not an unlogged path.** A bare full-source read is
+ledgered exactly like a paragraph read or a path read — there is no read
+this server serves that skips the ledger.
+
+**Author reads are out of scope.** The ledger records what the tool surface
+served *to a session* (§10.4). The UI (#25) reads through the same core —
+there is no second read path — but it is served to nobody, and passes
+through nothing that appends here: there is no session for an author's own
+click to belong to. Ledgering author browsing would make the supplied-context
+account report the author's own reading as context supplied to a model,
+which is exactly the confident-but-wrong number ADR-0001 exists to prevent.
+
+**Session identity.** The MCP protocol carries no session id, and Claude
+Code's own session id lives in its transcript JSONL path rather than
+anywhere a tool call can read it (`docs/poc-plan.md` §3). Absent
+`MEMORIA_SESSION_ID` in the server's environment, one id is generated for
+the whole life of the server process and held for every call it serves — a
+stdio server is spawned per client, so the process boundary stands in for
+the session boundary until a spawner sets the variable explicitly.
 
 ## Registering the server
 

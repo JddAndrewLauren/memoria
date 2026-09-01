@@ -359,10 +359,10 @@ interface.
   day: the per-type read tools unify into one `read(ref)` over the §4 stable IDs
   (part 11 §25, mirrored in §24.2). **`read(ref)` was forced 2026-09-01** (issue
   #11) and is recorded in [`tool-surface.md`](tool-surface.md), which also states
-  what it deliberately does not do yet — no ledger (#13), no overlay (#20), and no
-  `raw` parameter, which #20 owes when it adds decoration. `search_text` is next
-  (#12). Which of the remaining tools ship is still open — except `search_global`,
-  added and scheduled for M2 on 2026-09-01 (ADR-0005, issue #74).
+  what it deliberately does not do yet — no overlay (#20), and no
+  `raw` parameter, which #20 owes when it adds decoration. `search_text` (#12)
+  and the `events.jsonl` read ledger (#13) have since shipped too, both
+  recorded in the same doc.
 - Scope and trigger policy for the Curator.
 - Subject and length of the authorship-track piece — fully open again as of
   2026-09-01, since the corpus that suggested one is gone (issue #27).

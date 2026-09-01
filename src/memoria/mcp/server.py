@@ -3,10 +3,10 @@
 The second adapter over the core, after the CLI and before the FastAPI app
 (#64). §40.1 asks that business logic not be duplicated between them, and
 this module is where that stops being an aspiration: it holds no rule the
-other two lack, it imports only ``memoria.records``, ``memoria.repository``
-and (#12) ``memoria.index``, and it opens no file and speaks to no database
-itself. Everything it does is call one core function and render what comes
-back.
+other two lack, it imports only ``memoria.records``, ``memoria.repository``,
+(#12) ``memoria.index`` and (#13) ``memoria.ledger``, and it opens no file
+and speaks to no database itself. Everything it does is call one core
+function and render what comes back.
 
 `read(ref)` is the single read tool (part 11 §25). Dispatch is read off the
 reference, because the ID scheme already names the type; there are no
@@ -35,6 +35,7 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from memoria.index import SearchFilters, SearchResult, search as search_index
+from memoria.ledger import append_read, append_search, session_id_from_env
 from memoria.records import Read, ReadError, read as read_ref
 from memoria.repository import Repository, from_env
 
@@ -55,6 +56,11 @@ mcp = MCPServer(
 # buy nothing here but a layer to unwrap.
 _repository: Repository | None = None
 
+# Set lazily, the first time a served call needs it, and held for the rest of
+# this process's life - a stdio server is spawned per client (docs/poc-plan.md
+# §3), so the process is the session (#13).
+_session_id: str | None = None
+
 
 def repository() -> Repository:
     """The repository this server serves.
@@ -63,6 +69,14 @@ def repository() -> Repository:
     not require main() to have run.
     """
     return _repository if _repository is not None else from_env()
+
+
+def session_id() -> str:
+    """The session this server's served calls belong to (#13)."""
+    global _session_id
+    if _session_id is None:
+        _session_id = session_id_from_env()
+    return _session_id
 
 
 def render(result: Read) -> str:
@@ -126,13 +140,18 @@ def read(ref: str) -> str:
     SES-, CHG-, CLM-, RES-, DEC- - return an error naming the kind.
     """
     try:
-        return render(read_ref(repository(), ref))
+        result = read_ref(repository(), ref)
     except ReadError as exc:
         # ToolError is the SDK's anticipated-failure type: it reaches the
         # model as is_error with this message intact. A bare exception would
         # be reported as "Error executing tool read" with the reason stripped,
         # which is the silent failure #11 exists to forbid.
+        #
+        # Not ledgered: the ledger records what was served (#13), and a
+        # failed read served nothing.
         raise ToolError(str(exc)) from exc
+    append_read(repository(), session_id(), result)
+    return render(result)
 
 
 def render_search(results: list[SearchResult]) -> str:
@@ -169,7 +188,9 @@ def search_text(query: str, filters: SearchFilters | None = None) -> str:
     An unbuilt corpus (no `.memoria/index.db` yet) is the same as an empty
     one - not an error.
     """
-    return render_search(search_index(repository(), query, filters))
+    results = search_index(repository(), query, filters)
+    append_search(repository(), session_id(), query, filters, results)
+    return render_search(results)
 
 
 def main(argv=None) -> int:

@@ -443,12 +443,14 @@ def read(repository: Repository, ref: str) -> Read:
     path - returns the file exactly as it is on disk, which is what keeps
     reading through the tool from ever being worse than ``cat``.
 
-    Three things this deliberately does not do, so that they are not later
+    Two things this deliberately does not do, so that they are not later
     mistaken for omissions: it does not decorate with the curated overlay
     (#20, which owes a ``raw`` parameter when it does, since undecorated is
-    currently what every read is), it does not ledger (#13), and it resolves
-    no reference kind but ``SRC-``, ``SUB-`` and repository paths - the rest
-    exist as a named error, not as silence.
+    currently what every read is), and it resolves no reference kind but
+    ``SRC-``, ``SUB-`` and repository paths - the rest exist as a named
+    error, not as silence. Ledgering the served read is the caller's job
+    (``memoria.ledger``, #13): this function has no session to ledger
+    against.
     """
     try:
         reference = references.parse(ref)

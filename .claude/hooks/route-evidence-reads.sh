@@ -29,9 +29,9 @@ if [ -n "$target" ]; then
   # Says only what is true today. It used to promise the curated overlay and
   # a session ledger, and to name read_source/expand -- tools part 11 section
   # 25 withdrew in favour of the unified read(ref). A router that advertises
-  # what it cannot deliver teaches people to ignore it. Issue #20 adds the
-  # overlay clause back when there is an overlay, and #13 the ledger clause.
-  echo "Evidence reads route through the Memoria MCP tool read(ref): the same verbatim text, addressed by SRC- ID, paragraph anchor, or repository path - see docs/tool-surface.md. Direct file access to the evidence repo is disabled in this workspace." >&2
+  # what it cannot deliver teaches people to ignore it. #13 restored the
+  # ledger clause; issue #20 still owes the overlay clause.
+  echo "Evidence reads route through the Memoria MCP tool read(ref): the same verbatim text, addressed by SRC- ID, paragraph anchor, or repository path, and the read lands in the session ledger (events.jsonl) - see docs/tool-surface.md. Direct file access to the evidence repo is disabled in this workspace." >&2
   exit 2
 fi
 exit 0

@@ -42,6 +42,7 @@ ALLOWED_IMPORTS = {
     "memoria.records",
     "memoria.repository",
     "memoria.index",      # #12: search_text calls memoria.index.search
+    "memoria.ledger",      # #13: every served call is ledgered
 }
 
 FILE_OPENING_CALLS = {"open", "read_text", "read_bytes", "write_text", "write_bytes"}
@@ -72,9 +73,11 @@ def _repo(tmp_path):
 def _restore_server_repository():
     """`server._repository` is a module global; leaking it across tests would
     make them order-dependent."""
-    original = server._repository
+    original_repository = server._repository
+    original_session_id = server._session_id
     yield
-    server._repository = original
+    server._repository = original_repository
+    server._session_id = original_session_id
 
 
 # --- the adapter reaches nothing on its own --------------------------------
@@ -151,13 +154,14 @@ def _snapshot(*roots):
     }
 
 
-def test_no_read_writes_anything_under_either_root(tmp_path):
-    """#11: the server never writes to the evidence repo.
+def test_no_read_writes_anything_under_either_root_but_the_ledger(tmp_path):
+    """#11: the server never writes to the evidence repo. #13 adds the one
+    intentional write: the ledger, under `sessions/**`.
 
-    Snapshots both roots and asserts no changed bytes *and no new paths* - the
-    second half is what would catch a stray `.memoria/index.db` appearing as a
-    side effect of a read, which `search()` is already known to do on an empty
-    corpus.
+    Snapshots both roots and asserts no changed bytes *and no new paths*
+    outside `sessions/` - what would catch a stray `.memoria/index.db`
+    appearing as a side effect of a read, which `search()` is already known
+    to do on an empty corpus.
     """
     repo_root = tmp_path / "repo"
     evidence_root = tmp_path / "evidence"
@@ -184,9 +188,13 @@ def test_no_read_writes_anything_under_either_root(tmp_path):
             server.read(ref)
         except Exception:
             pass
-    after = _snapshot(repo_root, evidence_root)
+    after = {
+        path: content
+        for path, content in _snapshot(repo_root, evidence_root).items()
+        if repo_root / "sessions" not in path.parents
+    }
 
-    assert set(after) == set(before), "a read created or removed a file"
+    assert set(after) == set(before), "a read created or removed a file outside sessions/"
     assert after == before, "a read changed a file's bytes"
 
 
@@ -321,6 +329,63 @@ def test_search_text_filters_compose(tmp_path):
 
     assert "SRC-000001" in rendered
     assert "SRC-000002" not in rendered
+
+
+# --- the ledger (#13) -------------------------------------------------------
+
+
+def _events(tmp_path, session_id):
+    path = tmp_path / "sessions" / session_id / "events.jsonl"
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_a_served_read_is_ledgered(tmp_path):
+    server._repository = _repo(tmp_path)
+    server._session_id = "SES-test"
+
+    server.read("SRC-000184")
+
+    (event,) = _events(tmp_path, "SES-test")
+    assert event["tool"] == "read"
+    assert event["ref"] == "SRC-000184"
+
+
+def test_a_full_source_read_is_ledgered_like_any_other_read(tmp_path):
+    """The undecorated path is not an unlogged path."""
+    server._repository = _repo(tmp_path)
+    server._session_id = "SES-test"
+
+    server.read("SRC-000184")
+
+    (event,) = _events(tmp_path, "SES-test")
+    assert event["served"] == ["SRC-000184"]
+
+
+def test_a_failed_read_is_not_ledgered(tmp_path):
+    """Only what was served is ledgered - a ToolError supplied nothing."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    server._repository = _repo(tmp_path)
+    server._session_id = "SES-test"
+
+    with pytest.raises(ToolError):
+        server.read("SRC-000999")
+
+    assert not (tmp_path / "sessions").exists()
+
+
+def test_a_served_search_is_ledgered(tmp_path):
+    server._repository = _index(
+        tmp_path, [_record(paragraphs=["A blue heron flew over."])]
+    )
+    server._session_id = "SES-test"
+
+    server.search_text("heron")
+
+    (event,) = _events(tmp_path, "SES-test")
+    assert event["tool"] == "search_text"
+    assert event["query"] == "heron"
+    assert event["served"] == ["src-000184-p1"]
 
 
 def test_the_server_registers_a_search_text_tool():
