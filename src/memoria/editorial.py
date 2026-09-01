@@ -239,7 +239,15 @@ def _strip_editorial_apparatus_from_record(
             interpolation_hits.append((original_index, inner))
             return inner
 
-        stripped = _clean_ws(_BRACKET_RE.sub(_replace, paragraph))
+        substituted = _BRACKET_RE.sub(_replace, paragraph)
+        # Whitespace normalization is lossy (it collapses a quoted verse's
+        # line breaks to single spaces) and evidence text is sacred - only
+        # apply it to a paragraph an editorial span was actually excised
+        # from, where it closes up the excision's own artifacts (a
+        # doubled space, a stray space before punctuation). A paragraph
+        # with no bracket at all passes through untouched, byte-identical
+        # to what normalize_journals produced from the raw source.
+        stripped = _clean_ws(substituted) if substituted != paragraph else paragraph
         if stripped:
             cleaned.append(stripped)
             survives_at[original_index] = len(cleaned)
