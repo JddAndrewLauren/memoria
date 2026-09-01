@@ -244,6 +244,13 @@ separate retrospective-editorial records is part 16's dedicated
 construction: everything before the first `TO ` heading is discarded, the
 same way the journals discard everything before their first date heading.
 
+Issue #56 is that "editorial-voice segregation" step for the letters -
+but scoped, like #5 was for the journals, to *bracket-delimited* apparatus
+(footnote markers and bodies, bracketed asides, interpolations - see
+`docs/editorial-record-schema.md`). Sanborn's unbracketed connective
+prose between letters, described above, is a different shape of
+editorial voice and stays inline; #56 did not extend to it.
+
 ### Back matter: the General Index and trailing footnotes
 
 The volume's General Index (`GENERAL INDEX`, after the last letter) is cut
