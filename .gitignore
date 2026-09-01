@@ -8,3 +8,7 @@ __pycache__/
 # committed, same as the raw evidence corpus it derives from. Regenerate
 # with `memoria normalize` (see README).
 sources/normalized/
+
+# FTS5 search index; derived state, not durable (§42). Regenerate with
+# `memoria rebuild` (see README).
+.memoria/
