@@ -34,6 +34,13 @@ statements. `[open]` lines and [[memoria-note]]s sit outside it, excluded from
 write-side assembly and from the audit, retrievable in Think and Research modes.
 _Avoid_: Entry content, loaded body, canonical body, annex
 
+**Match terms**:
+How one entry is referenced, beyond the subject default — Bob, Robert, R., my
+brother-in-law. Kept on the entry and owned by the author, they are the system's
+only alias store; there is no canonical alias map. Discipline that spans entries —
+do not merge people sharing a surname — is a subject hazard, not a map row.
+_Avoid_: Alias map, aliases.yaml, aliases file, name variants
+
 **Gathered set**:
 The sources a subject matched to an entry. Derived, rebuildable, and asserts nothing
 on its own.

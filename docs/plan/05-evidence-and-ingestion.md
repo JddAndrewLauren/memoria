@@ -1,5 +1,7 @@
 <!-- Part of the Memoria build plan. Index: ./plan-index.md -->
 <!-- Source sections: 5, 6, 7 of the original memoria-plan.md -->
+<!-- §7 rewritten 2026-08-31: the canonical alias map is withdrawn; aliasing lives -->
+<!-- in entry match terms and subject hazards. Original §7 in _original-memoria-plan.md. -->
 
 # 5. Source Ingestion
 
@@ -128,13 +130,24 @@ Bob Smith
 my brother-in-law
 ```
 
-A canonical alias map lives in:
+**There is no canonical alias map.** That list *is* the Bob entry's **match terms**
+(part 06 §8.2) — how this entry is referenced, beyond the subject default — kept on
+the entry and owned by the author. A separate `subjects/people/_aliases.yaml` would
+be a second store for the same matching seam, guaranteed to drift from the first.
 
-```text
-subjects/people/_aliases.yaml
-```
+Aliasing therefore lives in two places, at two scales:
 
-Alias resolution is one of the few curation activities where ambiguity should normally be surfaced to the author.
+- **The subject prompt's matching hazards** (part 06 §8.1) carry the discipline
+  that spans entries: match aliases, initials, honorifics, married names and
+  location forms; do not merge people sharing a surname without corroboration.
+  Cross-entry disambiguation — the four Thoreaus sharing a surname in the evidence
+  repo's `RECON.md` — is a hazard stated once per subject, not a map row.
+- **The entry's match terms** carry the forms specific to one entry — Emerson's
+  four location forms, a nickname, a variant spelling the transcriber preserved.
+
+The resolution discipline is unchanged, and the People subject's hazards are where
+it is carried: alias resolution is one of the few curation activities where
+ambiguity should normally be surfaced to the author.
 
 A mistaken theme summary is reversible.
 

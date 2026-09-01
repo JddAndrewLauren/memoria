@@ -21,7 +21,6 @@ memoria/
 ├── subjects/
 │   ├── people/
 │   │   ├── _subject.md               match definition + matching hazards
-│   │   ├── _aliases.yaml
 │   │   └── bob.md                    author text, match terms, settlements
 │   ├── timeline/
 │   │   ├── _subject.md

@@ -10,7 +10,7 @@ original plan.
 **Revised since:** §8 (rewritten as the subject system), §16-§18 and §39 (rewritten
 for the manuscript layer), §14 (rewritten as ownership by badge), §18's category list
 and §17's question list (both withdrawn),
-§1.5, §1.10a (new), §2, §2.1 (new), §3, §4, §4.1 (new), §8.1, §8.2, §8.5, §8.6, §8.11,
+§1.5, §1.10a (new), §2, §2.1 (new), §3, §4, §4.1 (new), §7, §8.1, §8.2, §8.5, §8.6, §8.11,
 §8.12 (new), §9.5, §12.1, §13.4, §15, §19, §20, §21, §23, §24.2, §25, §32, §33, §36-§38, §42,
 §43.2, §47, §52.2, and Invariants 8 and 9.
 

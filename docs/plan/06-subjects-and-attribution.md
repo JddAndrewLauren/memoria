@@ -3,6 +3,7 @@
 <!-- §8 was REWRITTEN 2026-08-31 in the subject-system grilling session and is no -->
 <!-- longer verbatim. The original five-object-type §8 is in _original-memoria-plan.md. -->
 <!-- §8.2, §8.6, §8.12 and §9.5 revised 2026-08-31: ownership by badge. See part 08 §14. -->
+<!-- §8.2 revised again 2026-08-31: match terms are the only alias store (part 05 §7). -->
 
 # 8. The Subject System
 
@@ -85,6 +86,10 @@ not share an authority:
 | **Match terms** | how *this* entry is referenced, beyond the subject default | the author's |
 | **Settlements** | recorded resolutions of surfaced conflicts | attributable author acts |
 | **Gathered set** | the sources this subject matched to this entry | derived and rebuildable |
+
+Match terms are the system's **only alias store**: §7 withdrew the canonical alias
+map, and the discipline that spans entries — do not merge people sharing a surname —
+is a subject hazard (§8.1), not a map row.
 
 **The body is shared territory, and the §9 badge is the ownership marker.** There is
 no separate machine region, and nothing infers authorship from git blame (§14): who
