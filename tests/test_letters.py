@@ -433,6 +433,7 @@ def test_write_normalized_records_carries_letter_specific_frontmatter_fields(
     assert frontmatter["salutation"] == "DEAR HELEN,--"
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",

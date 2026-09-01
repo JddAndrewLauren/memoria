@@ -84,6 +84,7 @@ def test_search_includes_editorial_records_by_default(tmp_path):
     assert {r.src_id for r in results} == {"SRC-000003", "SRC-000004"}
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
@@ -108,6 +109,7 @@ def test_rebuild_writes_normalized_records_and_builds_a_searchable_index(tmp_pat
     assert len(results) > 0
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
@@ -130,6 +132,7 @@ def test_rebuild_after_deleting_the_index_reproduces_identical_search_results(
     assert before == after
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
@@ -171,6 +174,7 @@ def test_rebuild_resolves_years_and_never_leaves_a_journal_record_unresolved(
     assert any(r.date_confidence == "inferred" for r in letter_records)
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
@@ -205,6 +209,7 @@ def test_rebuild_strips_editorial_apparatus_and_exclude_editorial_excludes_it(
     assert len(editorial_written) == 1287
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",

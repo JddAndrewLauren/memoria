@@ -305,6 +305,7 @@ def test_resolve_years_leaves_an_entry_with_no_governing_chapter_unresolved(tmp_
     assert dated_entry.event_date == "Nov. 3., 1850"
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",

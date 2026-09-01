@@ -367,6 +367,7 @@ def test_quote_normalization_finds_the_same_phrase_regardless_of_source_conventi
     assert search_phrase in curly_quote_source
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
@@ -566,6 +567,7 @@ class TestAgainstTheRealEvidenceCorpus:
                 assert not paragraph.startswith("1850 (ÆT."), record.id
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",

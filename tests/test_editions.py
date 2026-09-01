@@ -89,6 +89,7 @@ class TestWorkText:
         assert [s.record_id for s in touched] == ["SRC-000900", "SRC-000901"]
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",

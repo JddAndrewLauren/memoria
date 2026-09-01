@@ -447,6 +447,7 @@ def test_letters_interpolation_is_kept_in_evidence_text(tmp_path):
     assert any(e.text == "John" for e in interpolations)
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
@@ -680,6 +681,7 @@ class TestAgainstTheRealEvidenceCorpus:
             assert record.text.strip() != ""
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",

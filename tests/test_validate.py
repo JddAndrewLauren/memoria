@@ -88,6 +88,7 @@ def test_validate_fails_when_manifest_file_is_missing(tmp_path):
     assert rel_path in errors[0]
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
