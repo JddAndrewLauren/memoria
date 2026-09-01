@@ -68,9 +68,11 @@ _Avoid_: Context window, prompt, loaded files, the context
 **Supplied context**:
 The [[working-context]] plus every read served since, for one session. It is an account
 of what Memoria supplied and asserts nothing about what the model still holds — the
-client may compact served reads away, and Memoria cannot see that it has. Reported in
-countable domain units; token counts belong to the session's context manifest, never to
-a surface.
+client may compact served reads away, and Memoria cannot see that it has. The author's
+own reads in the interface are not part of it — they are served to nobody, and the ledger
+behind this account records only what the tool surface served to a session (§10.4).
+Reported in countable domain units; token counts belong to the session's context
+manifest, never to a surface.
 _Avoid_: Context window usage, what the model has seen, context budget, token usage
 
 **Audit**:
