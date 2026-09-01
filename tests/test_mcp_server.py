@@ -339,7 +339,8 @@ def _events(tmp_path, session_id):
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
-def test_a_served_read_is_ledgered(tmp_path):
+def test_a_served_read_is_ledgered_full_source_included(tmp_path):
+    """The undecorated full-source path is not an unlogged path."""
     server._repository = _repo(tmp_path)
     server._session_id = "SES-test"
 
@@ -348,16 +349,6 @@ def test_a_served_read_is_ledgered(tmp_path):
     (event,) = _events(tmp_path, "SES-test")
     assert event["tool"] == "read"
     assert event["ref"] == "SRC-000184"
-
-
-def test_a_full_source_read_is_ledgered_like_any_other_read(tmp_path):
-    """The undecorated path is not an unlogged path."""
-    server._repository = _repo(tmp_path)
-    server._session_id = "SES-test"
-
-    server.read("SRC-000184")
-
-    (event,) = _events(tmp_path, "SES-test")
     assert event["served"] == ["SRC-000184"]
 
 
@@ -386,6 +377,50 @@ def test_a_served_search_is_ledgered(tmp_path):
     assert event["tool"] == "search_text"
     assert event["query"] == "heron"
     assert event["served"] == ["src-000184-p1"]
+
+
+def test_several_served_tool_calls_reconstruct_exactly_what_the_server_returned(tmp_path):
+    """Drives real `server.read` / `server.search_text` tool calls - not
+    `ledger.append_*` directly with hand-built values - against a fixture
+    repo, then checks the ledger against what the server *actually*
+    returned for each call, independently recomputed through the core.
+    """
+    from memoria.index import INDEX_RELATIVE_PATH, build_index
+    from memoria.index import search as search_core
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    records = [
+        _record(paragraphs=["A blue heron flew over.", "Nothing to do with birds."])
+    ]
+    write_normalized_records(records, tmp_path / NORMALIZED_RELATIVE_PATH)
+    build_index(tmp_path / INDEX_RELATIVE_PATH, records)
+    repository = Repository(root=tmp_path)
+    server._repository = repository
+    server._session_id = "SES-test"
+
+    full = read(repository, "SRC-000184")
+    rendered_full = server.read("SRC-000184")
+
+    paragraph = read(repository, "SRC-000184 P1")
+    rendered_paragraph = server.read("SRC-000184 P1")
+
+    hits = search_core(repository, "heron")
+    rendered_search = server.search_text("heron")
+
+    with pytest.raises(ToolError):
+        server.read("SRC-000999")
+
+    events = _events(tmp_path, "SES-test")
+    assert [e["tool"] for e in events] == ["read", "read", "search_text"]
+
+    assert events[0]["served"] == [full.citation]
+    assert server.render(full) == rendered_full
+
+    assert events[1]["served"] == [paragraph.citation]
+    assert server.render(paragraph) == rendered_paragraph
+
+    assert events[2]["served"] == [hit.anchor for hit in hits]
+    assert server.render_search(hits) == rendered_search
 
 
 def test_the_server_registers_a_search_text_tool():

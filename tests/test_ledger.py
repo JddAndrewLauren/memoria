@@ -10,6 +10,7 @@ helper.
 from __future__ import annotations
 
 import json
+import re
 
 from memoria import ledger
 from memoria.index import SearchFilters, SearchResult
@@ -25,6 +26,26 @@ def _read(**overrides):
     )
     fields.update(overrides)
     return Read(**fields)
+
+
+def test_event_path_nests_by_year_and_month_for_a_documented_session_id(tmp_path):
+    """Part 04 §2's tree nests a session under ``sessions/<YYYY>/<MM>/``."""
+    repository = Repository(root=tmp_path)
+
+    path = ledger.event_path(repository, "SES-20260912-1432-abcdef")
+
+    assert path == tmp_path / "sessions" / "2026" / "09" / "SES-20260912-1432-abcdef" / "events.jsonl"
+
+
+def test_event_path_falls_back_flat_for_a_non_conforming_session_id(tmp_path):
+    """A caller-supplied id that does not follow part 04 §4's ``SES-``
+    form has no year/month to nest by - documented in docs/tool-surface.md
+    as the deviation, rather than guessed at."""
+    repository = Repository(root=tmp_path)
+
+    path = ledger.event_path(repository, "my-custom-session")
+
+    assert path == tmp_path / "sessions" / "my-custom-session" / "events.jsonl"
 
 
 def test_a_served_read_appends_one_line_naming_the_reference_and_session(tmp_path):
@@ -107,8 +128,23 @@ def test_session_id_from_env_uses_the_configured_value(monkeypatch):
 
 
 def test_session_id_from_env_generates_one_when_unset(monkeypatch):
+    """Part 04 §4's citable form is minute granularity: ``SES-20260912-1432``.
+    A random suffix follows it, so the id stays parseable as that form by a
+    caller that only wants the prefix, while remaining collision-resistant.
+    """
     monkeypatch.delenv(ledger.SESSION_ID_ENV_VAR, raising=False)
 
     session_id = ledger.session_id_from_env()
 
-    assert session_id.startswith("SES-")
+    assert re.fullmatch(r"SES-\d{8}-\d{4}-[0-9a-f]{6}", session_id)
+
+
+def test_generated_session_ids_do_not_collide_within_the_same_minute(monkeypatch):
+    """Two servers spawned in the same minute must not share one id and
+    silently merge their events into one file (second-granularity used to
+    make exactly that possible)."""
+    monkeypatch.delenv(ledger.SESSION_ID_ENV_VAR, raising=False)
+
+    ids = {ledger.session_id_from_env() for _ in range(200)}
+
+    assert len(ids) == 200

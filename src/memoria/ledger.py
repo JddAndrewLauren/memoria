@@ -23,6 +23,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import secrets
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -55,13 +58,52 @@ def session_id_from_env() -> str:
 
 
 def _generate_session_id() -> str:
+    """A fresh id in part 04 §4's citable form, plus entropy.
+
+    ``SES-20260912-1432`` is minute granularity, not second: two servers
+    spawned in the same minute with no suffix would generate the *same* id
+    and silently append to one shared ``events.jsonl``, merging two
+    sessions' reads into one. The random suffix - 24 bits, checked
+    collision-free across 200 ids in the same minute by a test - is what
+    keeps the id unique while the documented prefix stays intact and
+    parseable.
+    """
     now = datetime.now(timezone.utc)
-    return f"SES-{now:%Y%m%d-%H%M%S}"
+    suffix = secrets.token_hex(3)
+    return f"SES-{now:%Y%m%d-%H%M}-{suffix}"
+
+
+# Part 04 §4's citable session id: SES-YYYYMMDD-HHMM, with this module's own
+# random suffix. Matched loosely enough to accept a caller-supplied id that
+# carries no suffix at all - only the date and the SES- prefix are load-
+# bearing for nesting.
+_DATED_SESSION_ID = re.compile(r"^SES-(?P<year>\d{4})(?P<month>\d{2})\d{2}-\d{4}")
 
 
 def event_path(repository: Repository, session_id: str) -> Path:
-    """Where this session's ledger lives (part 04 §2)."""
-    return repository.root / "sessions" / session_id / "events.jsonl"
+    """Where this session's ledger lives.
+
+    Part 04 §2's tree nests a session under ``sessions/<YYYY>/<MM>/SES-.../``
+    - the directory #29's context-manifest.json and M4's transcript.md must
+    later land in beside this file. Nesting is derived from the session id
+    itself, since the documented form (part 04 §4) already carries the date.
+
+    A ``session_id`` that does not carry that form - a caller-supplied
+    ``MEMORIA_SESSION_ID`` free of it - has no year/month to nest by, so the
+    ledger falls back to ``sessions/<session_id>/events.jsonl`` directly.
+    This is a documented deviation (docs/tool-surface.md), not a guess.
+    """
+    match = _DATED_SESSION_ID.match(session_id)
+    if match is None:
+        return repository.root / "sessions" / session_id / "events.jsonl"
+    return (
+        repository.root
+        / "sessions"
+        / match.group("year")
+        / match.group("month")
+        / session_id
+        / "events.jsonl"
+    )
 
 
 def append_read(repository: Repository, session_id: str, result: Read) -> None:
@@ -99,14 +141,12 @@ def append_search(
 
 
 def _filters_dict(filters: SearchFilters | None) -> dict | None:
+    """``asdict`` rather than a hand-picked field list: a filter `#12` adds
+    later is ledgered automatically, instead of silently dropping until
+    someone remembers to update this function too."""
     if filters is None:
         return None
-    return {
-        "event_date": filters.event_date,
-        "recorded_date": filters.recorded_date,
-        "source_type": filters.source_type,
-        "contemporaneous": filters.contemporaneous,
-    }
+    return asdict(filters)
 
 
 def _append(repository: Repository, session_id: str, event: dict) -> None:

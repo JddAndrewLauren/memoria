@@ -237,14 +237,25 @@ it against a synthetic multi-thousand-paragraph index.
 ## `events.jsonl` — the read ledger, forced 2026-09-01, issue #13
 
 Every `read(ref)` and `search_text(query, filters)` call this server
-**serves** appends one JSON line to `sessions/<session_id>/events.jsonl`
-(part 04 §2), in `memoria.ledger` — core, not the adapter, since a future
-caller (#64's web app) ledgers through the same function rather than opening
-its own file. Each line carries the reference or query, the filters, the
-records served (by `SRC-` ID or paragraph anchor — the same identifier
-`read(ref)` accepts verbatim), a timestamp, and the session it belongs to.
-The file is opened in append mode and written one line at a time; nothing
-here ever reads it back to rewrite it.
+**serves** appends one JSON line to `events.jsonl`, in `memoria.ledger` —
+core, not the adapter, since a future caller (#64's web app) ledgers through
+the same function rather than opening its own file. Each line carries the
+reference or query, the filters, the records served (by `SRC-` ID or
+paragraph anchor — the same identifier `read(ref)` accepts verbatim), a
+timestamp, and the session it belongs to. The file is opened in append mode
+and written one line at a time; nothing here ever reads it back to rewrite
+it.
+
+**The path nests by year and month, matching part 04 §2's tree exactly:**
+`sessions/<YYYY>/<MM>/<session_id>/events.jsonl` — the directory #29's
+`context-manifest.json` and M4's `transcript.md` must later land in beside
+this file. Nesting is derived from the session id itself, since the
+documented `SES-YYYYMMDD-HHMM` form (part 04 §4) already carries the date.
+A caller-supplied `MEMORIA_SESSION_ID` that does not carry that form has no
+year/month to nest by; the ledger then falls back to
+`sessions/<session_id>/events.jsonl` directly, flat. That fallback is a
+documented deviation from part 04 §2, not a broken promise — an operator
+who wants the full nested layout sets a session id in the documented form.
 
 **Only what was served is ledgered.** A `ToolError` — an unresolvable kind,
 a missing record, an un-normalized corpus, a bad query — supplies nothing,
@@ -271,7 +282,11 @@ anywhere a tool call can read it (`docs/poc-plan.md` §3). Absent
 `MEMORIA_SESSION_ID` in the server's environment, one id is generated for
 the whole life of the server process and held for every call it serves — a
 stdio server is spawned per client, so the process boundary stands in for
-the session boundary until a spawner sets the variable explicitly.
+the session boundary until a spawner sets the variable explicitly. The
+generated id is part 04 §4's `SES-YYYYMMDD-HHMM` form plus a random 24-bit
+suffix: the documented form alone is minute granularity, and two servers
+spawned in the same minute with no suffix would generate the identical id
+and silently merge their events into one shared file.
 
 ## Registering the server
 
