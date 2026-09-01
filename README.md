@@ -34,8 +34,17 @@ resolve, such as a `.claude/worktrees/issue-<n>` sub-worktree.
 ```
 .venv/bin/memoria --help
 .venv/bin/memoria validate
+.venv/bin/memoria normalize
 ```
 
 `memoria validate` verifies that every raw file in the evidence corpus matches
 the hash recorded in `raw/gutenberg/manifest.yaml`, and exits non-zero, naming
-the offending file, if a raw file has been modified or is missing.
+the offending file, if a raw file has been modified or is missing. It also
+checks every normalized record under `sources/normalized/` for a `SRC-` ID
+reference that does not resolve to an actual record.
+
+`memoria normalize` reads the journal volumes (J01, J02) from the evidence
+corpus and writes one normalized Markdown record per dated entry to
+`sources/normalized/` (gitignored — regenerate on demand; see
+`docs/normalized-record-schema.md` for the schema and the `SRC-` ID /
+paragraph-anchor conventions).
