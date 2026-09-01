@@ -118,6 +118,22 @@ def test_normalize_writes_records_under_sources_normalized(tmp_path):
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
 )
+def test_normalize_writes_editorial_records_under_sources_editorial(tmp_path):
+    env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=os.environ[EVIDENCE_ROOT_ENV_VAR])
+
+    result = run_cli("normalize", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0
+    written = list((tmp_path / "sources" / "editorial").glob("ED-*.md"))
+    # 880 footnotes (508 J01 + 372 J02) + 232 spans (asides + interpolations,
+    # 83 + 149) + 2 introductions (Torrey, Sanborn) - see test_editorial.py.
+    assert len(written) == 1114
+
+
+@pytest.mark.skipif(
+    EVIDENCE_ROOT_ENV_VAR not in os.environ,
+    reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
+)
 def test_rebuild_writes_normalized_records_and_the_index(tmp_path):
     env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=os.environ[EVIDENCE_ROOT_ENV_VAR])
 
@@ -140,16 +156,39 @@ def test_rebuild_writes_normalized_records_and_the_index(tmp_path):
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
 )
+def test_rebuild_writes_editorial_records_and_strips_them_from_normalized(tmp_path):
+    # BLOCKING 1, PR #51 review round 1: a plain `memoria rebuild` used to
+    # overwrite sources/normalized/ with unstripped paragraphs and never
+    # index the editorial records at all, silently undoing `memoria
+    # normalize` and leaving `exclude_editorial` an effective no-op.
+    env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=os.environ[EVIDENCE_ROOT_ENV_VAR])
+
+    result = run_cli("rebuild", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0
+    editorial_written = list((tmp_path / "sources" / "editorial").glob("ED-*.md"))
+    assert len(editorial_written) == 1114
+    for path in (tmp_path / "sources" / "normalized").glob("SRC-*.md"):
+        content = path.read_text(encoding="utf-8")
+        body = content.split("---\n", 2)[2]
+        assert "[" not in body and "]" not in body, path.name
+
+
+@pytest.mark.skipif(
+    EVIDENCE_ROOT_ENV_VAR not in os.environ,
+    reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
+)
 def test_rebuild_produces_byte_identical_output_to_normalize(tmp_path):
     # The invariant review round 1 on PR #52 asked for: a plain
-    # `memoria rebuild` must leave sources/normalized/ byte-identical to
-    # what `memoria normalize` produces - same record set, same
-    # frontmatter, same recipients table. `rebuild()` re-derives a
-    # hard-coded subset of the pipeline by construction, so every issue
-    # that adds or transforms records (year resolution, letters parsing,
-    # and whatever #5's editorial extraction adds next) can silently drop
-    # out of it again; this is the test that makes that fail loudly
-    # instead of passing on a stale record count nobody updated.
+    # `memoria rebuild` must leave sources/normalized/ AND
+    # sources/editorial/ byte-identical to what `memoria normalize`
+    # produces - same record set, same frontmatter, same recipients
+    # table, same editorial records. `rebuild()` re-derives a hard-coded
+    # subset of the pipeline by construction, so every issue that adds or
+    # transforms records (year resolution, letters parsing, #5's
+    # editorial extraction) can silently drop out of it again; this is
+    # the test that makes that fail loudly instead of passing on a stale
+    # record count nobody updated.
     env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=os.environ[EVIDENCE_ROOT_ENV_VAR])
     normalize_dir = tmp_path / "normalize-run"
     rebuild_dir = tmp_path / "rebuild-run"
@@ -162,10 +201,13 @@ def test_rebuild_produces_byte_identical_output_to_normalize(tmp_path):
     assert normalize_result.returncode == 0
     assert rebuild_result.returncode == 0
 
-    normalize_records = normalize_dir / "sources" / "normalized"
-    rebuild_records = rebuild_dir / "sources" / "normalized"
-    normalize_files = {p.name: p.read_text() for p in normalize_records.glob("*")}
-    rebuild_files = {p.name: p.read_text() for p in rebuild_records.glob("*")}
+    for subdir in ("normalized", "editorial"):
+        normalize_records = normalize_dir / "sources" / subdir
+        rebuild_records = rebuild_dir / "sources" / subdir
+        normalize_files = {
+            p.name: p.read_text() for p in normalize_records.glob("*")
+        }
+        rebuild_files = {p.name: p.read_text() for p in rebuild_records.glob("*")}
 
-    assert normalize_files.keys() == rebuild_files.keys()
-    assert normalize_files == rebuild_files
+        assert normalize_files.keys() == rebuild_files.keys(), subdir
+        assert normalize_files == rebuild_files, subdir
