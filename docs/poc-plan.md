@@ -351,8 +351,11 @@ interface.
   summarized-only), decorated with the curated overlay, a raw full-source read
   available, and every read ledgered in `events.jsonl`. Narrowed further the same
   day: the per-type read tools unify into one `read(ref)` over the §4 stable IDs
-  (part 11 §25, mirrored in §24.2). Which of the remaining tools ship is still
-  open.
+  (part 11 §25, mirrored in §24.2). **`read(ref)` was forced 2026-09-01** (issue
+  #11) and is recorded in [`tool-surface.md`](tool-surface.md), which also states
+  what it deliberately does not do yet — no ledger (#13), no overlay (#20), and no
+  `raw` parameter, which #20 owes when it adds decoration. `search_text` is next
+  (#12). Which of the remaining tools ship is still open.
 - Scope and trigger policy for the Curator.
 - Subject and length of the authorship-track piece — fully open again as of
   2026-09-01, since the corpus that suggested one is gone (issue #27).

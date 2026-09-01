@@ -1,19 +1,22 @@
 """The on-disk record format, both directions.
 
-The write half lives in ``memoria.records``; the read half used by the index
-lives in ``memoria.index.read_normalized_records`` until #11 gives the module
-a proper reader. These tests pin the contract between them, which is the only
-thing keeping the format round-trippable now that no normalizer produces
-records (docs/open-problems.md 2.4).
+Both halves live in ``memoria.records`` (ADR-0004). These tests pin the
+contract between them, which is the only thing keeping the format
+round-trippable now that no normalizer produces records
+(docs/open-problems.md 2.4).
+
+The read side proper - the composed ``read(ref)``, its reference forms and
+its errors - is exercised in ``test_read_ref.py``.
 """
 
-from memoria.index import read_normalized_records
 from memoria.records import (
     NORMALIZED_RELATIVE_PATH,
     NormalizedRecord,
+    read_all,
     record_to_markdown,
     write_normalized_records,
 )
+from memoria.repository import Repository
 
 
 def _record(**overrides):
@@ -67,19 +70,12 @@ def test_records_round_trip_through_disk(tmp_path):
     output_root = tmp_path / NORMALIZED_RELATIVE_PATH
     write_normalized_records([original], output_root)
 
-    (loaded,) = read_normalized_records(output_root)
+    (loaded,) = read_all(Repository(root=tmp_path))
 
-    for field in (
-        "id",
-        "source_type",
-        "recorded_date",
-        "event_date",
-        "date_confidence",
-        "original_file",
-        "original_locator",
-        "paragraphs",
-    ):
-        assert getattr(loaded, field) == getattr(original, field), field
+    # Every field, not a listed subset: the reader recovers the whole record
+    # now, so anything it dropped would be a regression rather than a known
+    # limit of the placeholder this replaced.
+    assert loaded == original
 
 
 def test_contemporaneous_round_trips_as_a_bool_not_a_string(tmp_path):
@@ -91,7 +87,7 @@ def test_contemporaneous_round_trips_as_a_bool_not_a_string(tmp_path):
         output_root,
     )
 
-    first, second = read_normalized_records(output_root)
+    first, second = read_all(Repository(root=tmp_path))
 
     assert first.contemporaneous is True
     assert second.contemporaneous is False
@@ -112,4 +108,5 @@ def test_writing_removes_records_a_later_run_no_longer_produces(tmp_path):
 
 
 def test_reading_a_directory_that_does_not_exist_is_empty_not_an_error(tmp_path):
-    assert read_normalized_records(tmp_path / "nothing-here") == []
+    """An un-normalized checkout is an empty corpus, not a failure."""
+    assert read_all(Repository(root=tmp_path / "nothing-here")) == []

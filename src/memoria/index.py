@@ -14,12 +14,8 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
-
-from memoria.records import (
-    NORMALIZED_RELATIVE_PATH,
-    NormalizedRecord,
-)
+from memoria.records import NormalizedRecord, read_all
+from memoria.repository import Repository
 
 INDEX_RELATIVE_PATH = ".memoria/index.db"
 
@@ -113,7 +109,7 @@ def search(
     return [SearchResult(src_id=r[0], anchor=r[1], source_type=r[2]) for r in rows]
 
 
-def rebuild(repo_root: Path) -> list[NormalizedRecord]:
+def rebuild(repository: Repository) -> list[NormalizedRecord]:
     """Delete and regenerate all derived state from evidence, losing nothing.
 
     §42's contract: derived state carries no authority and can always be
@@ -133,52 +129,6 @@ def rebuild(repo_root: Path) -> list[NormalizedRecord]:
 
     Returns the records it indexed, which is an empty list when none exist.
     """
-    repo_root = Path(repo_root)
-
-    records = read_normalized_records(repo_root / NORMALIZED_RELATIVE_PATH)
-    build_index(repo_root / INDEX_RELATIVE_PATH, records)
-    return records
-
-
-def read_normalized_records(normalized_root: Path) -> list[NormalizedRecord]:
-    """Load the records already on disk.
-
-    A placeholder for the read direction proper, which #11 owns
-    (``memoria.records``, per ADR-0004). It exists so that ``rebuild`` can
-    honour §42 - throw the index away and regenerate it - rather than being
-    left unable to do anything at all. It reads only what the index needs:
-    the ID, the source type and the paragraphs.
-    """
-    normalized_root = Path(normalized_root)
-    if not normalized_root.is_dir():
-        return []
-
-    records = []
-    for path in sorted(normalized_root.glob("SRC-*.md")):
-        text = path.read_text(encoding="utf-8")
-        if not text.startswith("---\n"):
-            continue
-        end = text.find("\n---\n", 3)
-        if end == -1:
-            continue
-        frontmatter = yaml.safe_load(text[4:end]) or {}
-        body = text[end + 5 :]
-        paragraphs = [
-            segment.split("</a>", 1)[1].strip()
-            for segment in body.split('<a id="')[1:]
-            if "</a>" in segment
-        ]
-        records.append(
-            NormalizedRecord(
-                id=frontmatter.get("id", path.stem),
-                source_type=frontmatter.get("source_type", ""),
-                recorded_date=frontmatter.get("recorded_date", ""),
-                event_date=frontmatter.get("event_date", ""),
-                date_confidence=frontmatter.get("date_confidence", ""),
-                contemporaneous=bool(frontmatter.get("contemporaneous", False)),
-                original_file=frontmatter.get("original_file", ""),
-                original_locator=frontmatter.get("original_locator", ""),
-                paragraphs=paragraphs,
-            )
-        )
+    records = read_all(repository)
+    build_index(repository.root / INDEX_RELATIVE_PATH, records)
     return records

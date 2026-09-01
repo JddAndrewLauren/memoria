@@ -1,4 +1,5 @@
 from memoria.index import INDEX_RELATIVE_PATH, build_index, rebuild, search
+from memoria.repository import Repository
 from memoria.records import NormalizedRecord
 
 
@@ -101,13 +102,13 @@ def test_rebuild_regenerates_an_index_deleted_from_disk(tmp_path):
     ]
     write_normalized_records(records, tmp_path / NORMALIZED_RELATIVE_PATH)
 
-    rebuild(tmp_path)
+    rebuild(Repository(root=tmp_path))
     db_path = tmp_path / INDEX_RELATIVE_PATH
     before = [(r.src_id, r.anchor) for r in search(db_path, "heron")]
     assert before
 
     db_path.unlink()
-    rebuild(tmp_path)
+    rebuild(Repository(root=tmp_path))
 
     assert [(r.src_id, r.anchor) for r in search(db_path, "heron")] == before
 
@@ -115,4 +116,4 @@ def test_rebuild_regenerates_an_index_deleted_from_disk(tmp_path):
 def test_rebuild_reports_no_records_when_none_exist(tmp_path):
     """With no corpus chosen there is nothing to index, and that is not an
     error - it is the honest state."""
-    assert rebuild(tmp_path) == []
+    assert rebuild(Repository(root=tmp_path)) == []

@@ -222,7 +222,8 @@ failure is recognised as evidence rather than as a surprise.
 Build detail rather than open decisions, from `poc-plan.md` §7:
 
 - the normalized record schema, and how editorial apparatus is represented;
-- which §25 tools ship, and their exact signatures;
+- which §25 tools ship, and their exact signatures — `read(ref)` forced
+  2026-09-01 (issue #11, [`tool-surface.md`](tool-surface.md)); the rest open;
 - the Curator's scope and trigger policy;
 - **the subject and length of the authorship-track piece** — now constrained by §4.1
   above, and forced at part 16's M4;

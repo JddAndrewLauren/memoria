@@ -2,8 +2,12 @@
 
 The on-disk record format, owned in one place
 (``docs/adr/0004-the-read-side-is-functions-over-a-repository-value.md``).
-This module carries the **write** direction — the dataclass, the stable
-anchor contract, and the Markdown serializer. The read direction is #11's.
+This module carries **both directions** — the dataclass, the stable anchor
+contract, the Markdown serializer, and the parser that is its exact inverse —
+together with the composed read that ``read(ref)`` is (#11). Serializing and
+parsing live in one module because they are one contract: a change to either
+that the other does not match is a corruption, and
+``record_to_markdown(parse_record(text)) == text`` is the test that says so.
 
 Nothing here is corpus-specific, which is why it survived the retirement of
 the Thoreau proof-of-concept corpus (``docs/open-problems.md`` §2.4). The
@@ -16,10 +20,15 @@ contract a future one must satisfy, specified in
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from pathlib import Path
 
 import yaml
+
+from memoria import references
+from memoria.repository import Repository
 
 # Where normalized records live inside the book repository. Here rather than
 # in validate.py so that the module owning the record format owns the path to
@@ -56,8 +65,11 @@ class NormalizedRecord:
         in prose, ``record.anchor_id(n)`` as the ``#...`` fragment. Callers
         cite through this rather than re-deriving the string, so the form
         can only ever change in one place.
+
+        That one place is ``references.anchor``, which the parser reads
+        through as well, so the write and read directions cannot drift.
         """
-        return f"{self.id.lower()}-p{paragraph_number}"
+        return references.anchor(self.id, paragraph_number)
 
 
 def record_to_markdown(record: NormalizedRecord) -> str:
@@ -122,3 +134,296 @@ def write_normalized_records(
             stale.unlink()
 
     return written
+
+
+# --- the read direction (issue #11) ---------------------------------------
+
+# The serializer writes an anchor, a blank line, the paragraph, and a blank
+# line before the next anchor. The parser strips exactly those separators and
+# nothing else: evidence text is sacred, and a blanket .strip() would eat a
+# paragraph's own leading indentation and trailing structure (the whitespace
+# policy in docs/normalized-record-schema.md).
+_ANCHOR_TAG = re.compile(r'<a id="(?P<anchor>[^"]+)"></a>')
+
+_REQUIRED_FIELDS = (
+    "id",
+    "source_type",
+    "recorded_date",
+    "event_date",
+    "date_confidence",
+    "contemporaneous",
+    "original_file",
+    "original_locator",
+)
+_OPTIONAL_FIELDS = ("recipient", "dateline", "salutation", "work", "chapter")
+
+
+class ReadError(Exception):
+    """A reference could not be served, and why."""
+
+
+def parse_record(text: str, *, source: str = "<string>") -> NormalizedRecord:
+    """Parse one record's Markdown back into a ``NormalizedRecord``.
+
+    The exact inverse of ``record_to_markdown``: for any record,
+    ``record_to_markdown(parse_record(record_to_markdown(r))) ==
+    record_to_markdown(r)``, paragraph bytes included.
+
+    ``source`` names the file in error messages and is otherwise unused.
+    """
+    if not text.startswith("---\n"):
+        raise ReadError(f"{source}: not a normalized record - no frontmatter")
+    end = text.find("\n---\n", 3)
+    if end == -1:
+        raise ReadError(f"{source}: frontmatter is not terminated")
+
+    try:
+        frontmatter = yaml.safe_load(text[4:end])
+    except yaml.YAMLError as exc:
+        raise ReadError(f"{source}: frontmatter is not valid YAML: {exc}") from exc
+    if not isinstance(frontmatter, dict):
+        raise ReadError(f"{source}: frontmatter is not a mapping")
+
+    fields = {}
+    for name in _REQUIRED_FIELDS:
+        if name not in frontmatter:
+            raise ReadError(f"{source}: frontmatter is missing {name!r}")
+        fields[name] = frontmatter[name]
+    for name in _OPTIONAL_FIELDS:
+        if name in frontmatter:
+            fields[name] = frontmatter[name]
+
+    unexpected = set(frontmatter) - set(_REQUIRED_FIELDS) - set(_OPTIONAL_FIELDS)
+    if unexpected:
+        # Explicit rather than NormalizedRecord(**frontmatter), which would
+        # raise a bare TypeError naming neither the file nor the schema.
+        raise ReadError(
+            f"{source}: frontmatter carries fields the schema does not define: "
+            + ", ".join(sorted(unexpected))
+        )
+
+    body = text[end + len("\n---\n") :]
+    record = NormalizedRecord(
+        contemporaneous=_as_bool(fields.pop("contemporaneous"), source),
+        paragraphs=_parse_paragraphs(body, source),
+        **{name: _as_text(value) for name, value in fields.items()},
+    )
+    _check_anchors(body, record, source)
+    return record
+
+
+def _as_text(value: object) -> str | None:
+    """Frontmatter scalars as the schema declares them: strings.
+
+    A schema-legal ``event_date: 1845-10-22`` is a ``datetime.date`` by the
+    time yaml is done with it, and would otherwise reach a field declared
+    ``str``. Dates are rendered ISO-8601 rather than by ``str()`` so the
+    round trip is stable.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _as_bool(value: object, source: str) -> bool:
+    """``contemporaneous`` as a real bool.
+
+    Load-bearing rather than pedantic: it is how the temporal discipline of
+    part 05 §6 reaches retrieval (#12), and the string ``"false"`` is true.
+    """
+    if isinstance(value, bool):
+        return value
+    raise ReadError(
+        f"{source}: 'contemporaneous' must be a YAML boolean, got {value!r}"
+    )
+
+
+def _parse_paragraphs(body: str, source: str) -> list[str]:
+    """Split an anchored body back into its paragraphs, byte for byte."""
+    anchors = list(_ANCHOR_TAG.finditer(body))
+    if not anchors:
+        # A record with no paragraphs serializes to an empty body. Not an
+        # error: the schema allows it, and an empty record is still a record.
+        if body.strip():
+            raise ReadError(f"{source}: body has text but no paragraph anchors")
+        return []
+
+    paragraphs = []
+    for position, match in enumerate(anchors):
+        start = match.end()
+        is_last = position + 1 == len(anchors)
+        stop = len(body) if is_last else anchors[position + 1].start()
+        segment = body[start:stop]
+        # Exactly the separators record_to_markdown inserted, and no more.
+        if segment.startswith("\n\n"):
+            segment = segment[2:]
+        if is_last:
+            if segment.endswith("\n"):
+                segment = segment[:-1]
+        elif segment.endswith("\n\n"):
+            segment = segment[:-2]
+        paragraphs.append(segment)
+    return paragraphs
+
+
+def _check_anchors(body: str, record: NormalizedRecord, source: str) -> None:
+    """Every anchor must be the one the ID scheme derives.
+
+    Anchors are positional and derivable, so the parser discards them rather
+    than keeping a second copy. Checking first is what stops a hand-edited
+    file asserting an anchor its own ID contradicts.
+
+    Scanned over the body alone, so an anchor-shaped string that happens to
+    sit in a frontmatter value cannot be mistaken for one.
+    """
+    found = [match.group("anchor") for match in _ANCHOR_TAG.finditer(body)]
+    expected = [record.anchor_id(n) for n in range(1, len(record.paragraphs) + 1)]
+    if found != expected:
+        raise ReadError(
+            f"{source}: paragraph anchors do not match the record's ID - "
+            f"expected {expected}, found {found}"
+        )
+
+
+def record_path(repository: Repository, record_id: str) -> Path:
+    """Where a record with this ID would live."""
+    return repository.root / NORMALIZED_RELATIVE_PATH / f"{record_id}.md"
+
+
+def load(repository: Repository, record_id: str) -> NormalizedRecord:
+    """Read one record off disk.
+
+    A missing directory and a missing file are different failures and get
+    different messages: the first means nothing has been normalized, the
+    second means this record is not among what was. Distinguishing them is
+    what makes an un-normalized checkout an honest empty state rather than an
+    error about a file (ADR-0004).
+    """
+    normalized_root = repository.root / NORMALIZED_RELATIVE_PATH
+    if not normalized_root.is_dir():
+        raise ReadError(
+            f"no normalized records in this repository ({normalized_root} does "
+            "not exist), and no normalizer is wired in - no evidence corpus is "
+            "currently chosen (see docs/open-problems.md 2.4)"
+        )
+    path = record_path(repository, record_id)
+    if not path.is_file():
+        raise ReadError(f"no such record: {record_id}")
+    return parse_record(path.read_text(encoding="utf-8"), source=record_id)
+
+
+def read_all(repository: Repository) -> list[NormalizedRecord]:
+    """Every record on disk, in ID order.
+
+    What ``rebuild`` indexes. Returns an empty list when nothing is
+    normalized, for the same reason ``load`` distinguishes its two failures:
+    an empty corpus is a value, not an error.
+    """
+    normalized_root = repository.root / NORMALIZED_RELATIVE_PATH
+    if not normalized_root.is_dir():
+        return []
+    return [
+        parse_record(path.read_text(encoding="utf-8"), source=path.name)
+        for path in sorted(normalized_root.glob("SRC-*.md"))
+    ]
+
+
+@dataclass(frozen=True)
+class Read:
+    """What one reference resolved to.
+
+    ``text`` is the payload and nothing else - no header, no citation line, no
+    envelope. That is what lets a test assert byte-level agreement with the
+    record, and what keeps the superset-of-grep constraint checkable rather
+    than merely asserted. Adapters shape; they do not fold anything into this
+    field.
+    """
+
+    ref: str
+    citation: str
+    text: str
+    record: NormalizedRecord | None = None
+    paragraph: int | None = None
+
+
+def read(repository: Repository, ref: str) -> Read:
+    """Serve any stable reference. The single read tool's core (part 11 §25).
+
+    Dispatch is read off the reference, because the ID scheme already names
+    the type. What comes back is constrained by ``docs/poc-plan.md`` §7, and
+    the constraint may not be weakened: **retrieval is a superset of grep**.
+    An evidence read returns verbatim source text, never a summary in its
+    place, and the full-source read - a bare ``SRC-`` ID, or a repository
+    path - returns the file exactly as it is on disk, which is what keeps
+    reading through the tool from ever being worse than ``cat``.
+
+    Three things this deliberately does not do, so that they are not later
+    mistaken for omissions: it does not decorate with the curated overlay
+    (#20, which owes a ``raw`` parameter when it does, since undecorated is
+    currently what every read is), it does not ledger (#13), and it resolves
+    no reference kind but ``SRC-`` and repository paths - the rest exist as a
+    named error, not as silence.
+    """
+    try:
+        reference = references.parse(ref)
+    except references.BadReference as exc:
+        # One error type crosses this boundary. A malformed reference is a
+        # read failure like any other, and an adapter that had to catch two
+        # exception types would eventually catch one of them.
+        raise ReadError(str(exc)) from exc
+    citation = references.format_citation(reference)
+
+    if isinstance(reference, references.UnknownReference):
+        raise ReadError(_unknown_kind_message(reference))
+
+    if isinstance(reference, references.PathReference):
+        path = repository.root / reference.path
+        if not path.is_file():
+            raise ReadError(f"no such file in this repository: {reference.path}")
+        return Read(
+            ref=ref, citation=citation, text=path.read_text(encoding="utf-8")
+        )
+
+    record = load(repository, reference.record_id)
+    if reference.paragraph is None:
+        # The full-source read: the record's own bytes, frontmatter and
+        # anchors included - what `cat` would give.
+        return Read(
+            ref=ref,
+            citation=citation,
+            text=record_path(repository, reference.record_id).read_text(
+                encoding="utf-8"
+            ),
+            record=record,
+        )
+
+    if not 1 <= reference.paragraph <= len(record.paragraphs):
+        raise ReadError(
+            f"{reference.record_id} has {len(record.paragraphs)} paragraphs; "
+            f"there is no ¶{reference.paragraph}"
+        )
+    return Read(
+        ref=ref,
+        citation=citation,
+        text=record.paragraphs[reference.paragraph - 1],
+        record=record,
+        paragraph=reference.paragraph,
+    )
+
+
+def _unknown_kind_message(reference: references.UnknownReference) -> str:
+    """Name the kind. Never a silent empty result (#11)."""
+    if reference.known:
+        return (
+            f"{reference.kind}- references are not resolvable in this build "
+            "yet: read(ref) currently serves SRC- records and repository "
+            "paths (see docs/tool-surface.md)"
+        )
+    return (
+        f"unknown reference kind {reference.kind}-: read(ref) serves SRC- "
+        "records and repository paths (see docs/tool-surface.md)"
+    )
