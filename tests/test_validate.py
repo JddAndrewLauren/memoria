@@ -100,6 +100,19 @@ def test_validate_fails_when_manifest_file_is_missing(tmp_path):
     assert rel_path in errors[0]
 
 
+def test_validate_fails_when_the_manifest_itself_does_not_exist(tmp_path):
+    """Regression: an absent manifest.yaml used to read as an empty ledger
+    (right for sync's bootstrap of a brand-new evidence root) and validate
+    would report zero errors - an unconfigured corpus looked identical to a
+    corpus that matches its manifest exactly."""
+    evidence_root = _make_corpus(tmp_path, {"raw/vol-01/text.txt": "hello evidence"})
+
+    errors = validate(evidence_root)
+
+    assert len(errors) == 1
+    assert "manifest" in errors[0].lower()
+
+
 def _write_normalized_record(repo_root, record_id, extra_body=""):
     normalized_dir = repo_root / "sources" / "normalized"
     normalized_dir.mkdir(parents=True, exist_ok=True)

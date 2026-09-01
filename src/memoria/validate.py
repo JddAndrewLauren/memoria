@@ -41,6 +41,14 @@ def validate(
     repo_root = Path(repo_root) if repo_root is not None else Path(".")
 
     manifest_path = evidence_root / manifest_relative_path
+    if not manifest_path.is_file():
+        # load_manifest treats an absent file as an empty ledger, which is
+        # right for `sync`'s bootstrap (a brand-new evidence root has no
+        # manifest yet) but wrong here: `validate` checks a corpus against
+        # its manifest, and a corpus with no manifest at all is not one that
+        # "matches exactly" - it is unconfigured, and silence about that
+        # would be indistinguishable from `validate: OK`.
+        return [f"no manifest: {manifest_relative_path}"]
     entries = load_manifest(manifest_path)
 
     errors = []

@@ -126,10 +126,29 @@ def test_all_forces_every_unit_to_reconvert(tmp_path):
     repository = Repository(root=tmp_path / "repo")
     normalize(repository, evidence_root)
 
-    report = normalize(repository, evidence_root, all=True)
+    report = normalize(repository, evidence_root, force_all=True)
 
     assert sorted(report.converted) == ["SRC-000001", "SRC-000002"]
     assert report.skipped == []
+
+
+def test_reconverting_with_force_all_is_still_byte_identical(tmp_path):
+    """The real idempotence check: forcing a reconversion of unchanged input
+    must reproduce exactly the same bytes, not merely be skipped. A
+    skip-path-only byte-identity test would pass even if the converter or
+    the serializer were nondeterministic, since it would never re-run
+    either of them on unchanged input."""
+    evidence_root = tmp_path / "evidence"
+    _write_raw_file(evidence_root, "a.txt", "One.\n\nTwo.")
+    repository = Repository(root=tmp_path / "repo")
+    normalize(repository, evidence_root)
+    record_path = repository.root / NORMALIZED_RELATIVE_PATH / "SRC-000001.md"
+    before = record_path.read_bytes()
+
+    report = normalize(repository, evidence_root, force_all=True)
+
+    assert report.converted == ["SRC-000001"]
+    assert record_path.read_bytes() == before
 
 
 def test_a_unit_with_no_registered_converter_is_reported_but_not_converted(tmp_path):

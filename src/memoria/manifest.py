@@ -5,8 +5,10 @@ same idea at finer grain - is numbered the first time the manifest lists it,
 keeps that number forever, and keeps it reserved if the unit is later
 deleted. Nothing is reused. The manifest is the only place that state lives:
 there is no separate allocation file (ADR-0006 rejected one as a second
-store), so the next ID is always ``len(entries) + 1`` over a ledger that is
-dense and monotonic by construction.
+store), so the next ID is derived from the ledger itself - the highest
+existing ID plus one, not the entry count, so a ledger that is not yet
+dense (a hand-edited or partially-synced one) never has a new unit collide
+with an ID already in use.
 
 This module owns the ledger's shape and its two operations: reading it off
 disk, and reconciling it against what is actually on disk under the evidence
@@ -17,15 +19,14 @@ root's raw tree (``sync``). It does not convert anything - that is
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import yaml
 
-# Where raw units live relative to the evidence root, and where the manifest
-# itself sits within that tree. A default, like validate.py's own - the
-# layout is PoC scaffolding, not a constant of the system.
-RAW_RELATIVE_PATH = "raw"
+# Where the manifest sits within the evidence root. A default, like
+# validate.py's own - the layout is PoC scaffolding, not a constant of the
+# system.
 DEFAULT_MANIFEST_RELATIVE_PATH = "raw/manifest.yaml"
 
 
@@ -37,12 +38,19 @@ class ManifestEntry:
     the same convention ``memoria validate`` already uses for the acquisition
     manifest. ``deleted`` is set, never removed, when the raw file that used
     to back this ID is no longer on disk: the ID stays reserved.
+
+    ``extra`` carries any manifest column this module does not itself model
+    (a future per-collection split rule, a locator for an email message unit
+    - part 05 §5.2) untouched through ``load_manifest``/``save_manifest``, so
+    a ``sync`` or ``normalize`` run cannot silently drop a field another part
+    of the system put there.
     """
 
     id: str
     path: str
     sha256: str
     deleted: bool = False
+    extra: dict = field(default_factory=dict)
 
 
 def id_number(record_id: str) -> int:
@@ -67,6 +75,11 @@ def load_manifest(manifest_path: Path) -> list[ManifestEntry]:
             path=row["path"],
             sha256=row["sha256"],
             deleted=bool(row.get("deleted", False)),
+            extra={
+                key: value
+                for key, value in row.items()
+                if key not in ("id", "path", "sha256", "deleted")
+            },
         )
         for row in data.get("units", [])
     ]
@@ -81,6 +94,7 @@ def save_manifest(manifest_path: Path, entries: list[ManifestEntry]) -> None:
         row = {"id": entry.id, "path": entry.path, "sha256": entry.sha256}
         if entry.deleted:
             row["deleted"] = True
+        row.update(entry.extra)
         rows.append(row)
     manifest_path.write_text(
         yaml.safe_dump({"units": rows}, sort_keys=False), encoding="utf-8"
@@ -128,7 +142,7 @@ def sync(evidence_root: Path, manifest_relative_path: str = DEFAULT_MANIFEST_REL
         else:
             updated.append(replace(entry, deleted=True))
 
-    next_number = len(entries) + 1
+    next_number = max((id_number(e.id) for e in entries), default=0) + 1
     new_ids = []
     for file_path in on_disk:
         rel_path = file_path.relative_to(evidence_root).as_posix()

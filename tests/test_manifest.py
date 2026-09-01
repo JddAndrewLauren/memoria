@@ -118,6 +118,31 @@ def test_check_ledger_rejects_an_out_of_order_id():
     assert any("dense and monotonic" in e for e in errors)
 
 
+def test_sync_over_a_non_dense_ledger_never_reuses_a_live_id(tmp_path):
+    """Regression: a ledger with a gap (SRC-000001, SRC-000003 - e.g.
+    hand-edited, or reconstructed from a partial sync) used to compute the
+    next ID from ``len(entries) + 1``, colliding with an ID already in use
+    rather than skipping past it."""
+    evidence_root = tmp_path / "evidence"
+    _write_raw_file(evidence_root, "a.txt", "first")
+    _write_raw_file(evidence_root, "c.txt", "third")
+    manifest_path = evidence_root / "raw" / "manifest.yaml"
+    save_manifest(
+        manifest_path,
+        [
+            ManifestEntry(id="SRC-000001", path="raw/a.txt", sha256="stale"),
+            ManifestEntry(id="SRC-000003", path="raw/c.txt", sha256="stale"),
+        ],
+    )
+
+    _write_raw_file(evidence_root, "new.txt", "brand new unit")
+    entries, added = sync(evidence_root)
+
+    ids = [e.id for e in entries]
+    assert len(ids) == len(set(ids)), f"duplicate IDs in ledger: {ids}"
+    assert added == ["SRC-000004"]
+
+
 def test_load_manifest_is_empty_when_no_file_exists(tmp_path):
     assert load_manifest(tmp_path / "raw" / "manifest.yaml") == []
 

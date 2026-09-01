@@ -59,7 +59,7 @@ def main(argv=None):
         except NoEvidenceRoot as exc:
             print(f"normalize: {exc}", file=sys.stderr)
             return 1
-        report = run_normalize(repository, evidence_root, all=args.all)
+        report = run_normalize(repository, evidence_root, force_all=args.all)
         if report.added_units:
             print(f"normalize: added {len(report.added_units)} new unit(s) to the ledger")
         print(

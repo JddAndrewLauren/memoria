@@ -66,7 +66,7 @@ def convert_plain_text(raw_bytes: bytes) -> ConversionDraft:
     ones #77/#78 add.
     """
     text = raw_bytes.decode("utf-8").replace("\r\n", "\n")
-    paragraphs = [p.strip("\n") for p in _BLANK_LINE.split(text) if p.strip()]
+    paragraphs = [p.strip() for p in _BLANK_LINE.split(text) if p.strip()]
     return ConversionDraft(
         source_type="document",
         recorded_date="",
@@ -100,13 +100,13 @@ def normalize(
     repository: Repository,
     evidence_root: Path,
     *,
-    all: bool = False,
+    force_all: bool = False,
     manifest_relative_path: str = DEFAULT_MANIFEST_RELATIVE_PATH,
 ) -> NormalizeReport:
     """Run one normalization pass.
 
-    ``all=True`` forces every convertible unit to reconvert, regardless of
-    whether its hash or converter version changed.
+    ``force_all=True`` forces every convertible unit to reconvert,
+    regardless of whether its hash or converter version changed.
     """
     evidence_root = Path(evidence_root)
     manifest_path = evidence_root / manifest_relative_path
@@ -128,7 +128,7 @@ def normalize(
         converter, pinned_version = registration
 
         record_path = output_root / f"{entry.id}.md"
-        if not all and record_path.is_file():
+        if not force_all and record_path.is_file():
             existing = _try_parse(record_path)
             if (
                 existing is not None
