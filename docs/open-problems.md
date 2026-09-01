@@ -81,9 +81,12 @@ Where: `poc-plan.md` §3 and §5, part 19 §19.11.
 
 ### 2.2 Semantic embeddings
 
-FTS5 first. The 364 resolvable cross-references produce the number that decides whether
-heavier machinery is justified. **This only works if the benchmark harness is built
-early** — FTS5-first without measurement is just under-building.
+FTS5 first. The 369 resolvable cross-references produce the number that decides whether
+heavier machinery is justified. (369 is the verified count, extracted from the raw corpus
+and independently re-derived; it supersedes RECON.md §4(b)'s 364 — see
+`cross-reference-schema.md` "Deviation from RECON.md".) **This only works if the
+benchmark harness is built early** — FTS5-first without measurement is just
+under-building.
 
 Where: `poc-plan.md` §3, part 11, part 15.
 
