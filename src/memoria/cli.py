@@ -10,6 +10,7 @@ from memoria.editorial import (
     extract_editorial_apparatus,
     write_editorial_records,
 )
+from memoria.index import INDEX_RELATIVE_PATH, rebuild
 from memoria.normalize import normalize_journals, write_normalized_records
 from memoria.validate import NORMALIZED_RELATIVE_PATH, validate
 
@@ -45,6 +46,10 @@ def main(argv=None):
         "normalize",
         help="Normalize the journal volumes into per-entry sources/normalized/ records",
     )
+    subparsers.add_parser(
+        "rebuild",
+        help="Delete and regenerate all derived state (normalized records, search index) from evidence",
+    )
 
     args = parser.parse_args(argv)
 
@@ -70,6 +75,15 @@ def main(argv=None):
         print(
             f"normalize: wrote {len(editorial_written)} editorial records to "
             f"{editorial_output_root}"
+        )
+        return 0
+
+    if args.command == "rebuild":
+        root = repo_root()
+        records = rebuild(evidence_root(), root)
+        print(
+            f"rebuild: indexed {len(records)} records to "
+            f"{root / INDEX_RELATIVE_PATH}"
         )
         return 0
 

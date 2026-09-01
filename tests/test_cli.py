@@ -30,6 +30,12 @@ def test_help_lists_normalize():
     assert "normalize" in result.stdout
 
 
+def test_help_lists_rebuild():
+    result = run_cli("--help")
+    assert result.returncode == 0
+    assert "rebuild" in result.stdout
+
+
 def _make_valid_corpus(tmp_path):
     rel_path = "raw/gutenberg/57393-journal-01/pg57393.txt"
     evidence_root = tmp_path / "thoreau-evidence"
@@ -113,6 +119,35 @@ def test_normalize_writes_editorial_records_under_sources_editorial(tmp_path):
 
     assert result.returncode == 0
     written = list((tmp_path / "sources" / "editorial").glob("ED-*.md"))
-    # 880 footnotes (508 J01 + 372 J02) + 232 bracketed spans (83 + 149)
-    # + 2 introductions (Torrey, Sanborn) - see test_editorial.py.
+    # 880 footnotes (508 J01 + 372 J02) + 232 spans (asides + interpolations,
+    # 83 + 149) + 2 introductions (Torrey, Sanborn) - see test_editorial.py.
     assert len(written) == 1114
+
+
+def test_rebuild_writes_normalized_records_and_the_index(tmp_path):
+    env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=os.environ[EVIDENCE_ROOT_ENV_VAR])
+
+    result = run_cli("rebuild", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0
+    written = list((tmp_path / "sources" / "normalized").glob("SRC-*.md"))
+    assert len(written) == 558
+    assert (tmp_path / ".memoria" / "index.db").is_file()
+
+
+def test_rebuild_writes_editorial_records_and_strips_them_from_normalized(tmp_path):
+    # BLOCKING 1, PR #51 review round 1: a plain `memoria rebuild` used to
+    # overwrite sources/normalized/ with unstripped paragraphs and never
+    # index the editorial records at all, silently undoing `memoria
+    # normalize` and leaving `exclude_editorial` an effective no-op.
+    env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=os.environ[EVIDENCE_ROOT_ENV_VAR])
+
+    result = run_cli("rebuild", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0
+    editorial_written = list((tmp_path / "sources" / "editorial").glob("ED-*.md"))
+    assert len(editorial_written) == 1114
+    for path in (tmp_path / "sources" / "normalized").glob("SRC-*.md"):
+        content = path.read_text(encoding="utf-8")
+        body = content.split("---\n", 2)[2]
+        assert "[" not in body and "]" not in body, path.name

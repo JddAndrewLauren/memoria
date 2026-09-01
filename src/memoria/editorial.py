@@ -68,7 +68,7 @@ _BRACKET_RE = re.compile(r"\[[^\[\]]*\]")
 @dataclass
 class EditorialRecord:
     id: str
-    editorial_type: str  # "footnote" | "bracketed-span" | "introduction"
+    editorial_type: str  # "footnote" | "bracketed-span" | "interpolation" | "introduction"
     recorded_date: str
     retrospective: bool
     linked_record_id: str | None
@@ -78,10 +78,58 @@ class EditorialRecord:
     text: str
 
 
+_SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([,.;:!?])")
+
+
 def _clean_ws(text: str) -> str:
     """Collapse the line-wrap whitespace of raw Gutenberg text (leading
-    indentation, mid-paragraph newlines) to single spaces."""
-    return " ".join(text.split())
+    indentation, mid-paragraph newlines) to single spaces, and close up
+    the "word , next" artifact a removed span next to punctuation leaves
+    behind."""
+    text = " ".join(text.split())
+    return _SPACE_BEFORE_PUNCT_RE.sub(r"\1", text)
+
+
+# A single abbreviation-shaped token - "Dec.", "N.", "H." - as opposed to
+# a capitalized word starting a genuine sentence.
+_ABBREV_TOKEN_RE = re.compile(r"^[A-Z][a-zA-Z]{0,4}\.?$")
+
+
+def _is_standalone_editorial_aside(paragraph: str, span: str, inner: str) -> bool:
+    """Distinguish a standalone editorial aside (extracted and removed -
+    the evidence text reads on without it) from a sentence-completing
+    interpolation, an editor-supplied word or short phrase that fills a
+    gap in Thoreau's own sentence (e.g. "must surely [be] the
+    circulations of God", "Concord [N. H.], 10 miles") and so must stay
+    in the evidence text to keep it grammatical - see issue #5 review
+    round 1, BLOCKING 2.
+
+    A bracket that is the *entire* paragraph (an illustration caption, a
+    "[Two pages missing.]" note standing on its own) is never an
+    interpolation - there is no surrounding sentence for it to complete -
+    regardless of its shape. Otherwise, an aside is recognized by known
+    editorial-apparatus forms (italicized asides and cross-references,
+    "[?]", "[Illustration...]", "[See ...]"/"[Cf. ...]") or by reading as
+    a complete sentence on its own (capitalized, terminal punctuation,
+    and not merely one or two abbreviation-shaped tokens like "Dec." or
+    "N. H." that plainly complete the surrounding text instead).
+    """
+    if paragraph.strip() == span:
+        return True
+    if not inner:
+        return True
+    if inner.startswith("_"):
+        return True
+    if inner == "?":
+        return True
+    if inner.startswith("Illustration"):
+        return True
+    if inner.startswith("See ") or inner.startswith("Cf. "):
+        return True
+    words = inner.split()
+    if len(words) <= 2 and all(_ABBREV_TOKEN_RE.match(w) for w in words):
+        return False
+    return inner[-1] in ".!?" and words[0][0].isupper()
 
 
 def _parse_footnote_bodies(raw_text: str) -> dict[int, str]:
@@ -135,42 +183,61 @@ def _extract_introduction_text(
 
 def _strip_editorial_apparatus_from_record(
     record: NormalizedRecord,
-) -> tuple[list[str], dict[int, str | None], list[tuple[str | None, str]]]:
-    """Strip footnote markers and bracketed spans out of one record's
-    paragraphs, in place-equivalent fashion (the caller assigns the
-    returned list back onto ``record.paragraphs``).
+) -> tuple[
+    list[str],
+    dict[int, str | None],
+    list[tuple[str | None, str]],
+    list[tuple[str | None, str]],
+]:
+    """Strip footnote markers and standalone editorial asides out of one
+    record's paragraphs, in place-equivalent fashion (the caller assigns
+    the returned list back onto ``record.paragraphs``) - but leave a
+    sentence-completing interpolation's *text* in place, stripping only
+    its brackets, so the evidence still reads as a continuous sentence
+    (see ``_is_standalone_editorial_aside``).
 
-    A span that was a whole paragraph on its own (e.g. a standalone
-    "[Two pages missing.]" aside) leaves that paragraph empty once
-    stripped; it is then dropped and the surviving paragraphs renumber -
+    A standalone aside that was a whole paragraph on its own (e.g. a
+    "[Two pages missing.]" note) leaves that paragraph empty once
+    removed; it is then dropped and the surviving paragraphs renumber -
     the same treatment normalize.py already gives chapter-marker
     paragraphs, so anchors stay positional over what is actually evidence.
     An editorial span pulled from a dropped paragraph links to the
     nearest surviving paragraph's anchor instead (preceding, else
     following), so the citation still opens next to the evidence it
-    annotates.
+    annotates. An interpolation's paragraph never empties, since its text
+    stays behind.
 
-    Returns ``(cleaned_paragraphs, footnote_marker_anchors, bracket_spans)``:
+    Returns ``(cleaned_paragraphs, footnote_marker_anchors, aside_spans,
+    interpolation_spans)``:
       - ``footnote_marker_anchors``: {footnote number: resolved anchor id}
         for every numeric marker found.
-      - ``bracket_spans``: [(resolved anchor id, span text)] for every
-        non-numeric bracketed span found, in encounter order.
+      - ``aside_spans``: [(resolved anchor id, span text)] for every
+        standalone bracketed aside found (removed from the evidence
+        text), in encounter order.
+      - ``interpolation_spans``: [(resolved anchor id, span text)] for
+        every sentence-completing interpolation found (left in the
+        evidence text, brackets only), in encounter order.
     """
     original_paragraphs = record.paragraphs
     footnote_hits: list[tuple[int, int]] = []  # (original_index, number)
-    bracket_hits: list[tuple[int, str]] = []  # (original_index, text)
+    aside_hits: list[tuple[int, str]] = []  # (original_index, text)
+    interpolation_hits: list[tuple[int, str]] = []  # (original_index, text)
     cleaned: list[str] = []
     survives_at: dict[int, int] = {}  # original_index -> final anchor number
 
     for original_index, paragraph in enumerate(original_paragraphs):
 
         def _replace(match: re.Match, original_index: int = original_index) -> str:
-            inner = match.group(0)[1:-1]
+            span = match.group(0)
+            inner = span[1:-1]
             if inner.isdigit():
                 footnote_hits.append((original_index, int(inner)))
-            else:
-                bracket_hits.append((original_index, inner))
-            return ""
+                return ""
+            if _is_standalone_editorial_aside(paragraph, span, inner):
+                aside_hits.append((original_index, inner))
+                return ""
+            interpolation_hits.append((original_index, inner))
+            return inner
 
         stripped = _clean_ws(_BRACKET_RE.sub(_replace, paragraph))
         if stripped:
@@ -190,11 +257,15 @@ def _strip_editorial_apparatus_from_record(
         number: _resolve_anchor(original_index)
         for original_index, number in footnote_hits
     }
-    bracket_spans = [
+    aside_spans = [
         (_resolve_anchor(original_index), text)
-        for original_index, text in bracket_hits
+        for original_index, text in aside_hits
     ]
-    return cleaned, footnote_anchors, bracket_spans
+    interpolation_spans = [
+        (_resolve_anchor(original_index), text)
+        for original_index, text in interpolation_hits
+    ]
+    return cleaned, footnote_anchors, aside_spans, interpolation_spans
 
 
 def extract_editorial_apparatus(
@@ -204,15 +275,18 @@ def extract_editorial_apparatus(
     ``normalize_journals``) plus the volume-level introductions.
 
     Mutates each record's ``paragraphs`` in place, stripping every
-    footnote marker and bracketed editorial span so the evidence text
-    reads continuously without them, and returns the ``EditorialRecord``
-    list - one per footnote, one per non-numeric bracketed span found in
-    entry text, and one per introduction - each linked back to the
-    evidence record and paragraph anchor it annotates (or, for a footnote
-    whose marker fell in text this slice does not cover - Torrey's
-    Introduction, or J02's undated opening fragments discarded by #3 -
-    left unlinked rather than dropped, per "nothing in this slice deletes
-    anything").
+    footnote marker and standalone bracketed aside so the evidence text
+    reads continuously without them; a sentence-completing interpolation
+    (e.g. "must surely [be] the circulations of God") keeps its text in
+    the evidence, brackets only removed, so the sentence itself is never
+    mangled (see ``_is_standalone_editorial_aside``). Returns the
+    ``EditorialRecord`` list - one per footnote, one per standalone
+    bracketed aside, one per interpolation, and one per introduction -
+    each linked back to the evidence record and paragraph anchor it
+    annotates (or, for a footnote whose marker fell in text this slice
+    does not cover - Torrey's Introduction, or J02's undated opening
+    fragments discarded by #3 - left unlinked rather than dropped, per
+    "nothing in this slice deletes anything").
     """
     evidence_root = Path(evidence_root)
     editorial: list[EditorialRecord] = []
@@ -257,17 +331,20 @@ def extract_editorial_apparatus(
         footnote_bodies = _parse_footnote_bodies(raw_text)
 
         marker_links: dict[int, tuple[str, str | None]] = {}
-        pending_spans: list[tuple[NormalizedRecord, str | None, str]] = []
+        pending_asides: list[tuple[NormalizedRecord, str | None, str]] = []
+        pending_interpolations: list[tuple[NormalizedRecord, str | None, str]] = []
 
         for record in volume_records:
-            cleaned, footnote_anchors, bracket_spans = (
+            cleaned, footnote_anchors, aside_spans, interpolation_spans = (
                 _strip_editorial_apparatus_from_record(record)
             )
             record.paragraphs = cleaned
             for number, anchor in footnote_anchors.items():
                 marker_links[number] = (record.id, anchor)
-            for anchor, text in bracket_spans:
-                pending_spans.append((record, anchor, text))
+            for anchor, text in aside_spans:
+                pending_asides.append((record, anchor, text))
+            for anchor, text in interpolation_spans:
+                pending_interpolations.append((record, anchor, text))
 
         for number in sorted(footnote_bodies):
             linked_record_id, linked_anchor = marker_links.get(number, (None, None))
@@ -285,7 +362,7 @@ def extract_editorial_apparatus(
                 )
             )
 
-        for record, anchor, text in pending_spans:
+        for record, anchor, text in pending_asides:
             locator = f"{volume['volume_label']}, {record.id}"
             if anchor:
                 locator += f" {anchor}"
@@ -293,6 +370,24 @@ def extract_editorial_apparatus(
                 EditorialRecord(
                     id=next_id(),
                     editorial_type="bracketed-span",
+                    recorded_date=_EDITION_DATE,
+                    retrospective=True,
+                    linked_record_id=record.id,
+                    linked_anchor=anchor,
+                    original_file=volume["raw_path"],
+                    original_locator=locator,
+                    text=_clean_ws(text),
+                )
+            )
+
+        for record, anchor, text in pending_interpolations:
+            locator = f"{volume['volume_label']}, {record.id}"
+            if anchor:
+                locator += f" {anchor}"
+            editorial.append(
+                EditorialRecord(
+                    id=next_id(),
+                    editorial_type="interpolation",
                     recorded_date=_EDITION_DATE,
                     retrospective=True,
                     linked_record_id=record.id,

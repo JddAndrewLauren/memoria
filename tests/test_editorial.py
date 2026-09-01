@@ -329,14 +329,17 @@ class TestAgainstTheRealEvidenceCorpus:
         assert j02_count == 512
         assert j01_count + j02_count == 1105
 
-    def test_footnote_and_bracketed_span_editorial_records_extracted(self, extracted):
+    def test_footnote_and_span_editorial_records_extracted(self, extracted):
         _, editorial = extracted
         footnotes = [e for e in editorial if e.editorial_type == "footnote"]
-        spans = [e for e in editorial if e.editorial_type == "bracketed-span"]
+        asides = [e for e in editorial if e.editorial_type == "bracketed-span"]
+        interpolations = [e for e in editorial if e.editorial_type == "interpolation"]
         introductions = [e for e in editorial if e.editorial_type == "introduction"]
 
         assert len(footnotes) == 880  # 508 (J01) + 372 (J02) footnote bodies
-        assert len(spans) == 232  # 83 (J01) + 149 (J02) in-entry bracket spans
+        assert len(asides) == 86  # 25 (J01) + 61 (J02) standalone asides
+        assert len(interpolations) == 146  # 58 (J01) + 88 (J02) interpolations
+        assert len(asides) + len(interpolations) == 232  # in-entry bracket spans
         assert len(introductions) == 2
 
     def test_most_footnote_markers_link_back_to_an_evidence_paragraph(self, extracted):
@@ -350,9 +353,13 @@ class TestAgainstTheRealEvidenceCorpus:
         linked = [e for e in footnotes if e.linked_record_id is not None]
         assert len(linked) == 851
 
-    def test_every_bracketed_span_links_to_a_record_and_anchor(self, extracted):
+    def test_every_span_links_to_a_record_and_anchor(self, extracted):
         _, editorial = extracted
-        spans = [e for e in editorial if e.editorial_type == "bracketed-span"]
+        spans = [
+            e
+            for e in editorial
+            if e.editorial_type in ("bracketed-span", "interpolation")
+        ]
         for span in spans:
             assert span.linked_record_id is not None
             assert span.linked_anchor is not None
@@ -377,6 +384,36 @@ class TestAgainstTheRealEvidenceCorpus:
                     record.id,
                     paragraph,
                 )
+
+    def test_no_evidence_paragraph_has_a_space_before_punctuation(self, extracted):
+        # Regression test for PR #51 review round 1, BLOCKING 2's "41
+        # space-before-punctuation artifacts" - the leftover of excising a
+        # bracket next to a comma or period without closing the gap.
+        records, _ = extracted
+        space_before_punct = re.compile(r"\s[,.;:!?]")
+        for record in records:
+            for paragraph in record.paragraphs:
+                assert not space_before_punct.search(paragraph), (
+                    record.id,
+                    paragraph,
+                )
+
+    def test_sentence_completing_interpolations_are_kept_in_the_evidence_text(
+        self, extracted
+    ):
+        # Regression test for PR #51 review round 1, BLOCKING 2: these
+        # four editor-supplied words/phrases complete Thoreau's own
+        # sentence and must survive in the evidence text - only their
+        # brackets are stripped - rather than being excised, which
+        # mangled the sentence around them.
+        records, _ = extracted
+        full_text = "\n".join(p for r in records for p in r.paragraphs)
+        assert "must surely be the circulations of God" in full_text
+        assert "Walked to Concord N. H., 10 miles." in full_text
+        assert "as if out of courtesy to the green sea" in full_text
+        assert "Had Robin Hood no Sherwood to resort to, it would be difficult" in (
+            full_text
+        )
 
     def test_editorial_records_are_marked_retrospective_with_the_edition_date(
         self, extracted
