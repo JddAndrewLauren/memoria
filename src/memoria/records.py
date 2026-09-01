@@ -370,8 +370,8 @@ def load(repository: Repository, record_id: str) -> NormalizedRecord:
     if not normalized_root.is_dir():
         raise ReadError(
             f"no normalized records in this repository ({normalized_root} does "
-            "not exist), and no normalizer is wired in - no evidence corpus is "
-            "currently chosen (see docs/open-problems.md 2.4)"
+            "not exist) - run `memoria normalize` to produce them, or choose an "
+            "evidence corpus (see docs/open-problems.md 2.4)"
         )
     path = record_path(repository, record_id)
     if not path.is_file():

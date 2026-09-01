@@ -11,9 +11,11 @@ and issue #1 for what it cost.
 
 Practically, this means:
 
-- Nothing produces normalized records today. The ingestion layer written for that
-  corpus — the normalizer, editorial segregation, year resolution,
-  cross-reference extraction and the benchmark answer key — was removed with it.
+- `memoria normalize` produces normalized records from any raw unit whose suffix
+  has a registered converter — plain text today, with docx and PDF owed by #77
+  and #78. What was removed with that corpus is the rest of its ingestion layer:
+  editorial segregation, year resolution, cross-reference extraction and the
+  benchmark answer key.
 - `docs/normalized-record-schema.md` survives as the **contract** a future
   normalizer must satisfy. It is what `memoria.index` and `memoria validate`
   already read, and it is what to build against.
@@ -128,6 +130,7 @@ compile error in `ui/`, not a runtime surprise nobody sees.
 ```
 .venv/bin/memoria --help
 .venv/bin/memoria validate
+.venv/bin/memoria normalize
 .venv/bin/memoria rebuild
 ```
 
@@ -142,9 +145,11 @@ records under `sources/normalized/` and the SQLite FTS5 full-text search index a
 `.memoria/index.db` (both gitignored) — from evidence, losing nothing (§42:
 derived state carries no authority and can always be thrown away).
 
-**`rebuild` has no normalizer to call.** With the corpus retired it regenerates
-the index from whatever records are already on disk and reports that no producer
-is wired in. Restoring it is part of choosing a corpus, not a gap to patch.
+**`rebuild` does not normalize.** It regenerates the index from whatever records
+are already on disk; producing those records is `memoria normalize`'s job, and
+the two stay separate so a reindex never rewrites evidence-derived records
+(ADR-0006). On an empty corpus `rebuild` indexes nothing and says so — choosing a
+corpus is what fills it, not a gap to patch.
 
 Use `memoria.index.search(repository, query, filters)` to query the index —
 it takes the frozen `Repository` value, like every other core read (ADR-0004).

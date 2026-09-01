@@ -82,8 +82,8 @@ def main(argv=None):
         )
         if not records:
             print(
-                "rebuild: no normalized records found, and no normalizer is "
-                "wired in - no evidence corpus is currently chosen "
+                "rebuild: no normalized records found - run `memoria "
+                "normalize` to produce them, or choose an evidence corpus "
                 "(see docs/open-problems.md 2.4)"
             )
         return 0

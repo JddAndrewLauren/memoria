@@ -144,4 +144,4 @@ def test_rebuild_needs_no_corpus_at_all(tmp_path):
     result = run_cli("rebuild", env=env, cwd=tmp_path)
 
     assert result.returncode == 0, result.stderr
-    assert "no normalizer is wired in" in result.stdout
+    assert "run `memoria normalize` to produce them" in result.stdout

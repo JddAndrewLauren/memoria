@@ -238,8 +238,10 @@ it against a synthetic multi-thousand-paragraph index.
 
 Every `read(ref)` and `search_text(query, filters)` call this server
 **serves** appends one JSON line to `events.jsonl`, in `memoria.ledger` —
-core, not the adapter, since a future caller (#64's web app) ledgers through
-the same function rather than opening its own file. Each line carries the
+core, not the adapter, so that any future caller ledgers through the same
+function rather than opening its own file. (#64's web app, which landed
+alongside this, deliberately appends nothing — author reads are out of scope,
+below.) Each line carries the
 reference or query, the filters, the records served (by `SRC-` ID or
 paragraph anchor — the same identifier `read(ref)` accepts verbatim), a
 timestamp, and the session it belongs to. The file is opened in append mode
