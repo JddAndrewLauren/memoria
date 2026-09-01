@@ -73,7 +73,11 @@ LETTERS_VOLUME = {
 
 # Letters open with a line-initial "TO <recipient>." heading (RECON.md §5) -
 # re-verified directly against the raw corpus: exactly 130 such headings,
-# 43 distinct verbatim strings, matching RECON's own counts exactly.
+# 43 distinct verbatim strings, matching RECON's own counts exactly, with
+# zero false positives anywhere in this file (review round 1 on PR #52).
+# Deliberately loose (any text after "TO "): safe for this one volume, but
+# would need tightening (a real correspondent-name shape) before it could
+# be trusted against a second letters volume with different formatting.
 _LETTER_HEADING_RE = re.compile(r"^TO .+")
 
 # Familiar Letters' back matter (RECON.md §5): the General Index that
@@ -307,18 +311,44 @@ def _is_indented_paragraph(paragraph: str) -> bool:
     )
 
 
+# A whole-paragraph editorial annotation - Sanborn's own bracketed or
+# parenthetical asides ("[The first of many letters.]", "(Written as from
+# one Indian to another.)") rather than Thoreau's dateline or salutation.
+# Neither dateline nor salutation extraction may treat one of these as the
+# letter's own opening content (review round 1 on PR #52: an unskipped
+# "[The first of many letters.]" was wrongly read as a salutation).
+_EDITORIAL_ANNOTATION_RE = re.compile(r"^[(\[].*[)\]]\.?$", re.DOTALL)
+
+
+def _is_editorial_annotation(paragraph: str) -> bool:
+    return bool(_EDITORIAL_ANNOTATION_RE.match(paragraph.strip()))
+
+
 def _extract_dateline(entry_lines: list[str]) -> str:
-    """The letter's dateline: the first indented paragraph after the
-    heading, e.g. "     CONCORD, October 27, 1837." Unlike the journals'
-    date headings, letter datelines already carry a full explicit date
-    (RECON.md §5) - still landing here verbatim, since parsing it into a
-    resolved year is the later year-resolution slice, not this one.
+    """The letter's dateline: the first substantive paragraph after the
+    heading - skipping any leading editorial annotation - if and only if
+    it is indented, e.g. "     CONCORD, October 27, 1837." Unlike the
+    journals' date headings, letter datelines already carry a full
+    explicit date (RECON.md §5) - still landing here verbatim, since
+    parsing it into a resolved year is the later year-resolution slice,
+    not this one.
+
+    Bounded to that one paragraph rather than scanning the whole letter
+    (review round 1 on PR #52's blocking defect): a letter can have no
+    dateline at all (SRC-000129, a follow-up note with no dateline before
+    "FRIEND HECKER,--"), and scanning further would find its closing
+    signature block - itself indented - and wrongly report that as the
+    dateline. A letter with no dateline gets an empty string, not an
+    invented one.
     """
     for paragraph in _raw_paragraphs(entry_lines[1:]):
+        if _is_editorial_annotation(paragraph):
+            continue
         if _is_indented_paragraph(paragraph):
             return " ".join(
                 line.strip() for line in paragraph.splitlines() if line.strip()
             )
+        return ""
     return ""
 
 
@@ -331,15 +361,16 @@ _SALUTATION_RE = re.compile(r"^(.*?,--)")
 
 
 def _extract_salutation(entry_lines: list[str]) -> str:
-    """The letter's salutation: extracted from the first unindented
-    paragraph after the dateline (the body's opening paragraph), which the
-    body itself keeps in full - this is a non-destructive read of it, not a
-    split. A second or third letter bundled under one recipient heading
-    sometimes continues without a fresh greeting; falls back to that
-    paragraph's first line rather than an empty field.
+    """The letter's salutation: extracted from the first unindented,
+    non-annotation paragraph after the dateline (the body's opening
+    paragraph), which the body itself keeps in full - this is a
+    non-destructive read of it, not a split. A second or third letter
+    bundled under one recipient heading sometimes continues without a
+    fresh greeting; falls back to that paragraph's first line rather than
+    an empty field.
     """
     for paragraph in _raw_paragraphs(entry_lines[1:]):
-        if _is_indented_paragraph(paragraph):
+        if _is_editorial_annotation(paragraph) or _is_indented_paragraph(paragraph):
             continue
         first_line = paragraph.splitlines()[0].strip()
         match = _SALUTATION_RE.match(first_line)

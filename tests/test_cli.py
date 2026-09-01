@@ -4,6 +4,7 @@ import subprocess
 import sys
 
 import pytest
+import yaml
 
 EVIDENCE_ROOT_ENV_VAR = "MEMORIA_EVIDENCE_ROOT"
 
@@ -28,6 +29,12 @@ def test_help_lists_normalize():
     result = run_cli("--help")
     assert result.returncode == 0
     assert "normalize" in result.stdout
+
+
+def test_help_lists_rebuild():
+    result = run_cli("--help")
+    assert result.returncode == 0
+    assert "rebuild" in result.stdout
 
 
 def _make_valid_corpus(tmp_path):
@@ -103,7 +110,62 @@ def test_normalize_writes_records_under_sources_normalized(tmp_path):
     assert len(written) == 688
     recipients_path = tmp_path / "sources" / "normalized" / "recipients.yaml"
     assert recipients_path.is_file()
-    import yaml
-
     table = yaml.safe_load(recipients_path.read_text())
     assert len(table) == 43
+
+
+@pytest.mark.skipif(
+    EVIDENCE_ROOT_ENV_VAR not in os.environ,
+    reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
+)
+def test_rebuild_writes_normalized_records_and_the_index(tmp_path):
+    env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=os.environ[EVIDENCE_ROOT_ENV_VAR])
+
+    result = run_cli("rebuild", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0
+    written = list((tmp_path / "sources" / "normalized").glob("SRC-*.md"))
+    # 558 journal + 130 letter records (issue #6 review round 1: rebuild()
+    # used to call normalize_journals alone, silently deleting every
+    # letter record produced by `memoria normalize`).
+    assert len(written) == 688
+    recipients_path = tmp_path / "sources" / "normalized" / "recipients.yaml"
+    assert recipients_path.is_file()
+    table = yaml.safe_load(recipients_path.read_text())
+    assert len(table) == 43
+    assert (tmp_path / ".memoria" / "index.db").is_file()
+
+
+@pytest.mark.skipif(
+    EVIDENCE_ROOT_ENV_VAR not in os.environ,
+    reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
+)
+def test_rebuild_produces_byte_identical_output_to_normalize(tmp_path):
+    # The invariant review round 1 on PR #52 asked for: a plain
+    # `memoria rebuild` must leave sources/normalized/ byte-identical to
+    # what `memoria normalize` produces - same record set, same
+    # frontmatter, same recipients table. `rebuild()` re-derives a
+    # hard-coded subset of the pipeline by construction, so every issue
+    # that adds or transforms records (year resolution, letters parsing,
+    # and whatever #5's editorial extraction adds next) can silently drop
+    # out of it again; this is the test that makes that fail loudly
+    # instead of passing on a stale record count nobody updated.
+    env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=os.environ[EVIDENCE_ROOT_ENV_VAR])
+    normalize_dir = tmp_path / "normalize-run"
+    rebuild_dir = tmp_path / "rebuild-run"
+    normalize_dir.mkdir()
+    rebuild_dir.mkdir()
+
+    normalize_result = run_cli("normalize", env=env, cwd=normalize_dir)
+    rebuild_result = run_cli("rebuild", env=env, cwd=rebuild_dir)
+
+    assert normalize_result.returncode == 0
+    assert rebuild_result.returncode == 0
+
+    normalize_records = normalize_dir / "sources" / "normalized"
+    rebuild_records = rebuild_dir / "sources" / "normalized"
+    normalize_files = {p.name: p.read_text() for p in normalize_records.glob("*")}
+    rebuild_files = {p.name: p.read_text() for p in rebuild_records.glob("*")}
+
+    assert normalize_files.keys() == rebuild_files.keys()
+    assert normalize_files == rebuild_files

@@ -3,8 +3,10 @@
 import argparse
 import os
 import sys
+from collections import Counter
 from pathlib import Path
 
+from memoria.index import INDEX_RELATIVE_PATH, rebuild
 from memoria.normalize import (
     normalize_journals,
     normalize_letters,
@@ -13,6 +15,7 @@ from memoria.normalize import (
     write_recipients_table,
 )
 from memoria.validate import NORMALIZED_RELATIVE_PATH, validate
+from memoria.year_resolution import resolve_years
 
 EVIDENCE_ROOT_ENV_VAR = "MEMORIA_EVIDENCE_ROOT"
 DEFAULT_EVIDENCE_ROOT = "../thoreau-evidence"
@@ -49,6 +52,10 @@ def main(argv=None):
             "sources/normalized/ records"
         ),
     )
+    subparsers.add_parser(
+        "rebuild",
+        help="Delete and regenerate all derived state (normalized records, search index) from evidence",
+    )
 
     args = parser.parse_args(argv)
 
@@ -63,19 +70,37 @@ def main(argv=None):
 
     if args.command == "normalize":
         journal_records = normalize_journals(evidence_root())
+        warnings = resolve_years(journal_records, evidence_root())
+        for warning in warnings:
+            print(f"normalize: {warning}")
         letter_records = normalize_letters(
             evidence_root(), start_id=len(journal_records) + 1
         )
         records = journal_records + letter_records
         output_root = repo_root() / NORMALIZED_RELATIVE_PATH
         written = write_normalized_records(records, output_root)
-        print(f"normalize: wrote {len(written)} records to {output_root}")
+        counts = Counter(record.date_confidence for record in records)
+        counts_text = ", ".join(
+            f"{level}={counts[level]}"
+            for level in ("exact", "inferred", "chapter-only", "unresolved")
+            if counts[level]
+        )
+        print(
+            f"normalize: wrote {len(written)} records to {output_root} ({counts_text})"
+        )
         table = recipients_table(letter_records)
         recipients_path = write_recipients_table(
             table, output_root / "recipients.yaml"
         )
+        print(f"normalize: wrote {len(table)} recipients to {recipients_path}")
+        return 0
+
+    if args.command == "rebuild":
+        root = repo_root()
+        records = rebuild(evidence_root(), root)
         print(
-            f"normalize: wrote {len(table)} recipients to {recipients_path}"
+            f"rebuild: indexed {len(records)} records to "
+            f"{root / INDEX_RELATIVE_PATH}"
         )
         return 0
 

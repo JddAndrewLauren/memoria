@@ -2,7 +2,9 @@
 
 Forces `docs/open-problems.md` §6's "the normalized record schema, and how
 editorial apparatus is represented" for the PoC's first source type
-(journals). Implemented by `src/memoria/normalize.py`.
+(journals). Implemented by `src/memoria/normalize.py`, with year resolution
+(the `recorded_date`/`event_date`/`date_confidence` fields below) by
+`src/memoria/year_resolution.py` (issue #4).
 
 ## What a normalized record is
 
@@ -18,8 +20,8 @@ record gets a stable `SRC-` ID (part 04 §4) and stable paragraph anchors
 id: SRC-000184
 source_type: journal
 recorded_date: Oct. 22.
-event_date: Oct. 22.
-date_confidence: unresolved
+event_date: Oct. 22., 1845
+date_confidence: inferred
 contemporaneous: true
 original_file: raw/gutenberg/57393-journal-01/pg57393.txt
 original_locator: "Journal I, entry dated Oct. 22."
@@ -30,8 +32,9 @@ original_locator: "Journal I, entry dated Oct. 22."
 |---|---|
 | `id` | Stable `SRC-NNNNNN` identifier (six digits, zero-padded — part 04 §4's `SRC-000184` form; the `SRC-0184` seen in the desktop mockup is a noted divergence, part 19 §19.11). Assigned sequentially: volume order, then entry order within the volume. Stable across re-runs over unchanged input because the assignment is a deterministic function of that input, not a hash or a counter file. |
 | `source_type` | `journal` for this slice. Other source types (letter, email, ...) are later slices. |
-| `recorded_date` / `event_date` | **This slice does not resolve years** (part 16's M0 scopes year resolution as a separate, later build step — RECON.md's chapter/weekday-checksum work). The date heading text lands here verbatim, exactly as the brief specifies: "Dates land as whatever the heading says; the year arrives in the next slice." Journals have no retrospective/contemporaneous date split within one entry, so `recorded_date` and `event_date` are identical for now. |
-| `date_confidence` | `unresolved` for every record this slice produces — a fourth value alongside the plan's `exact` / `inferred` / `chapter-only` (part 16 M0), signaling "year resolution has not run yet" rather than any of those three outcomes. The year-resolution slice is expected to overwrite this field. |
+| `recorded_date` | The date heading text, verbatim, exactly as it appears in the source — never rewritten by year resolution. |
+| `event_date` | `recorded_date` with its resolved year appended (`"Oct. 22., 1845"`), or unchanged from `recorded_date` where the heading already states its own year, or where no year could be resolved at all (`date_confidence: chapter-only` — no invented date). Journals have no retrospective/contemporaneous date split within one entry, so before year resolution `recorded_date` and `event_date` were identical; year resolution (`src/memoria/year_resolution.py`, issue #4) is what makes them diverge. |
+| `date_confidence` | `exact` only where a weekday in the heading confirmed the resolved year against a real calendar; `inferred` where the year came from an unambiguous chapter heading, an explicit year in the entry heading itself, or position within a multi-year chapter, without a weekday to confirm it; `chapter-only` where no chapter marker precedes the entry at all, so no year context exists (RECON.md §3's description of J02 Chapter I's undated opening fragments — none of the corpus's 558 records currently exercise this branch, since `normalize_journals` discards those fragments before this stage; see "Known data loss" below). A weekday that does not match any candidate year is never silently accepted as `exact`; `memoria normalize` prints it as a warning instead. |
 | `contemporaneous` | `true` for journal entries — a diary entry is contemporaneous evidence by definition (part 05 §6). |
 | `original_file` | Path to the raw source, relative to the evidence root (`MEMORIA_EVIDENCE_ROOT`) — the same convention `manifest.yaml` and `memoria validate` use, e.g. `raw/gutenberg/57393-journal-01/pg57393.txt`. |
 | `original_locator` | Human-readable pointer into the original, e.g. `"Journal I, entry dated Oct. 22."`. |
@@ -200,6 +203,16 @@ trims every letter's lines at a trailing `FOOTNOTES:` marker, not just the
 last letter's, since a footnote block is never part of the letter itself
 wherever it lands.
 
+**"Editorial narrative is left inline" is not uniformly true**, and #5
+should not assume it is (review round 1 on PR #52): `_trim_trailing_footnotes`
+cuts a letter's lines at its first `FOOTNOTES:` marker, so any connective
+narrative that happens to fall *after* a `FOOTNOTES:` block within that
+same span is silently dropped along with the footnotes, while narrative
+falling *before* one (the ordinary case — narrative between two letters
+elsewhere in the volume) is kept. This is a side effect of trimming at the
+first marker found, not a deliberate distinction between two kinds of
+narrative.
+
 ## Recipients table (issue #6)
 
 `recipients_table(records)` maps each verbatim `recipient` string to the
@@ -208,3 +221,43 @@ list in a comment" (issue #6). `memoria normalize` writes it as YAML to
 `sources/normalized/recipients.yaml` via `write_recipients_table`. It has
 43 entries against the real corpus, matching RECON.md §5's "43 distinct
 recipients" exactly.
+
+**Not person-level ground truth on its own.** The 43 rows are 43 distinct
+verbatim *strings*, over roughly 25 actual people — they include artefacts
+of the source text alongside genuine location-form variants: a stray-comma
+duplicate (`DANIEL RICKETSON, (AT NEW BEDFORD).` vs `DANIEL RICKETSON (AT
+NEW BEDFORD).`), an `(AT MILTON)` / `(IN MILTON)` preposition variant, and
+two footnote-marked Emerson headings alongside his three genuine location
+forms. This is correct as issue #6 specifies it (verbatim, unmerged — the
+alias-resolution hazard material §7 wants intact), but M2's
+promotion-miss-rate scoring will need an alias layer on top of this table
+before it is ground truth at the level of a *person*, not a heading string.
+
+## Weekday checksum: reconciled against RECON.md (issue #4)
+
+RECON.md §3 estimates "roughly 100 headings carry a weekday." Mechanically
+counting weekday-bearing headings against the raw corpus finds more:
+**152**, of which **150 confirm** against a real calendar the year
+resolution otherwise assigns from the chapter and position (giving
+`date_confidence: exact` for those 150). The remaining 2 are genuine
+editorial/transcription
+discrepancies in the source, not parsing bugs — verified by hand against
+the raw text and a real calendar:
+
+- `SRC-000332`, `raw/gutenberg/57393-journal-01/pg57393.txt:10062` —
+  `"_Sept. 5. Saturday._"`; the source text does read "Saturday", but
+  Sept. 5, 1841 (the chapter's single candidate year) was actually a
+  Sunday.
+- `SRC-000464`, `raw/gutenberg/59031-journal-02/pg59031.txt:5746` —
+  `"_May 6. Monday._"`, under the `MAY, 1851` chapter; May 6, 1851 was
+  actually a Tuesday.
+
+Both are surfaced as warnings by `resolve_years()` (printed by `memoria
+normalize`) rather than silently accepted as `exact` — RECON.md §3's own
+prediction: "where it does not [match], it flags a genuine editorial
+problem worth surfacing rather than guessing."
+
+Final counts across all 558 records: **exact=150, inferred=408,
+chapter-only=0** (`tests/test_year_resolution.py`'s
+`TestAgainstTheRealEvidenceCorpus` asserts this distribution, alongside the
+invariant that no record is `exact` without a weekday in its heading).

@@ -35,6 +35,7 @@ resolve, such as a `.claude/worktrees/issue-<n>` sub-worktree.
 .venv/bin/memoria --help
 .venv/bin/memoria validate
 .venv/bin/memoria normalize
+.venv/bin/memoria rebuild
 ```
 
 `memoria validate` verifies that every raw file in the evidence corpus matches
@@ -48,3 +49,11 @@ corpus and writes one normalized Markdown record per dated entry to
 `sources/normalized/` (gitignored — regenerate on demand; see
 `docs/normalized-record-schema.md` for the schema and the `SRC-` ID /
 paragraph-anchor conventions).
+
+`memoria rebuild` deletes and regenerates all derived state — the normalized
+records under `sources/normalized/` and the SQLite FTS5 full-text search
+index at `.memoria/index.db` (both gitignored) — from evidence, losing
+nothing (§42: derived state carries no authority and can always be thrown
+away). Use `memoria.index.search(db_path, query)` to query the index; pass
+`exclude_editorial=True` to search evidence records only, excluding editorial
+voice.

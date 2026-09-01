@@ -124,6 +124,55 @@ def test_normalize_letters_extracts_dateline_and_salutation(tmp_path):
     assert records[0].event_date == "CONCORD, October 27, 1837."
 
 
+def test_normalize_letters_with_no_dateline_gets_an_empty_dateline_not_a_signature(
+    tmp_path,
+):
+    # Regression test for review round 1 on PR #52's blocking defect 1:
+    # a letter with no dateline at all must not have its closing
+    # signature block ("Yours truly, HENRY.") picked up as `dateline`.
+    evidence_root = tmp_path / "thoreau-evidence"
+    text = _FAKE_LETTERS_TEXT.replace(
+        "     CONCORD, March 11, 1842.\r\n"
+        "\r\n"
+        "DEAR FRIEND,--I write to you now about the pond.\r\n",
+        "DEAR FRIEND,--I write to you now about the pond, with no dateline\r\n"
+        "at all this time.\r\n",
+    )
+    _write_fake_letters_volume(evidence_root, text)
+
+    records = normalize_letters(evidence_root)
+
+    assert records[2].dateline == ""
+    assert records[2].recorded_date == ""
+
+
+def test_normalize_letters_skips_a_leading_editorial_annotation_for_dateline(
+    tmp_path,
+):
+    # SRC-000049 in the real corpus: "[The first of many letters.]" (an
+    # editorial aside) precedes the real indented dateline. Neither
+    # dateline nor salutation extraction may treat the annotation itself
+    # as the letter's own content.
+    evidence_root = tmp_path / "thoreau-evidence"
+    text = _FAKE_LETTERS_TEXT.replace(
+        "TO R. W. EMERSON (AT CONCORD).\r\n"
+        "\r\n"
+        "     CONCORD, March 11, 1842.\r\n",
+        "TO R. W. EMERSON (AT CONCORD).\r\n"
+        "\r\n"
+        "[The first of many letters.]\r\n"
+        "\r\n"
+        "     CONCORD, March 11, 1842.\r\n",
+    )
+    _write_fake_letters_volume(evidence_root, text)
+
+    records = normalize_letters(evidence_root)
+
+    assert records[2].dateline == "CONCORD, March 11, 1842."
+    assert records[2].salutation == "DEAR FRIEND,--"
+    assert not records[2].salutation.startswith("[")
+
+
 def test_normalize_letters_carries_the_verbatim_body(tmp_path):
     evidence_root = tmp_path / "thoreau-evidence"
     _write_fake_letters_volume(evidence_root)
@@ -289,13 +338,56 @@ class TestAgainstTheRealEvidenceCorpus:
         }
         assert location_forms <= table.keys()
 
-    def test_every_letter_has_a_nonempty_dateline(self, records):
+    def test_every_letters_dateline_is_plausibly_shaped_or_empty(self, records):
+        # Recall/shape check (review round 1 on PR #52's blocking defect
+        # 2): a presence check cannot fail on the defect where
+        # `_extract_dateline` picked up a closing signature block instead
+        # of a real dateline - `dateline` was never empty, just wrong
+        # ("TAHATAWAN." for SRC-000002, "Yrs. in great haste, HENRY D.
+        # THOREAU." for SRC-000129). This checks the shape of what was
+        # extracted (short, does not open with signature-closing
+        # vocabulary) and, independently, exactly which letters have no
+        # dateline in the raw text at all - a regression that made
+        # `_extract_dateline` timid (returning "" for a letter that does
+        # have one) would silently grow that set without this failing.
+        signature_openers = (
+            "yours",
+            "yrs",
+            "your affectionate",
+            "your friend",
+            "believe me",
+            "truly",
+            "affectionately",
+            "ever yours",
+            "from your",
+        )
         for record in records:
-            assert record.dateline, record.id
+            if not record.dateline:
+                continue
+            assert len(record.dateline) <= 100, (record.id, record.dateline)
+            lowered = record.dateline.lower()
+            assert not lowered.startswith(signature_openers), (
+                record.id,
+                record.dateline,
+            )
+        empty_ids = {r.id for r in records if not r.dateline}
+        assert empty_ids == {"SRC-000002", "SRC-000129"}, empty_ids
 
     def test_every_letter_has_a_nonempty_salutation(self, records):
         for record in records:
             assert record.salutation, record.id
+
+    def test_no_salutation_is_an_editorial_annotation(self, records):
+        # Non-blocking finding, review round 1 on PR #52: SRC-000049 fell
+        # back to "[The first of many letters.]" (Sanborn's bracketed
+        # aside, not Thoreau's greeting) because the dateline/salutation
+        # scan did not skip editorial annotations. Fixed alongside the
+        # dateline defect since both walk the same leading paragraphs.
+        for record in records:
+            assert not record.salutation.startswith(("[", "(")), (
+                record.id,
+                record.salutation,
+            )
 
     def test_no_letter_contains_sanborns_introduction(self, records):
         # Acceptance criterion: "Sanborn's introduction is not part of any
