@@ -122,6 +122,10 @@ Other generated summaries are compressions of this layer and its evidence.
 
 They are not independent semantic authorities.
 
+A cluster's synthesized summary (ADR-0005) is one of these compressions: served only
+marked `[inferred]`, never as evidence, and superseded by the entry once the cluster is
+promoted.
+
 This prevents the project from gradually accumulating contradictory understandings across graph summaries, agents, vector stores, cached summaries, and model memories.
 
 ---
@@ -246,7 +250,11 @@ Add formal structure when repeated use demonstrates that free text and links are
 
 Do not build a graph database because relationship graphs are theoretically useful.
 
-Do not build GraphRAG because global retrieval might theoretically fail.
+~~Do not build GraphRAG because global retrieval might theoretically fail.~~ **Struck
+2026-09-01** — `../adr/0005-extraction-is-the-candidate-engine.md`. A GraphRAG-style
+extraction is now the subject system's candidate engine, and its global search ships
+with the summary half ungated. That was a choice made against this principle, with the
+cost recorded in the ADR; the principle stands for everything else in §45's list.
 
 A real failure becomes a benchmark.
 

@@ -112,6 +112,10 @@ kind of judgement that rationalizes after the fact.
 
 **Safe default:** FTS5. Anything heavier needs a written-down failure first.
 
+The extraction (ADR-0005, 2026-09-01) does not touch this: it is a candidate engine,
+not a search index, and `search_text` stays FTS5. It is, though, the first thing to
+enter without a failure, and §5 records that.
+
 Where: `poc-plan.md` §3, part 11, part 15 §43.14.
 
 ### 2.3 What recall@10 over the cross-references is evidence for — SUPERSEDED
@@ -214,6 +218,9 @@ failure is recognised as evidence rather than as a surprise.
 | Assembly is reproducible per session, not globally deterministic | part 11 §32 | Needing to reproduce an old assembly exactly and being unable to |
 | Ingest stales audit verdicts across every touched entry | part 06 §8.12 — fourth hash | Not-current counts so noisy after routine ingest that the author stops trusting the tint |
 | The supplied-context account lists reads the client may have compacted away | ADR-0001 — the account covers the whole session, not just assembly | An author acting on a supplied item the model demonstrably no longer holds |
+| The extraction and `search_global`'s summary mode ship without an observed failure | ADR-0005 — chosen against §1.11 and §45 | Clusters the author never promotes, or summaries the agent quotes in place of evidence |
+| Placement recall is unreported, like gathered-set recall | ADR-0005 — unplaced surface forms stay enumerable | A person the author knows is in the archive with placements missing where the name is plain |
+| A fresh archive shows no candidates until the author runs the extraction | ADR-0005 — one engine, author-launched | The first extraction of a real archive being unaffordably long in one session |
 
 ---
 

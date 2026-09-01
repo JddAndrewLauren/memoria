@@ -355,7 +355,8 @@ interface.
   #11) and is recorded in [`tool-surface.md`](tool-surface.md), which also states
   what it deliberately does not do yet — no ledger (#13), no overlay (#20), and no
   `raw` parameter, which #20 owes when it adds decoration. `search_text` is next
-  (#12). Which of the remaining tools ship is still open.
+  (#12). Which of the remaining tools ship is still open — except `search_global`,
+  added and scheduled for M2 on 2026-09-01 (ADR-0005, issue #74).
 - Scope and trigger policy for the Curator.
 - Subject and length of the authorship-track piece — fully open again as of
   2026-09-01, since the corpus that suggested one is gone (issue #27).
@@ -423,6 +424,12 @@ Vocabulary: [`../CONTEXT.md`](../CONTEXT.md).
 - **Nothing in §5's reductions is affected.** The subject system is repository and
   Curator design; it adds no runtime and no interface requirement beyond what §3
   already scoped.
+
+**Revised 2026-09-01.** The candidate numbers above came from a capitalized-name
+pass that no longer exists: candidates now come from the **extraction**, a model pass,
+and subjects carry an **auto-promote** declaration
+(`adr/0005-extraction-is-the-candidate-engine.md`). The gathered-set recall reading
+stands.
 
 **Still not decided.** Whether hard-coded subjects can be edited or removed, and
 whether adding a subject late backfills over existing prose. §17's premature-revelation

@@ -25,8 +25,19 @@ grep_repo(pattern, paths)
 trace(ref)
 backlinks(ref)
 
+search_global(query, filters, summarize=false)
+
 list(path)
 ```
+
+**`search_global` was added 2026-09-01** (ADR-0005). It returns paragraph references
+grouped by **cluster**, each group labelled by the entries and relations that define
+it, under a §33-style scope line — *"clustered 1,842 paragraphs across 2009–2014;
+3 clusters matched"*. With `summarize=true` it also returns each cluster's synthesized
+text, marked `[inferred]` and never served as evidence. Both modes are ledgered, with
+the mode named. It is a superset of grep in the poc-plan §7 sense: every reference
+resolves through `read(ref)`, and the summary is a compression under §1.5, not an
+answer.
 
 **`read(ref)` is the single read tool.** It accepts any §4 stable reference —
 `SRC-`, `SES-` (with an optional `#T` turn), `CHG-`, `CLM-`, `RES-`, `DEC-`,
@@ -114,6 +125,10 @@ This makes source corrections, reinterpretation, contradiction analysis, and imp
 
 It also provides much of the useful graph behavior without requiring a dedicated graph database.
 
+Since 2026-09-01 the extraction's **relations** (part 06 §8.4) feed it too: `backlinks`
+on an entry can list the entries it is related to, paragraph by paragraph. Relations are
+derived index rows and nothing else — never durable, never in a working context.
+
 ---
 
 ---
@@ -174,6 +189,15 @@ If frontier-model agentic search repeatedly fails real examples, those failures 
 - other retrieval systems.
 
 Heavier machinery earns its place against observed failures.
+
+> **Revised 2026-09-01** (ADR-0005). The gate above was not walked; it was set aside.
+> The extraction, its clusters and `search_global` — including the summary half —
+> ship with M2, chosen with the cost stated: the failure-first discipline is gone for
+> GraphRAG, and the evaluation set above becomes a **regression suite** that gates
+> nothing (part 15 §43.11). What the extraction actually answers is not this
+> section's risk but part 06's gap — nothing proposed a Theme or gathered for one.
+> The rest of the list (graph databases, clustering, topic models, summary structures)
+> still enters only against an observed failure.
 
 ---
 
@@ -283,7 +307,9 @@ of the declared scope, not by the number of subjects or entries.** Ten subjects 
 four hundred promoted entries cost the same as two and twelve, because a session
 still names a handful. The only thing that would break this is automatic inclusion —
 transitive expansion from a named entry to its neighbours, or loading a whole
-subject. Neither is done; §28's loop retrieves instead.
+subject. Neither is done; §28's loop retrieves instead. The extraction's relations
+(ADR-0005) change nothing here: they are read by gathering, `backlinks()` and
+`search_global`, and a related entry is never loaded because its neighbour was.
 
 The declared scope is **durable on the section**, as prose and only as prose. It is
 never parsed into a structured field, and the resolution is never written back onto the

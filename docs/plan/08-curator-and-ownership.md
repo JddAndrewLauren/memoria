@@ -44,7 +44,8 @@ The Curator runs after events such as:
 | **New or edited manuscript prose exists** | maintainer | Mark it **not current**. The audit itself runs only when the author asks |
 | Research memo completes | extractor | Append supported findings to entry bodies as badged `[source]`/`[inferred]` statements; testimony is never machine-written (part 06 §8.2) |
 | New evidence ingested | maintainer | Index, match against every subject, refresh candidates and gathered sets; audit verdicts of entries whose gathered set changed become **not current** (part 06 §8.12) |
-| **A subject is added or its prompt changes** | maintainer | **Re-match that subject across the corpus; refresh its candidates** |
+| **A subject is added or its prompt changes** | maintainer | **Re-match that subject across the corpus; refresh its candidates** — the extraction's memo key includes the subject prompts, so this is a full re-read the author launches (part 06 §8.12) |
+| **The author launches the extraction** (added 2026-09-01, ADR-0005) | maintainer | Read every paragraph not already memoized; refresh candidates, placements, relations, clusters and proposed match terms. A model pass, so it never runs unasked |
 
 Passes are debounced and materiality-gated.
 

@@ -13,9 +13,10 @@ are the ones resolved in working sessions and take precedence where they differ.
 A named dimension along which the archive connects to the book — People, Timeline,
 Events, Themes, Arcs, and others the author adds. It is both a check the Curator
 performs on new manuscript prose and an index a writing agent reads instead of the
-corpus. Its prompt carries three things: what counts as a match, the matching hazards,
-and **the audit questions this subject asks of new prose**. Every audit question in
-the system belongs to some subject; there is no central list.
+corpus. Its prompt carries four things: what counts as a match, the matching hazards,
+**the audit questions this subject asks of new prose**, and whether it
+[[auto-promote]]s. Every audit question in the system belongs to some subject; there
+is no central list. To the [[extraction]] a subject is an entity type.
 On screen the three trees are `MANUSCRIPT` / `SUBJECTS` / `SOURCES`, and a new
 subject is added with `+ New subject`.
 _Avoid_: Axis, group, category, object type, dimension, lens
@@ -24,8 +25,9 @@ _Avoid_: Axis, group, category, object type, dimension, lens
 One instance under a subject — Bob under People, the acquisition under Events. The
 subject says what a kind of entry is; the entry's body is shared territory carrying
 the author's testimony and Memoria's badged statements, with ownership read off the
-badge (see [[audit-visible-body]]). Testimony is the author's hand alone.
-_Avoid_: Item, object, record, node
+badge (see [[audit-visible-body]]). Testimony is the author's hand alone. An entry is
+what an extracted entity becomes when promoted; before that it is a [[candidate]].
+_Avoid_: Item, object, record, node, entity
 
 **Audit-visible body**:
 The part of an entry's body that assembly loads and the audit compares prose
@@ -38,7 +40,9 @@ _Avoid_: Entry content, loaded body, canonical body, annex
 How one entry is referenced, beyond the subject default — Bob, Robert, R., my
 brother-in-law. Kept on the entry and owned by the author, they are the system's
 only alias store; there is no canonical alias map. Discipline that spans entries —
-do not merge people sharing a surname — is a subject hazard, not a map row.
+do not merge people sharing a surname — is a subject hazard, not a map row. A match
+term may name an entry or a [[relation]] rather than a word, which is how a Theme
+gathers. The [[extraction]] proposes match terms; the author owns what stays.
 _Avoid_: Alias map, aliases.yaml, aliases file, name variants
 
 **Gathered set**:
@@ -50,6 +54,45 @@ _Avoid_: Matches, index, link set, results
 Author acts overlaying a gathered set — pin keeps a source in regardless of what the
 pass finds; exclude keeps one out. Both are attributable and survive a rebuild.
 _Avoid_: Include/ignore, accept/reject, approve/deny
+
+### The extraction
+
+**Extraction**:
+The author-launched pass in which a model reads every paragraph of the archive for
+what it mentions — the entries it places, the surface forms it cannot place, the
+relations between them — and proposes candidates, clusters and match terms from what
+it found. It is the subject system's one candidate engine, and it asserts nothing.
+_Avoid_: GraphRAG, indexing run, entity pass, entity extraction
+
+**Candidate**:
+Something the extraction found under a subject that no author has promoted. Held only
+in the index, never loaded into a session, and enumerable even when the recurrence
+filter rejects it.
+_Avoid_: Proposal, suggestion, unpromoted entity, draft entry
+
+**Placement**:
+The extraction's reading that a paragraph mentions a particular entry. A placement that
+the entry's match terms license is durable on rebuild; one they do not becomes a
+proposed match term for the author, and is unplaced until accepted.
+_Avoid_: Entity link, resolution, mention, match
+
+**Relation**:
+A link the extraction reads between two placed entries within one paragraph — Bob
+pressures the author. Derived, rebuildable, never loaded into a working context; read
+by gathering, backlinks and the global search.
+_Avoid_: Edge, triple, relationship, connection
+
+**Cluster**:
+A grouping of paragraphs the extraction proposes from the entries and relations that
+recur together, offered as a candidate under Themes or Arcs. A promoted entry keeps
+the entries and relations as its match terms and forgets the cluster.
+_Avoid_: Community, community summary, topic, graph
+
+**Auto-promote**:
+A subject's declaration that its candidates above the recurrence filter become entries
+without an author act. Off for Themes and Arcs; a subject the author adds may say
+otherwise.
+_Avoid_: Auto-accept, trust, automatic promotion
 
 ### The two consumers
 

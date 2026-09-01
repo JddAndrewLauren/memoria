@@ -99,6 +99,10 @@ Does exploratory author conversation remain exploratory instead of becoming acce
 
 Can agentic retrieval identify patterns requiring evidence distributed broadly across the archive?
 
+**Since 2026-09-01 this set gates nothing** (ADR-0005): the machinery it was to
+decide on ships with M2. It is still owed, as a regression suite over the extraction
+and `search_global`, and it still needs a corpus (`../open-problems.md` §2.4).
+
 ## 43.12 Manuscript-authorization test
 
 Can Memoria propose a manuscript rewrite autonomously while refusing to apply it until explicit authorization exists?

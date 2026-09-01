@@ -6,7 +6,7 @@
 Memoria initially does **not** require:
 
 - Qdrant;
-- GraphRAG;
+- ~~GraphRAG;~~ **in, 2026-09-01** — `../adr/0005-extraction-is-the-candidate-engine.md`;
 - Neo4j;
 - Open WebUI;
 - a graph database;

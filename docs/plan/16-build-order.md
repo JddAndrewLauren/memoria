@@ -104,10 +104,16 @@ Build:
 - the five built-in subjects with their prompts — match definition, matching
   hazards, audit questions (part 06 §8.1). Hazards are stated as **classes** —
   surname collision, multi-form naming — not as instances of a particular corpus;
-- continuous candidate matching and the recurrence filter (part 06 §8.4);
-  promotion as an author act; manual entry creation;
-- **match terms** on entries — populated by ingest, owned by the author, the
-  system's only alias store (§7, part 06 §8.2);
+- ~~continuous candidate matching and the recurrence filter~~ **the extraction**
+  (2026-09-01, ADR-0005): the author-launched, per-paragraph-memoized model pass that
+  proposes candidates, placements, relations, clusters and match terms for every
+  subject; the recurrence filter runs over its output; promotion as an author act
+  unless the subject declares **auto-promote** (part 06 §8.1); manual entry creation;
+- **match terms** on entries — proposed by the extraction, owned by the author, the
+  system's only alias store (§7, part 06 §8.2); a Theme's name entries and relations
+  and it gathers by co-occurrence;
+- `search_global(query, filters, summarize)` on the tool surface (part 11 §25), both
+  modes, ledgered;
 - gathered sets, and the curated overlay: **pins and exclusions**, attributable
   and rebuild-surviving — the durable-dismissal machinery poc-plan §3 requires
   from the first Curator pass;
@@ -276,7 +282,8 @@ gate green and this fails, Memoria advanced while no book did.
 The poc-plan §5 reductions stand: no `ModelBackend`, no capacity queue, no
 auth or remote access, no web/phone surface, no Ask Memoria, and the write
 coordinator stays a stale-revision check. Embeddings enter only against an
-observed failure (§45) — there are no M2 numbers to say so.
+observed failure (§45) — there are no M2 numbers to say so. The extraction is the one
+exception, admitted by choice rather than by failure (ADR-0005).
 
 Also deliberately unsequenced: **choosing an evidence corpus at all**
 (open-problems §2.4) and rebuilding a benchmark harness against one — a successor
@@ -295,7 +302,7 @@ observed need, under §45.
 |---|---|
 | M0 | **withdrawn** — the record schema it forced survives (`../normalized-record-schema.md`); the editorial-apparatus representation is re-forced when a corpus is chosen |
 | M1 | exact signatures of `search_text` and `read(ref)`. The rest of §25's tool list stays open |
-| M2 | nothing open — the embeddings decision it carried is withdrawn (open-problems §2.2) |
+| M2 | the exact signature of `search_global`, and the extraction prompt's shape (ADR-0005); the embeddings decision it carried is withdrawn (open-problems §2.2) |
 | M3 | nothing open — it builds what earlier decisions already settled |
 | M4 | at its start: the authorship piece's subject and length (open-problems §4.1, §6) |
 | M5 | nothing new — it spends decisions forced earlier |

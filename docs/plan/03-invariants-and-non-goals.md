@@ -12,7 +12,9 @@ Memoria initially does not attempt:
 - native iOS or Android applications in the initial build;
 - unprompted modification of canonical manuscript prose;
 - Word or Scrivener round-trip synchronization;
-- graph infrastructure without demonstrated need;
+- ~~graph infrastructure without demonstrated need;~~ **amended 2026-09-01** — the
+  extraction and its derived relations are in (ADR-0005); a graph *database* and a
+  visual graph explorer remain out;
 - a large up-front ontology;
 - permanent agent personas with private memories;
 - automated interpretation that cannot be traced;

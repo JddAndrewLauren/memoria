@@ -71,6 +71,19 @@ People and Events and an empty one for Themes, where the entry holds an interpre
 and the question that matters is §22's: *is the framing still in step?* No amount of
 matching produces that question, which is why it had to be stated.
 
+**Four — whether the subject auto-promotes** (added 2026-09-01, ADR-0005).
+
+```text
+auto-promote: no
+```
+
+Off means candidates above the recurrence filter wait, ranked, for a one-key
+promotion. On means they become entries with an empty overlay and the author demotes
+what is wrong. Themes and Arcs ship off, because a wrong entry there sits in Tier 2 and
+the audit until noticed; a subject like Locations may say yes. To the extraction
+(§8.4) a subject is an entity type: the match definition and hazards are what it is
+handed.
+
 The whole prompt is a few lines per subject, not a schema.
 
 ---
@@ -151,12 +164,20 @@ is the second of the benchmark harness's three numbers (`poc-plan.md` §3, part 
 
 The gathered set exists **before the entry does**.
 
-A subject matches the corpus continuously and holds a **candidate** for everything it
-finds. Candidates are index rows. They never load into a session.
+~~A subject matches the corpus continuously and holds a **candidate** for everything it
+finds.~~ **Revised 2026-09-01** (ADR-0005): candidates come from the **extraction**, an
+author-launched model pass over every paragraph that records, per paragraph, the
+entries it places, the surface forms it cannot place, and the relations between them,
+and proposes from that the candidates under every subject, the **clusters** it offers
+under Themes and Arcs, and match terms for the entries it placed. It is the one
+candidate engine; the lexical pass it replaces survives only as gathering (§8.3), which
+stays deterministic over match terms. Candidates are index rows. They never load into a
+session.
 
-The Curator proposes candidates for promotion; the author promotes. An **entry is a
-promoted candidate**, and promotion is what earns it author text, settlements and a
-seat in the working context.
+The Curator proposes candidates for promotion; the author promotes — unless the
+subject declares **auto-promote** (§8.1), in which case candidates above the recurrence
+filter become entries on their own. An **entry is a promoted candidate**, and promotion
+is what earns it author text, settlements and a seat in the working context.
 
 Consequences:
 
@@ -182,6 +203,13 @@ stay enumerable**, so the misses are countable rather than invisible.
 The author may also **create an entry manually**, on any subject, at any time. A
 manually created entry has no matched history, so it needs its own match terms
 before a subject can gather for it.
+
+**A promoted cluster becomes a Theme or Arc whose match terms are entries and
+relations** — `Bob`, `the acquisition`, `Bob -> pressures -> author` — and it gathers
+the paragraphs where those co-occur, joined over the extraction's placements. It does
+not remember the cluster it came from; cluster identity does not survive
+re-clustering, and match terms do. The author tunes a Theme the way they tune a
+person.
 
 ---
 
@@ -406,7 +434,10 @@ appearance the author wants suppressed is a sentence in the brief.
 
 **Two engines, one name.** For People, Timeline and Events, an appearance is a match —
 names, aliases, dates — using the same lexical machinery as the gathered set. For
-Themes and Arcs there are no match terms that work: a paragraph about the fear of
+Themes and Arcs, *gathering* now works — their match terms name entries and relations
+and the set is a co-occurrence join (§8.4, 2026-09-01) — but an appearance still does
+not, because manuscript prose is not extracted and there are no match terms that work
+against it: a paragraph about the fear of
 dependence need not contain any of the entry's words, and §19.6's card carries
 judgements — *"frames episode as ambition"* — rather than matches. Those require a
 model reading the passage against the entry.
@@ -443,6 +474,20 @@ key    = the three above
 value  = clear, or a finding: the disagreement-set members, the prose
          stating how they disagree, and a confidence (§8.10)
 ```
+
+The **extraction** (§8.4) is memoized the same way, one paragraph at a time:
+
+```text
+key    = hash(paragraph text)
+       + hash(extraction prompt)
+       + hash(every subject prompt)
+value  = { placements, unplaced surface forms, relations }
+```
+
+Match terms are deliberately **not** in the key: placement against them is a
+deterministic rebuild step over the cached value, so accepting a proposed term never
+re-reads the corpus. Changing a subject prompt does, for every paragraph, which is the
+same price §8.1 already puts on editing a subject.
 
 Membership, not content: evidence is immutable (Invariant 3), so only *which* sources
 belong to an entry can change. A newly ingested source that joins the gathered set

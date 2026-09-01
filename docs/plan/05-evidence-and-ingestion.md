@@ -156,4 +156,10 @@ A mistaken entity merge can silently contaminate thousands of retrieval results.
 
 Memoria should therefore prefer unresolved ambiguity to confident misidentification.
 
+**The extraction does not change this** (2026-09-01, ADR-0005). The model pass that
+now proposes candidates records **placements** — its reading that a paragraph mentions
+an entry — but the durable mapping is recomputed at rebuild from match terms alone. A
+placement the terms do not license is a *proposed* match term, unplaced until the
+author accepts it. The model proposes; the author's terms decide.
+
 ---
