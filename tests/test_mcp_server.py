@@ -204,13 +204,31 @@ def test_the_envelope_carries_the_verbatim_text_contiguously(tmp_path):
     assert "original_locator: Journal I, entry dated Oct. 22." in header
 
 
-def test_a_full_source_read_renders_the_file_and_no_repeated_metadata(tmp_path):
+def test_a_full_source_read_is_rendered_bare(tmp_path):
+    """Indistinguishable from `cat`, at the surface and not just in `text`.
+
+    It used to carry a `ref:` line and a `---`. In the first live session a
+    reader saw those above the record's own frontmatter opener, read the two
+    consecutive `---` lines as an empty pair, and reported the payload as
+    corrupted. The envelope was correct and the report was wrong - which is
+    the point: an envelope that reads as damage costs the tool the trust the
+    routing hook depends on.
+    """
     repository = _repo(tmp_path)
-    result = read(repository, "SRC-000184")
+    path = tmp_path / NORMALIZED_RELATIVE_PATH / "SRC-000184.md"
 
-    rendered = server.render(result)
+    rendered = server.render(read(repository, "SRC-000184"))
 
-    assert rendered == f"ref: SRC-000184\n---\n{result.text}"
+    assert rendered.encode("utf-8") == path.read_bytes()
+
+
+def test_a_path_read_is_rendered_bare(tmp_path):
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "note.md").write_text("# note\n", encoding="utf-8")
+
+    rendered = server.render(read(Repository(root=tmp_path), "docs/note.md"))
+
+    assert rendered == "# note\n"
 
 
 def test_the_tool_maps_a_core_error_onto_one_the_model_can_read(tmp_path):

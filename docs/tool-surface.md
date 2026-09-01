@@ -83,15 +83,31 @@ A record ID with no paragraph returns **the record file exactly as it is on
 disk** — frontmatter, anchors and all, byte for byte what `cat` gives. That is
 the raw undecorated full-source read the constraint requires.
 
-A paragraph reference returns that paragraph's bytes, with the record's
-metadata in a header above a `---` delimiter.
+**A full-source read is returned bare** — the file and nothing else, with no
+header and no delimiter. It is the undecorated read, and it should be
+indistinguishable from `cat` at the surface, not only in the value the core
+returns. Path reads are bare for the same reason.
 
-Two properties of the rendering are contracts, not styling:
+That was learned rather than designed. The first live read carried a `ref:`
+line and a `---` above the record's own frontmatter opener; the reader saw two
+consecutive `---` lines, took them for an empty pair, and reported the payload
+as corrupted. The envelope was correct and the report was wrong — which is
+precisely the problem. The routing hook is a router, not a wall, and a tool
+whose output reads as damaged loses the traffic it depends on. The line was
+redundant anyway: the record's frontmatter states its own `id`.
+
+**A paragraph reference** returns that paragraph's bytes, with the record's
+metadata in a header above a `---` delimiter — a paragraph genuinely does not
+carry the fields a reader needs to judge it.
+
+Two properties of that header are contracts, not styling:
 
 - **The verbatim text appears contiguously and unmodified** — never wrapped,
   re-indented, escaped, or interleaved with anything.
 - **There is exactly one delimiter convention.** The curated overlay (#20)
-  appends after the text using it; it does not interleave.
+  appends after the text using it; it does not interleave. The full-source
+  read has no delimiter because it has no decoration — that is what makes it
+  the raw one.
 
 `original_locator` is printed and never parsed. It is a pointer a person
 follows, not an offset — issue #25 depends on that staying true.

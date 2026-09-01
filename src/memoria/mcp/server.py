@@ -58,31 +58,42 @@ def repository() -> Repository:
 def render(result: Read) -> str:
     """Shape one read into what the model sees.
 
-    A short header, then the delimiter the record format already uses, then
-    the payload. Two properties of this are contracts rather than styling,
-    and ``docs/tool-surface.md`` states them: the verbatim text appears
-    **contiguously and unmodified** - never wrapped, re-indented or escaped -
-    and there is exactly one delimiter convention, which the curated overlay
-    (#20) must reuse by appending after the text rather than interleaving.
+    **A full-source read is returned bare** - the file, and nothing else.
+    That is the whole point of it: it is the undecorated read, and it should
+    be indistinguishable from ``cat``. It carried a ``ref:`` line and a
+    ``---`` delimiter until the first live session, where a reader saw those
+    sitting directly above the record's own frontmatter opener, read the two
+    consecutive ``---`` lines as an empty pair, and reported the payload as
+    corrupted. The envelope was correct and the report was wrong, which is
+    exactly why it matters: an envelope that reads as damage costs the tool
+    the trust the routing hook depends on. The line was redundant anyway -
+    the record's own frontmatter states its ``id``. Path reads are bare for
+    the same reason.
+
+    **A paragraph read keeps a header**, because a paragraph genuinely does
+    not carry the fields a reader needs to judge it. Two properties of that
+    header are contracts rather than styling, and ``docs/tool-surface.md``
+    states them: the verbatim text appears **contiguously and unmodified** -
+    never wrapped, re-indented or escaped - and there is exactly one
+    delimiter convention, which the curated overlay (#20) must reuse by
+    appending after the text rather than interleaving.
 
     ``original_locator`` is printed and never parsed: it is a pointer a person
     follows, not an offset (#25).
     """
-    header = [f"ref: {result.citation}"]
     record = result.record
-    if record is not None and result.paragraph is not None:
-        # A paragraph read carries no frontmatter of its own, so the fields a
-        # reader needs to judge the evidence travel with it. A full-source
-        # read does not repeat them: they are in the text already.
-        header += [
-            f"source_type: {record.source_type}",
-            f"event_date: {record.event_date}",
-            f"date_confidence: {record.date_confidence}",
-            f"contemporaneous: {'true' if record.contemporaneous else 'false'}",
-            f"original_file: {record.original_file}",
-            f"original_locator: {record.original_locator}",
-            f"paragraphs_in_record: {len(record.paragraphs)}",
-        ]
+    if record is None or result.paragraph is None:
+        return result.text
+    header = [
+        f"ref: {result.citation}",
+        f"source_type: {record.source_type}",
+        f"event_date: {record.event_date}",
+        f"date_confidence: {record.date_confidence}",
+        f"contemporaneous: {'true' if record.contemporaneous else 'false'}",
+        f"original_file: {record.original_file}",
+        f"original_locator: {record.original_locator}",
+        f"paragraphs_in_record: {len(record.paragraphs)}",
+    ]
     return "\n".join(header) + "\n---\n" + result.text
 
 
