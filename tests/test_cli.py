@@ -168,9 +168,17 @@ def test_rebuild_writes_editorial_records_and_strips_them_from_normalized(tmp_pa
     assert result.returncode == 0
     editorial_written = list((tmp_path / "sources" / "editorial").glob("ED-*.md"))
     assert len(editorial_written) == 1114
+    # Scoped to journal records (issue #6 rebase, round 3): #5's
+    # extract_editorial_apparatus only ever processes JOURNAL_VOLUMES, so
+    # letters keep their own bracketed footnote markers inline by design
+    # (issue #6's own scope decision, mirroring #3's original "left inline
+    # for this slice" call for journals before #5 existed) - segregating
+    # Familiar Letters' apparatus was never built by either issue.
     for path in (tmp_path / "sources" / "normalized").glob("SRC-*.md"):
         content = path.read_text(encoding="utf-8")
-        body = content.split("---\n", 2)[2]
+        frontmatter, body = content.split("---\n", 2)[1:]
+        if "source_type: journal" not in frontmatter:
+            continue
         assert "[" not in body and "]" not in body, path.name
 
 
