@@ -1,5 +1,7 @@
 """The single write path: a content-hash staleness check, then a
-path-scoped commit.
+path-scoped commit. Also `checkpoint`, ADR-0008's other trigger for the same
+commit primitive - the author's own edits made outside a Memoria surface,
+swept in on demand or before a machine actor writes.
 
 ADR-0003 settles the mechanism and ADR-0004 settles where it lives - a
 module of its own, taking the same frozen ``Repository`` value the read
@@ -32,6 +34,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from memoria import changes
 from memoria.repository import Repository
 
 # The durable state classes (part 04 §3) this module owns every write to,
@@ -67,10 +70,18 @@ class WriteError(Exception):
 class Actor:
     """Who a commit is attributed to (decision 2). An author's edit through
     a surface commits as theirs; a Curator pass commits as the machine
-    (§41)."""
+    (§41).
+
+    ``human`` is what §41's identification decision (ADR-0008) turns on: a
+    human-authored commit - an author's edit through the write path, or a
+    checkpoint of one made outside it - carries a ``change-id:`` trailer.
+    Curator and AI manuscript commits carry none, so ``human`` defaults to
+    ``True`` and a machine actor sets it ``False``.
+    """
 
     name: str
     email: str
+    human: bool = True
 
 
 @dataclass(frozen=True)
@@ -102,6 +113,24 @@ class Rejected:
 
 
 WriteResult = Written | Rejected
+
+
+@dataclass(frozen=True)
+class Checkpointed:
+    """A checkpoint committed - one commit, one ``CHG-`` id, over every
+    tracked durable file it found dirty."""
+
+    change_id: str
+    files: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class NoChanges:
+    """A checkpoint found nothing dirty under a durable state class. Not an
+    error (§11): a clean tree is the expected common case."""
+
+
+CheckpointResult = Checkpointed | NoChanges
 
 
 def serve(repository: Repository, relative_path: str) -> Served:
@@ -137,7 +166,14 @@ def write(
     Decision 2: an accepted write commits, path-scoped to `relative_path`
     and attributed to `actor` - never `git add -A`, so an unrelated dirty
     file is neither committed nor cleaned.
+
+    ADR-0008: a machine actor triggers a checkpoint first, before anything
+    else here - the moment the dirty-tree rule (#32) stops shielding a file
+    and the human-touched flag has to take over. `actor` is never the
+    checkpoint's author; the checkpoint is of edits *outside* this write.
     """
+    if not actor.human:
+        checkpoint(repository)
     path = _confined(repository, PurePosixPath(relative_path))
     if _current_token(path) != token:
         return Rejected(outcome="stale", path=relative_path)
@@ -206,11 +242,71 @@ def _commit(repository: Repository, relative_path: str, actor: Actor) -> None:
     if _git(repository, ["diff", "--cached", "--quiet", "--", relative_path],
             env=env, ok=(0, 1)) == 0:
         return
+    message = f"write: {relative_path}"
+    if actor.human:
+        # ADR-0008: every human-authored commit carries a change-id trailer,
+        # checkpoints and writes through the write path alike. Minted here,
+        # right before the commit that consumes it, off the same ledger
+        # `checkpoint` mints from - never positionally, so a later rebase
+        # cannot renumber it.
+        message = f"{message}\n\n{changes.CHANGE_ID_TRAILER}: {changes.next_change_id(repository)}"
     _git(
         repository,
-        ["commit", "-m", f"write: {relative_path}", "--", relative_path],
+        ["commit", "-m", message, "--", relative_path],
         env=env,
     )
+
+
+def checkpoint(repository: Repository) -> CheckpointResult:
+    """Commit every tracked, durable-class file with uncommitted
+    modifications, as one commit under one ``CHG-`` id (ADR-0008).
+
+    Never untracked files, never Derived state, never ``git add -A`` - only
+    the paths ``DURABLE_PATHS`` names. A clean tree is a no-op: `NoChanges`,
+    not an error, since both triggers (on demand, or before a machine write)
+    expect to find nothing dirty most of the time.
+
+    No `Actor` here, deliberately: a checkpoint is always human-authored, so
+    it commits under this process's own git identity rather than one a
+    caller supplies - the same identity an ordinary `git commit` would use.
+    """
+    dirty = _dirty_durable_paths(repository)
+    if not dirty:
+        return NoChanges()
+    env = dict(os.environ)
+    _git(repository, ["add", "--", *dirty], env=env)
+    change_id = changes.next_change_id(repository)
+    message = f"checkpoint\n\n{changes.CHANGE_ID_TRAILER}: {change_id}"
+    _git(repository, ["commit", "-m", message, "--", *dirty], env=env)
+    return Checkpointed(change_id=change_id, files=tuple(dirty))
+
+
+def _dirty_durable_paths(repository: Repository) -> list[str]:
+    """Tracked files under a durable state class that carry uncommitted
+    modifications - staged or not. Scoped to `DURABLE_PATHS` as pathspecs,
+    so Evidence, Interaction record and Derived state never appear in the
+    result no matter how dirty they are; `??` (untracked) lines are dropped
+    explicitly, since a checkpoint never adds a new file."""
+    result = subprocess.run(
+        ["git", "status", "--porcelain", "--", *DURABLE_PATHS],
+        cwd=repository.root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        reason = " ".join(
+            part.strip() for part in (result.stdout, result.stderr) if part.strip()
+        )
+        raise WriteError(f"git status failed: {reason}")
+    paths = []
+    for line in result.stdout.splitlines():
+        if not line or line.startswith("??"):
+            continue
+        path = line[3:]
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        paths.append(path)
+    return paths
 
 
 def _git(

@@ -14,13 +14,13 @@ import pytest
 
 from memoria import write
 from memoria.repository import Repository
-from memoria.write import Actor, Rejected, Written
+from memoria.write import Actor, Checkpointed, NoChanges, Rejected, Written
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = REPO_ROOT / "src" / "memoria"
 
 AUTHOR = Actor(name="Author", email="author@memoria.test")
-CURATOR = Actor(name="Curator", email="curator@memoria.test")
+CURATOR = Actor(name="Curator", email="curator@memoria.test", human=False)
 
 
 def _git(cwd, *args):
@@ -32,8 +32,14 @@ def _repo(tmp_path, files: dict[str, str]) -> Repository:
 
     A real repository because the point under test is what `git` itself
     ends up recording: the commit's scope and its author.
+
+    A local `user.name`/`user.email` is configured so a checkpoint's
+    ambient-identity commit (no `Actor`, unlike `write`) succeeds
+    regardless of the host machine's own git config.
     """
     _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.name", "Local Author")
+    _git(tmp_path, "config", "user.email", "local-author@memoria.test")
     for relative_path, content in files.items():
         path = tmp_path / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -242,20 +248,139 @@ def test_a_failed_git_call_reports_what_git_printed_on_either_stream(tmp_path, m
     assert "on stderr" in str(excinfo.value)
 
 
+# --- checkpoints commit outside human edits (ADR-0008) ----------------------
+
+
+def test_checkpoint_commits_tracked_modified_durable_files_only(tmp_path):
+    repository = _repo(
+        tmp_path, {"subjects/people/bob.md": "Bob\n", ".memoria/index.db": "stale\n"}
+    )
+    (tmp_path / "subjects/people/bob.md").write_text("Bob (edited in Obsidian)\n")
+    (tmp_path / ".memoria/index.db").write_text("also dirty, but Derived\n")
+    (tmp_path / "subjects/people/untracked.md").write_text("new, never added\n")
+
+    result = write.checkpoint(repository)
+
+    assert isinstance(result, Checkpointed)
+    assert result.files == ("subjects/people/bob.md",)
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert "bob.md" not in status              # committed
+    assert " M .memoria/index.db" in status    # Derived - left dirty
+    assert "?? subjects/people/untracked.md" in status  # untracked - left alone
+
+
+def test_checkpoint_on_a_clean_tree_is_a_no_op(tmp_path):
+    repository = _repo(tmp_path, {"subjects/people/bob.md": "Bob\n"})
+    before = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+
+    result = write.checkpoint(repository)
+
+    after = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert result == NoChanges()
+    assert after == before
+
+
+def test_a_checkpoint_commit_carries_a_change_id_trailer(tmp_path):
+    repository = _repo(tmp_path, {"subjects/people/bob.md": "Bob\n"})
+    (tmp_path / "subjects/people/bob.md").write_text("Bob (edited in Obsidian)\n")
+
+    result = write.checkpoint(repository)
+
+    message = subprocess.run(
+        ["git", "log", "-1", "--format=%B"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert f"change-id: {result.change_id}" in message
+
+
+def test_two_checkpoints_the_same_day_get_distinct_sequential_ids(tmp_path):
+    """Covers two mintings within the same minute (part 04 §4's amended
+    per-day form) - both calls happen back to back in this test."""
+    repository = _repo(
+        tmp_path,
+        {"subjects/people/bob.md": "Bob\n", "subjects/people/alice.md": "Alice\n"},
+    )
+    (tmp_path / "subjects/people/bob.md").write_text("Bob (edited)\n")
+    first = write.checkpoint(repository)
+    (tmp_path / "subjects/people/alice.md").write_text("Alice (edited)\n")
+    second = write.checkpoint(repository)
+
+    assert first.change_id != second.change_id
+    assert first.change_id.rsplit("-", 1)[0] == second.change_id.rsplit("-", 1)[0]
+
+
+# --- every human-authored commit is identified, machine ones are not -------
+
+
+def test_a_human_actors_write_carries_a_change_id_trailer(tmp_path):
+    repository = _repo(tmp_path, {"subjects/people/bob.md": "Bob\n"})
+    served = write.serve(repository, "subjects/people/bob.md")
+
+    write.write(repository, "subjects/people/bob.md", served.token, "Bob Smith\n", AUTHOR)
+
+    message = subprocess.run(
+        ["git", "log", "-1", "--format=%B"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert "change-id: CHG-" in message
+
+
+def test_a_curator_actors_write_carries_no_change_id_trailer(tmp_path):
+    repository = _repo(tmp_path, {"subjects/people/bob.md": "Bob\n"})
+    served = write.serve(repository, "subjects/people/bob.md")
+
+    write.write(repository, "subjects/people/bob.md", served.token, "Bob Smith\n", CURATOR)
+
+    message = subprocess.run(
+        ["git", "log", "-1", "--format=%B"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert "change-id:" not in message
+
+
+def test_a_machine_write_checkpoints_other_dirty_files_first(tmp_path):
+    """The moment #32's dirty-tree rule stops shielding a file - a machine
+    actor's write must not leave an unrelated outside edit uncommitted."""
+    repository = _repo(
+        tmp_path,
+        {"subjects/people/bob.md": "Bob\n", "subjects/people/alice.md": "Alice\n"},
+    )
+    served = write.serve(repository, "subjects/people/bob.md")
+    (tmp_path / "subjects/people/alice.md").write_text("Alice (edited in Obsidian)\n")
+
+    result = write.write(
+        repository, "subjects/people/bob.md", served.token, "Bob Smith\n", CURATOR
+    )
+
+    assert result == Written(path="subjects/people/bob.md")
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert status == ""  # alice.md's outside edit was checkpointed, not left dirty
+    subjects = subprocess.run(
+        ["git", "log", "--format=%s"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert "checkpoint" in subjects
+
+
 # --- one module owns every durable write ------------------------------------
 
-# The two pre-existing writers ADR-0003 and ADR-0004 scope outside this
-# module: `records` is the ingest side, writing normalized records under
+# The pre-existing writers ADR-0003 and ADR-0004 scope outside this module:
+# `records` is the ingest side, writing normalized records under
 # `sources/normalized/`, and `index` is the index maintainer, writing
-# `.memoria/index.db`. Both are Derived state (§42), not a durable class.
+# `.memoria/index.db`. `changes` is ADR-0008's - the gitignored `changes/`
+# projection. All three are Derived state (§42), not a durable class.
 #
-# `manuscript` is a third: #35 has it write a brief's bytes directly
+# `manuscript` is a fourth: #35 has it write a brief's bytes directly
 # (`_write_brief_file`'s `os.replace`, `_renumber_directories`'s
 # `Path.rename`) rather than through this module. Whether that should
 # instead route through `memoria.write` is an open operator decision
 # (issue #66, comment 5501089810), not settled by this guard - it only
 # records who writes today.
-ALLOWED_WRITERS = {"write.py", "records.py", "index.py", "manuscript.py"}
+ALLOWED_WRITERS = {"write.py", "records.py", "index.py", "manuscript.py", "changes.py"}
 FILE_WRITING_CALLS = {
     "write_text", "write_bytes",
     "rename", "copy2", "copyfile", "copyfileobj", "move",

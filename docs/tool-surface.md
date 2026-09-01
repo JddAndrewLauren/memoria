@@ -60,6 +60,7 @@ enumeration of kinds, and had already drifted.
 | `docs/poc-plan.md` | the file, verbatim | a repository-relative path |
 | `CHP-0001` | that chapter's brief, verbatim | part 04 §2.1 / #35 |
 | `SEC-0001` | that section's brief, verbatim | part 04 §2.1 / #35 |
+| `CHG-20261014-003` | the §11 projection of that human-authored commit | part 04 §4 / ADR-0008 |
 
 The bare anchor is accepted deliberately. `SearchResult` carries
 `(src_id, anchor, source_type)`, so a search hit feeds straight back into
@@ -73,7 +74,11 @@ ID space, but two sections in different chapters do, so a bare `SEC-0002` in
 a citation is unambiguous without naming its chapter. They resolve by stable
 ID rather than by directory, because reordering renumbers directories (#35);
 the ID in a chapter's or section's own frontmatter is what survives the
-move.
+move. `CHG-` IDs are a per-day sequence, `CHG-YYYYMMDD-NNN`, minted by
+counting the day's `change-id:` trailers already in git history (ADR-0008) —
+there is no allocation file. `read` finds the commit by its trailer, never
+positionally, so a later rebase cannot renumber a reference to it; an id with
+no matching commit is refused, naming the reference.
 
 Paths are repository-relative, and reads are confined to the repository by
 **two** checks, because one is not enough. The reference is refused if it says
@@ -125,7 +130,7 @@ follows, not an offset — issue #25 depends on that staying true.
 ### What it refuses, and how
 
 Reference kinds part 04 §4 defines but this build does not resolve —
-`SES-` (with or without a `#T` turn), `CHG-`, `CLM-`, `RES-`, `DEC-`,
+`SES-` (with or without a `#T` turn), `CLM-`, `RES-`, `DEC-`,
 `SUB-x`, `SUB-x/y` — return an error **naming the kind**, never a silent empty
 result. A kind that is not part of the scheme at all is named too, and
 distinguished from one that is merely unbuilt.

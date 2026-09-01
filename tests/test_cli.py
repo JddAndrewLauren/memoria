@@ -32,6 +32,12 @@ def test_help_lists_rebuild():
     assert "rebuild" in result.stdout
 
 
+def test_help_lists_checkpoint():
+    result = run_cli("--help")
+    assert result.returncode == 0
+    assert "checkpoint" in result.stdout
+
+
 def _make_valid_corpus(tmp_path):
     rel_path = "raw/vol-01/text.txt"
     evidence_root = tmp_path / "evidence"
@@ -116,3 +122,61 @@ def test_rebuild_needs_no_corpus_at_all(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert "no normalizer is wired in" in result.stdout
+    assert "wrote 0 change projection(s)" in result.stdout
+
+
+def _git_repo(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+
+
+def _git_commit(tmp_path, *args, env=None):
+    subprocess.run(
+        ["git", "-c", "user.name=X", "-c", "user.email=x@x.com", "commit", *args],
+        cwd=tmp_path, check=True, capture_output=True, env=env,
+    )
+
+
+def test_rebuild_writes_the_changes_projection(tmp_path):
+    _git_repo(tmp_path)
+    _git_commit(tmp_path, "--allow-empty", "-q", "-m", "checkpoint\n\nchange-id: CHG-20261014-001")
+    env = {k: v for k, v in os.environ.items() if k != "MEMORIA_EVIDENCE_ROOT"}
+
+    result = run_cli("rebuild", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "wrote 1 change projection(s)" in result.stdout
+    assert (tmp_path / "changes" / "CHG-20261014-001.md").is_file()
+
+
+def test_checkpoint_on_a_clean_tree_exits_zero_and_reports_it(tmp_path):
+    """ADR-0008's on-demand trigger: a no-op is reported, not silent."""
+    _git_repo(tmp_path)
+    _git_commit(tmp_path, "--allow-empty", "-q", "-m", "init")
+    env = {k: v for k, v in os.environ.items() if k != "MEMORIA_EVIDENCE_ROOT"}
+
+    result = run_cli("checkpoint", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "nothing to checkpoint" in result.stdout
+
+
+def test_checkpoint_commits_a_dirty_durable_file(tmp_path):
+    _git_repo(tmp_path)
+    (tmp_path / "subjects").mkdir()
+    (tmp_path / "subjects" / "bob.md").write_text("Bob\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    _git_commit(tmp_path, "-q", "-m", "init")
+    (tmp_path / "subjects" / "bob.md").write_text("Bob (edited)\n")
+    env = dict(
+        (k, v) for k, v in os.environ.items() if k != "MEMORIA_EVIDENCE_ROOT"
+    )
+    env.update(
+        GIT_AUTHOR_NAME="X", GIT_AUTHOR_EMAIL="x@x.com",
+        GIT_COMMITTER_NAME="X", GIT_COMMITTER_EMAIL="x@x.com",
+    )
+
+    result = run_cli("checkpoint", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "committed 1 file(s) as CHG-" in result.stdout

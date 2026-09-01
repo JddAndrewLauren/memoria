@@ -287,7 +287,6 @@ def test_reading_an_unresolvable_chapter_or_section_id_names_it(tmp_path):
     [
         ("SES-20260912-1432", "SES"),
         ("SES-20260912-1432#T017", "SES"),
-        ("CHG-20261014-0917", "CHG"),
         ("CLM-0041", "CLM"),
         ("RES-20261018-003", "RES"),
         ("DEC-0088", "DEC"),

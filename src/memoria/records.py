@@ -27,7 +27,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from memoria import manuscript, references
+from memoria import changes, manuscript, references
 from memoria.repository import Repository
 
 # Where normalized records live inside the book repository. Here rather than
@@ -435,8 +435,8 @@ def read(repository: Repository, ref: str) -> Read:
     mistaken for omissions: it does not decorate with the curated overlay
     (#20, which owes a ``raw`` parameter when it does, since undecorated is
     currently what every read is), it does not ledger (#13), and it resolves
-    no reference kind but ``SRC-``, ``CHP-``, ``SEC-`` and repository paths -
-    the rest exist as a named error, not as silence.
+    no reference kind but ``SRC-``, ``CHP-``, ``SEC-``, ``CHG-`` and
+    repository paths - the rest exist as a named error, not as silence.
     """
     try:
         reference = references.parse(ref)
@@ -475,6 +475,13 @@ def read(repository: Repository, ref: str) -> Read:
         return Read(
             ref=ref, citation=citation, text=entry.path.read_text(encoding="utf-8")
         )
+
+    if isinstance(reference, references.ChangeReference):
+        try:
+            commit = changes.resolve(repository, reference.change_id)
+        except changes.ChangesError as exc:
+            raise ReadError(str(exc)) from exc
+        return Read(ref=ref, citation=citation, text=changes.render(commit))
 
     record = load(repository, reference.record_id)
     if reference.paragraph is None:
