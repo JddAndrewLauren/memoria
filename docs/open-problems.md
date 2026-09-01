@@ -28,10 +28,23 @@ separate, already-accepted cost (§5 table, row 2).
 ### 1.2 Whether the in-app prose editor is built
 
 `poc-plan.md` §3 puts editing in Obsidian. §19.7 draws a paragraph-at-a-time editor in
-the app, which is a second write path into `chapters/**/draft.md`. The reduced §40.6
-check — "reject writes staged against a stale git revision" — is all that holds the two
-apart, and it is file-level, which is now sufficient because §4.1 leaves no stored
-pointers for an Obsidian edit to invalidate.
+the app, which is a second write path into `chapters/**/draft.md`. The single write path
+and its staleness check are all that hold the two apart, and the check is file-level.
+
+**Why file-level is sufficient** — corrected 2026-09-01; the earlier reason given here was
+that §4.1 leaves no stored pointers for an Obsidian edit to invalidate, which is an
+argument about identity and does not bear on whether two writes collide. The real
+constraint is that finer granularity has only two implementations and both are closed.
+Positional ("replace paragraph 12") is invalidated by any insert or delete above the
+target, so a concurrent edit elsewhere silently lands the write on the wrong prose — and
+§4.1 removed durable passage identity by design, so position is all that is left.
+Content-addressed ("replace the paragraph hashing to X") is patch application onto a file
+that has moved, i.e. reconciliation, which `poc-plan.md` §5's reduction of §40.6 cut by
+name. See `adr/0003-durable-writes-go-through-one-path.md`.
+
+So this stays open on its own merits. If the editor is built, the cost of file-level
+granularity is a rejected write, not lost work: the client holds the author's text and
+re-reads for a fresh token.
 
 Undecided, and cheap to leave undecided.
 

@@ -178,3 +178,24 @@ subjects that can match, and by a memoized model pass for subjects like Themes a
 Arcs that cannot. It carries no pin or exclude overlay, because an author act against
 one passage would be a durable pointer into mutable prose.
 _Avoid_: Affected passages, backlinks, manuscript matches, edges
+
+### Writing to the repository
+
+**Write path**:
+The one route every durable write takes — the author's through a surface, and the
+Curator's. It checks the [[staleness token]], writes the file whole or not at all, and
+commits it, attributed to whoever acted — an author's edit through a surface commits as
+the author's own, the same class of thing as an edit made in Obsidian, and a Curator pass
+commits as the machine. It holds nothing back: no queue, no lock, no
+reconciliation, no merge. Derived state does not go through it, having no author work to
+protect and nothing to be stale against.
+_Avoid_: Write coordinator, transaction, save handler, commit service
+
+**Staleness token**:
+The evidence a write carries that the file is still as it was read. Issued when a file is
+served for editing and presented back when the write is made; if the file has moved
+underneath, the write is rejected, naming the file, and the author's text stays on screen
+to be re-applied. It asks whether this file changed since it was read — a different
+question from whether the file holds uncommitted human work, which is what the
+[[human-touched flag]]'s companion dirty-tree rule asks, and neither answers the other.
+_Avoid_: Version, revision, lock, etag, generation

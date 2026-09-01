@@ -198,6 +198,23 @@ This prevents conflicts between:
 
 Writes should be checked against the current Git revision. Stale operations should be rejected or reconciled rather than silently overwriting newer work.
 
+<!-- Amended 2026-09-01, from the single-write-path grilling session. -->
+
+**Amended 2026-09-01.** The git-revision comparison above is **wrong**, and it fails in
+the direction §1.7 forbids. The author opens an entry in the app at revision `abc`, edits
+the same file in Obsidian and does not commit — Obsidian has no reason to. `HEAD` is still
+`abc`, the check passes, and the uncommitted edit is destroyed by the mechanism meant to
+prevent it.
+
+The comparison is against **the file as it was read**, not against `HEAD`: a content hash
+taken when the file is served, compared to the file on disk at write time. That catches
+committed and uncommitted changes alike. "Rejected **or reconciled**" is also narrower than
+written — `../poc-plan.md` §5 reduces this section to a check, so a stale write is rejected
+and never reconciled.
+
+Settled in `../adr/0003-durable-writes-go-through-one-path.md`, which also records that an
+accepted write commits, path-scoped and attributed to whoever acted.
+
 ---
 
 ## 40.7 Streaming and visible activity
