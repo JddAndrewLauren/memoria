@@ -3,6 +3,14 @@
 
 # 24. Model Runtime
 
+> **Reduced for the PoC, 2026-08-31** (`../poc-plan.md` §3 and §5). Memoria is an
+> **MCP server** and Claude Code, used interactively in its ordinary supported way,
+> is the client. There is no web service driving Claude Code headless, no
+> `ModelBackend` abstraction, and no capacity scheduler. What the PoC keeps from this
+> part is §24.1's division of responsibility and §24.2's controlled tool surface.
+> The stack diagrams below and §§24.3–24.5 are retained as the future-option record
+> for a remote or multi-backend deployment — nothing the PoC builds.
+
 Memoria should separate its durable architecture from the model runtime used to operate on it.
 
 The preferred initial runtime is **Claude Code authenticated through the author's own supported Anthropic Claude subscription**, rather than requiring pay-as-you-go API usage for normal personal operation.

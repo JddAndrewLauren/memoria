@@ -149,10 +149,12 @@ corpus exercises it.**
 
 **13** is the most heavily narrowed part. The `ModelBackend` abstraction and the
 §24.3–24.4 capacity scheduler are out: Memoria is an MCP server, Claude Code is
-the client, and the subscription bet is avoided rather than validated.
+the client, and the subscription bet is avoided rather than validated. The
+reduction is now marked inline at the head of the part.
 **14** — local only. §40.5 auth and remote access are gone entirely; §40.6's write
 coordinator reduces to a stale-revision check. Four of the five surfaces need no
-model driver and are in scope; "Ask Memoria" is deferred.
+model driver and are in scope; "Ask Memoria" is deferred. The reduction is now
+marked inline at the head of the part.
 **19 is illustrative throughout** — every label, verdict, badge and count in it is
 example content and may not drive data structures (banner recorded 2026-08-31).
 It is the designed desktop UI, recorded as it stands — six screens, the

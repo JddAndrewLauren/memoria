@@ -4,6 +4,13 @@
 
 # 40. Interfaces
 
+> **Reduced for the PoC, 2026-08-31** (`../poc-plan.md` §3 and §5). Local, one
+> machine: §40.5's auth, HTTPS and tailnet access are out entirely; §40.6's write
+> coordinator reduces to rejecting writes staged against a stale git revision;
+> web/phone access is out. Of §40.3's surfaces, the four needing no model driver are
+> in scope and **Home / Ask Memoria** is deferred. §40.2 and the phone material below
+> are the future-option record, not the PoC.
+
 The responsive web interface should be part of the first usable Memoria build rather than a late-stage convenience layer.
 
 This follows directly from the product promise:
@@ -83,6 +90,10 @@ Source packet
 Unresolved impacts
 Resume
 ```
+
+Of these, `Checkpoint` and `Unresolved impacts` are superseded (part 12 §39, part 09
+§17): neither is stored state, and both compose live from the brief, git and a
+requested audit. `Purpose` reads the brief (§2.1).
 
 ### Source viewer
 
