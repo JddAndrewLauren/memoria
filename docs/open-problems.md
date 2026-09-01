@@ -11,21 +11,19 @@ observe a real failure before choosing a mechanism.
 
 ## 1. Open decisions
 
-### 1.1 Curator ownership and human-edit supremacy
+### 1.1 Curator ownership and human-edit supremacy — CLOSED 2026-08-31
 
-**The last open architectural question.** §1.7 states human-edit supremacy as an
-invariant; §14 implements it as a heuristic — git blame at span granularity. Two
-expected failures: prose reflow destroys attribution, so one Curator touch claims a
-human sentence; and ownership ratchets the wrong way, since once the Curator owns a
-span a light human edit does not reclaim it, inverting §1.7 exactly.
+**Resolved: ownership by badge.** The entry body is shared territory and §9's badges
+are the structural ownership marker — testimony is never machine-written, `[author]`
+requires a citing turn, `[source]`/`[inferred]`/`[open]` are the Curator's to revise.
+§14's git-blame span inference is retired; the backstop for in-place human edits is a
+monotonic **human-touched flag** set once at Curator-pass time, plus the rule that the
+Curator never writes into a file with uncommitted human modifications. Both predicted
+failures are structurally dead: there is no blame to destroy, and the surviving
+ratchet points toward the author.
 
-Options weighed and not chosen: file-level ownership via git history, explicit span
-markers, an always-append-only Curator, or git blame as specified.
-
-**Safe default:** the Curator does not rewrite prose a human has touched. Appending is
-recoverable; overwriting is only recoverable from git, and only if noticed.
-
-Where: `poc-plan.md` §4, part 08.
+Full mechanism: part 06 §8.2 and part 08 §14. §20's display-blame coarseness is a
+separate, already-accepted cost (§5 table, row 2).
 
 ### 1.2 Whether the in-app prose editor is built
 

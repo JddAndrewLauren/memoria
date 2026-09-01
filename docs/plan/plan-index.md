@@ -8,10 +8,11 @@ exception: it records the desktop UI as designed, and has no counterpart in the
 original plan.
 
 **Revised since:** §8 (rewritten as the subject system), §16-§18 and §39 (rewritten
-for the manuscript layer), §18's category list and §17's question list (both withdrawn),
-§1.5, §1.10a (new), §2, §2.1 (new), §3, §4, §4.1 (new), §8.1, §8.5, §8.11, §8.12 (new),
-§12.1, §13.4, §15, §19, §20, §21, §23, §25, §32, §33, §36-§38, §42, §43.2, §47, and
-Invariants 8 and 9.
+for the manuscript layer), §14 (rewritten as ownership by badge), §18's category list
+and §17's question list (both withdrawn),
+§1.5, §1.10a (new), §2, §2.1 (new), §3, §4, §4.1 (new), §8.1, §8.2, §8.5, §8.6, §8.11,
+§8.12 (new), §9.5, §12.1, §13.4, §15, §19, §20, §21, §23, §25, §32, §33, §36-§38, §42,
+§43.2, §47, §52.2, and Invariants 8 and 9.
 
 Five parts — 06, 08, 11, 14, 18 — end in an appended
 `## Editorial note — the desktop design`, recording where that design confirms,
@@ -91,16 +92,17 @@ keeps the four attribution statuses and adds §9.5: author testimony needs no ba
 | # | Part | Original §§ | Status |
 |---|---|---|---|
 | 07 | [Session Records, Direct Human Edits, Git as Audit](07-sessions-and-human-edits.md) | 10, 11, 41 | reduced |
-| 08 | [The Curator, Post-Session Curation, Ownership](08-curator-and-ownership.md) | 12, 13, 14, 15 | **open** |
+| 08 | [The Curator, Post-Session Curation, Ownership](08-curator-and-ownership.md) | 12, 13, 14, 15 | stable |
 
 **07** — §10 assumes Memoria owns the conversation loop. It does not: transcripts
 with stable `#T017` anchors are derived from Claude Code's per-session JSONL as a
 post-session pass.
-**08** holds the deferred ownership decision. §14's git-blame span inference is
-expected to fail on prose reflow. Safe default while open: **the Curator does not
-rewrite prose a human has touched.** §12.1's trigger table now carries the audit pass
-(new text only, subject-bounded); §13.4 forbids harvesting manuscript prose into an
-entry without a settlement.
+**08** — ownership is **closed** (2026-08-31): §14 was rewritten as **ownership by
+badge**. The entry body is shared territory, the §9 badge is the ownership marker,
+testimony is never machine-written, and a monotonic human-touched flag plus the
+dirty-tree rule backstop in-place author edits. Git-blame inference is retired.
+§12.1's trigger table carries the audit pass; §13.4 forbids harvesting manuscript
+prose into an entry without a settlement.
 
 ### The manuscript — impact, authorship, authorization
 
@@ -194,7 +196,7 @@ independent requirements.
 - **Orienting from scratch:** 01 → 02 → 03 → 18
 - **The subject system:** 06 → 11 (§32, §33.1) → 09 → 08, then 04's anchoring note
 - **Working on ingest now:** 05 → 04 → 06, with `RECON.md` alongside
-- **Resolving the open decisions:** 08 (ownership) — the last one; 04's anchoring is closed
+- **Resolving the open decisions:** none remain at the architecture level — 04's anchoring and 08's ownership are both closed; what's left is in `../open-problems.md` §1
 - **The manuscript layer:** 04 (§2.1, §4.1) → 06 (§8.11, §8.12) → 09 → 12 (§39)
 - **Re-planning the build:** 13 → 14 → 19 → 15 → 16
 

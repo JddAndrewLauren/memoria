@@ -21,9 +21,17 @@ _Avoid_: Axis, group, category, object type, dimension, lens
 
 **Entry**:
 One instance under a subject — Bob under People, the acquisition under Events. The
-subject says what a kind of entry is; the entry carries the links and the author's
-own knowledge.
+subject says what a kind of entry is; the entry's body is shared territory carrying
+the author's testimony and Memoria's badged statements, with ownership read off the
+badge (see [[audit-visible-body]]). Testimony is the author's hand alone.
 _Avoid_: Item, object, record, node
+
+**Audit-visible body**:
+The part of an entry's body that assembly loads and the audit compares prose
+against — testimony, settlements, and the `[author]`/`[source]`/`[inferred]`
+statements. `[open]` lines and [[memoria-note]]s sit outside it, excluded from
+write-side assembly and from the audit, retrievable in Think and Research modes.
+_Avoid_: Entry content, loaded body, canonical body, annex
 
 **Gathered set**:
 The sources a subject matched to an entry. Derived, rebuildable, and asserts nothing
@@ -71,6 +79,21 @@ _Avoid_: Author note, recollection, memory, annotation
 A recorded author resolution of a surfaced conflict, naming which side was chosen and
 when. Downstream passages relying on it inherit the resolution and stay silent.
 _Avoid_: Dismissal, decision, override, resolution
+
+### Ownership
+
+**Memoria note**:
+The author-facing note the Curator appends when evidence conflicts with a statement
+it may not rewrite — a human-touched or author-supreme one. It never loads into
+write-side assembly and the audit never evaluates against it. The §19.6 amber card
+is this note drawn.
+_Avoid_: Annex, annotation, machine note, comment
+
+**Human-touched flag**:
+An index flag set at Curator-pass time on statements changed by non-Curator commits
+since the last pass. Set once, monotonic, never recomputed — reflow cannot unset it.
+The Curator does not rewrite a flagged statement; conflicts become [[memoria-note]]s.
+_Avoid_: Ownership bit, blame, dirty flag, lock
 
 ### The manuscript
 

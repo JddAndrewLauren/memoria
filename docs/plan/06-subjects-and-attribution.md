@@ -2,6 +2,7 @@
 <!-- Source sections: 8, 9 of the original memoria-plan.md -->
 <!-- §8 was REWRITTEN 2026-08-31 in the subject-system grilling session and is no -->
 <!-- longer verbatim. The original five-object-type §8 is in _original-memoria-plan.md. -->
+<!-- §8.2, §8.6, §8.12 and §9.5 revised 2026-08-31: ownership by badge. See part 08 §14. -->
 
 # 8. The Subject System
 
@@ -80,10 +81,29 @@ not share an authority:
 
 | | What it is | Authority |
 |---|---|---|
-| **Author text** | what the author knows and thinks about this entry | the author's, and supreme |
+| **Body** | testimony and badged statements about this entry | shared territory; ownership is carried by the badge — see below |
 | **Match terms** | how *this* entry is referenced, beyond the subject default | the author's |
 | **Settlements** | recorded resolutions of surfaced conflicts | attributable author acts |
 | **Gathered set** | the sources this subject matched to this entry | derived and rebuildable |
+
+**The body is shared territory, and the §9 badge is the ownership marker.** There is
+no separate machine region, and nothing infers authorship from git blame (§14): who
+may write a statement, and who may revise it, is read off the statement itself.
+
+| Statement | Who writes it | Who revises it |
+|---|---|---|
+| unbadged **testimony** | the author's hand only — the Curator never writes unbadged text, no exceptions | the author |
+| `[author]` | the Curator, on a citing transcript turn; §13.1's bar decides `[author]` against `[open]` | the Curator, only on a new citing turn |
+| `[source]` / `[inferred]` / `[open]` | the Curator, freely (so may the author) | the Curator, freely — unless the statement is human-touched (§14.2) |
+| a **settlement** | click-authorized (§8.7) | a new settlement |
+
+The **audit-visible body** is testimony, settlements, and the `[author]`, `[source]`
+and `[inferred]` statements. It is what assembly loads (§32's Tier 2, badges visible)
+and what the audit compares prose against; a finding that disagrees with a `[source]`
+or `[inferred]` statement ranks below one that disagrees with testimony or a
+settlement, through §8.10's confidence ordering. `[open]` lines and Memoria notes
+(§14.2) sit outside it — excluded from write-side assembly and from the audit,
+retrievable in Think and Research modes.
 
 An entry with an **empty gathered set is a valid state**, not an error. An entry may
 exist entirely on author testimony — someone the archive barely names, or an entry
@@ -159,9 +179,9 @@ the conflict in the capital.
 ```
 
 Assembly resolves that declaration through the subjects into a working context: the
-named entries' author text and settlements, loaded; their gathered sets, queryable;
-everything else, retrieved if it becomes relevant. This is §32's Tier 2, declared
-rather than inferred.
+named entries' audit-visible bodies (§8.2), loaded with badges visible; their gathered
+sets, queryable; everything else, retrieved if it becomes relevant. This is §32's
+Tier 2, declared rather than inferred.
 
 Assembly is not curation. It happens at write time, in service of a session.
 
@@ -204,6 +224,12 @@ contemporaneous note records an *impression*, where the author may hold the fact
 The cost, accepted knowingly: **the audit cannot flag author misremembering as an
 error.** It can only report the divergence. The value therefore lives entirely in
 when and where that divergence is shown.
+
+**Testimony is never machine-written.** An AI-drafted statement the author approves
+stays badged: approval authorizes recording, not belief, and promoting compiled facts
+into unbadged supremacy would launder them past every future audit — §8.8's reasoning,
+one level up. To claim a statement as their own, the author strips its badge; that is
+an attributable author act with a commit behind it.
 
 One boundary: **craft direction is not testimony.** "Bob should read as unreliable
 early on" is not a claim about the world, must never be checked against evidence, and
@@ -380,10 +406,13 @@ one entry. Every such judgement is cached on the three things it depends on.
 
 ```text
 key    = hash(paragraph text)
-       + hash(entry author text + settlements)
+       + hash(entry audit-visible body)
        + hash(subject prompt)
 value  = { engages: yes/no, note: "frames episode as ambition" }
 ```
+
+The audit-visible body (§8.2) includes settlements. `[open]` lines and Memoria notes
+sit outside it, so appending either invalidates nothing.
 
 Three consequences follow, and they replace a good deal of machinery.
 
@@ -497,5 +526,8 @@ There is deliberately **no fifth status**.
 Author text in an entry (§8.6) is self-sourcing: the entry is the record, and §1.7
 governs it. A badge would imply the statement rests on something else, when the
 point is that it does not.
+
+This holds because the Curator never writes unbadged text (§8.2): inside an entry
+body, the absence of a badge *is* the attribution.
 
 The date is carried by the commit, and by any settlement the statement is party to.

@@ -89,7 +89,9 @@ arcs/...
 claims/...
 ```
 
-with a mixture of `[author]`, `[source]`, `[inferred]`, and `[open]` material.
+with a mixture of `[author]`, `[source]`, `[inferred]`, and `[open]` material — the
+entry body is shared territory, and the badge is the ownership marker: testimony stays
+the author's hand alone (part 06 §8.2).
 
 Every substantive point is clickable.
 

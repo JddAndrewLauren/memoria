@@ -226,8 +226,7 @@ Tier 1 — always
     draft.md                  the prose
 
 Tier 2 — the declared scope, resolved
-    the named entries' author text
-    the named entries' settlements
+    the named entries' audit-visible bodies
     relevant claims
     active decisions
     local questions
@@ -255,9 +254,10 @@ the conflict in the capital.
 ```
 
 Assembly resolves that declaration through the subjects (part 06 §8.5). What loads is
-an entry's author text and settlements — short and dense. What does **not** load is
-its gathered set, which stays queryable at Tier 4, and the unpromoted candidates,
-which never load at all.
+an entry's audit-visible body — testimony, settlements and badged statements, badges
+visible — short and dense. What does **not** load is its `[open]` lines and Memoria
+notes (part 06 §8.2), its gathered set, which stays queryable at Tier 4, and the
+unpromoted candidates, which never load at all.
 
 The consequence matters for Invariant 1: **the working context is bounded by the size
 of the declared scope, not by the number of subjects or entries.** Ten subjects and

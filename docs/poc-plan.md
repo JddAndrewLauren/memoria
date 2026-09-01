@@ -177,7 +177,8 @@ things have been dismissed. §15 and §38 both depend on it.
 ## 4. Decisions deliberately deferred
 
 Both were deferred under §45 discipline — observe real failure before choosing a
-mechanism. Each carries a safe default that keeps the deferral cheap.
+mechanism — and both have since been closed. The entries record the questions as
+deferred and how each was resolved.
 
 ### Manuscript passage anchoring — CLOSED 2026-08-31
 
@@ -197,20 +198,24 @@ composed from `git blame` plus the session's context manifest.
 Full reasoning: part 04 §4.1. This also unblocks the desktop UI, which part 04
 previously said could not be built past mock data until this was settled.
 
-### Human-edit supremacy / Curator ownership
-**The question.** §1.7 is stated as an invariant but §14 implements it as a
-heuristic — git blame at span granularity. Two expected failures: prose reflow
-destroys attribution, so one Curator touch claims your sentence; and ownership
-ratchets the wrong way, since once the Curator owns a span your light edit does
-not reclaim it, inverting §1.7 exactly.
+### Human-edit supremacy / Curator ownership — CLOSED 2026-08-31
 
-Options weighed: file-level ownership via git history ("has any non-Curator
-commit touched this file?" — mechanical, no blame, but coarse), explicit span
-markers, always-append-only Curator, or git blame as specified.
+**Was:** §1.7 stated as an invariant but §14 implemented it as a heuristic — git
+blame at span granularity. Two expected failures: prose reflow destroys attribution,
+so one Curator touch claims your sentence; and ownership ratchets the wrong way,
+since once the Curator owns a span your light edit does not reclaim it, inverting
+§1.7 exactly. Options weighed: file-level ownership via git history, explicit span
+markers, always-append-only Curator, or git blame as specified — none chosen; the
+safe default while deferred was "the Curator does not rewrite prose a human has
+touched."
 
-**Safe default while deferred: the Curator does not rewrite prose a human has
-touched.** Appending is recoverable; overwriting is only recoverable from git,
-and only if noticed.
+**Resolved: ownership by badge.** The entry body is shared territory and the §9 badge
+is the structural ownership marker: testimony is never machine-written, `[author]`
+requires a citing transcript turn, the working badges are the Curator's to revise.
+Blame inference is retired, so there is nothing for reflow to destroy; a monotonic
+**human-touched flag**, set once at Curator-pass time from commit diffs, backstops
+in-place author edits of badged statements, and the Curator never writes into a file
+with uncommitted human modifications. Full mechanism: part 06 §8.2, part 08 §14.
 
 ---
 
@@ -246,8 +251,8 @@ interface.
 4. **Paraphrase matching may be hard enough to swamp the signal.** Thoreau rewrote
    heavily; if even embeddings score poorly on the 364 links, the benchmark
    measures the difficulty of the task rather than the quality of Memoria.
-5. **One open architectural question** — ownership — sits under §12-15. Its safe
-   default holds only while the Curator stays conservative. Anchoring is closed (§4).
+5. **Ownership — resolved 2026-08-31** (ownership by badge, §4). Both architectural
+   deferrals are now closed; what remains open is listed in `open-problems.md` §1.
 6. **The manuscript layer has no test corpus.** Thoreau supplies evidence and audit
    targets, but nothing with a brief, a declared scope, or a passage written from
    something. §43.2's resumption test is now the manuscript layer's central claim and

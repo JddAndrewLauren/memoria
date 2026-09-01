@@ -133,7 +133,7 @@ Every durable artifact belongs to an explicit class.
 | **Evidence** | `sources/**` | Immutable documentary record |
 | **Interaction record** | `sessions/**` | Immutable record of conversations |
 | **Manuscript** | `chapters/**/draft.md`, and the briefs `book.md` / `chapter.md` / `section.md` | Canonical book prose and intent; human- or AI-authored, but AI writes require author authorization |
-| **Subjects** | `subjects/**` entries — author text, match terms, settlements | Author-authored and supreme; see §8.6 |
+| **Subjects** | `subjects/**` entries — body (testimony + badged statements), match terms, settlements | Ownership by badge: testimony and `[author]` statements are the author's and supreme; `[source]`/`[inferred]`/`[open]` are Curator-maintained. See part 06 §8.2 |
 | **Claims** | `claims/**` | Propositions accreted from settlements, or asserted outright |
 | **Working state** | decisions, questions, research | Primarily machine-maintained |
 | **Change record** | Git history + `changes/**` | Record of direct human, AI, and Curator edits |
