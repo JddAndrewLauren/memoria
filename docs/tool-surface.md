@@ -12,7 +12,7 @@ a gap nobody noticed.
 | Tool | State |
 |---|---|
 | `read(ref)` | **Forced** — issue #11, below |
-| `search_text(query, filters)` | Open — issue #12 |
+| `search_text(query, filters)` | **Forced** — issue #12, below |
 | `search_global(query, filters, summarize)` | Open — issue #74, scheduled for M2 (ADR-0005). Settled 2026-09-01: `query` optional, a `level` filter, summaries served from the extraction pass and never generated on the call |
 | `search_semantic(query, filters)` | Open — issue #81, scheduled for M2 (ADR-0007): a `sqlite-vec` table in the index file, a local CPU model at rebuild |
 | `expand`, `timeline`, `grep_repo`, `trace`, `backlinks`, `list` | Open; §25 does not commit to shipping them |
@@ -144,6 +144,85 @@ the core's one error type onto it.
   finds it rather than discovering it.
 - **No raw *original*.** Reading the pre-normalization source at
   `original_file` is #64/#25's "Open original", not this.
+
+## `search_text(query, filters)` — forced 2026-09-01, issue #12
+
+```
+search_text(query: str, filters: SearchFilters | None = None) -> str
+```
+
+The retrieval half of the minimum M1 tool surface: full-text search over the
+FTS5 index (`memoria.index`), the other half of what §7's superset-of-grep
+constraint needs alongside `read`.
+
+**FTS5 and nothing else.** ADR-0007 admitted embeddings by choice, but
+`search_semantic` (#81) is a separate tool over a separate `sqlite-vec`
+table, scheduled for M2; ADR-0005's extraction is a candidate engine, not a
+search index (`docs/open-problems.md` §2.2: "`search_text` stays FTS5").
+This tool's result set is FTS5 hits, and cluster summaries are never served
+here as evidence.
+
+### The filters are implemented in the core, not the tool
+
+`memoria.index.search(repository, query, filters)` takes the frozen
+`Repository` value, like every other core read (ADR-0004) — the point at
+which the function's `db_path` parameter was aligned to match, since #74 and
+#81 inherit the shape. `SearchFilters` carries the four filters that have
+something to filter on at M1:
+
+- `event_date` — exact match against the record's verbatim frontmatter
+  string
+- `recorded_date` — exact match, same reason
+- `source_type` — exact match (e.g. `"journal"`, `"editorial"`)
+- `contemporaneous` — `true` excludes retrospective/editorial commentary
+  added over the same ground; this is how §6's temporal discipline is
+  enforced at retrieval time
+
+All four are optional and compose (ANDed together). `record class` is not a
+filter: §26 lists it only as a *potential* one, and nothing defines it in
+`docs/normalized-record-schema.md` or on `NormalizedRecord`. Dates have no
+sortable value in the schema (`date_confidence` runs `exact` … `unresolved`
+with no ordering), so a range filter has nothing ordered to compare against —
+exact/prefix match was the choice available, and exact match is what shipped.
+Subject and entry filters (`person`, `theme`, `arc`, …) wait for M2, since
+entries do not exist yet; they are never filters, because the entry filter
+will cover every subject the author adds.
+
+The filter values live in a plain (non-FTS) table keyed by paragraph anchor —
+`paragraphs(anchor, src_id, source_type, event_date, recorded_date,
+contemporaneous)` — written by `build_index` beside the FTS5 `records`
+virtual table, not as extra `UNINDEXED` FTS5 columns. `memoria.index.
+filter_predicate` is the one predicate builder that turns a `SearchFilters`
+into `(sql, params)` against that table; `search()` joins FTS5 hits to it,
+and #81 (a `sqlite-vec` table) and #74 (the extraction's placements,
+relations, clusters and membership) are expected to join their own
+paragraph-keyed rows to it the same way, rather than each keeping a second
+copy of the metadata (§40.1).
+
+Reachable without the MCP server — `memoria.index.search` is a plain core
+function, exercised directly by `tests/test_index.py`.
+
+### What it returns
+
+Each `SearchResult` carries `(src_id, anchor, source_type)` and **no text**.
+`search_text` renders one line per hit, ranked, giving both the `SRC-` ID and
+the paragraph anchor — the anchor is `SearchResult.anchor` verbatim, which
+`read(ref)` accepts with no reconstruction by the caller (the bare-anchor
+form in the `read(ref)` table above exists specifically for this). No
+snippets or ranked text are served by this tool; wanting them would be a
+change to `memoria.index`, not to the adapter.
+
+No match, and no built index yet — every fresh clone, since `.memoria/` is
+gitignored — both render `"No results."` rather than an empty string or a
+driver exception. The empty index is part of this function's interface: it
+answers "the corpus is not built" rather than raising
+`sqlite3.OperationalError: no such table: records`, and it does not create
+`.memoria/index.db` as a side effect of searching.
+
+### Performance
+
+Search over the full corpus returns in well under a second — a test asserts
+it against a synthetic multi-thousand-paragraph index.
 
 ## Registering the server
 

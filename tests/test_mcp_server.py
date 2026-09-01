@@ -41,6 +41,7 @@ ALLOWED_IMPORTS = {
     "memoria.mcp",       # the package's own modules
     "memoria.records",
     "memoria.repository",
+    "memoria.index",      # #12: search_text calls memoria.index.search
 }
 
 FILE_OPENING_CALLS = {"open", "read_text", "read_bytes", "write_text", "write_bytes"}
@@ -255,10 +256,81 @@ def test_the_server_registers_a_read_tool(tmp_path):
     assert "verbatim" in (tool.description or "")
 
 
-def test_the_tool_surface_is_one_read_tool():
-    """Part 11 §25 withdrew the per-type read tools; there is no read_source."""
+def test_the_tool_surface_is_read_and_search_text():
+    """Part 11 §25 withdrew the per-type read tools; there is no read_source.
+
+    #12 adds exactly one more tool, search_text - not one per filter or one
+    per source type.
+    """
     names = {t.name for t in asyncio.run(server.mcp.list_tools())}
-    assert names == {"read"}
+    assert names == {"read", "search_text"}
+
+
+# --- search_text --------------------------------------------------------
+
+
+def _index(tmp_path, records):
+    from memoria.index import INDEX_RELATIVE_PATH, build_index
+
+    build_index(tmp_path / INDEX_RELATIVE_PATH, records)
+    return Repository(root=tmp_path)
+
+
+def test_search_text_returns_the_src_id_and_anchor_of_each_hit(tmp_path):
+    repository = _index(
+        tmp_path,
+        [_record(paragraphs=["A blue heron flew over.", "Nothing to do with birds."])],
+    )
+    server._repository = repository
+
+    rendered = server.search_text("heron")
+
+    assert "SRC-000184" in rendered
+    assert "src-000184-p1" in rendered
+
+
+def test_search_text_returns_no_results_rather_than_an_empty_string(tmp_path):
+    server._repository = _index(tmp_path, [_record()])
+
+    rendered = server.search_text("nonexistentterm")
+
+    assert rendered == "No results."
+
+
+def test_search_text_over_an_unbuilt_index_returns_no_results(tmp_path):
+    server._repository = Repository(root=tmp_path)
+
+    assert server.search_text("anything") == "No results."
+
+
+def test_search_text_filters_compose(tmp_path):
+    from memoria.index import SearchFilters
+
+    repository = _index(
+        tmp_path,
+        [
+            _record(id="SRC-000001", source_type="journal", paragraphs=["A fox ran."]),
+            _record(
+                id="SRC-000002", source_type="editorial", paragraphs=["A fox, noted."]
+            ),
+        ],
+    )
+    server._repository = repository
+
+    rendered = server.search_text("fox", SearchFilters(source_type="journal"))
+
+    assert "SRC-000001" in rendered
+    assert "SRC-000002" not in rendered
+
+
+def test_the_server_registers_a_search_text_tool():
+    """The one other test that touches the SDK for this tool."""
+    tools = asyncio.run(server.mcp.list_tools())
+
+    (tool,) = [t for t in tools if t.name == "search_text"]
+    assert set(tool.input_schema["properties"]) == {"query", "filters"}
+    assert tool.input_schema["required"] == ["query"]
+    assert "ranked" in (tool.description or "")
 
 
 # --- the committed registration ---------------------------------------------

@@ -1,11 +1,12 @@
-"""The `memoria` MCP server, exposing `read(ref)`.
+"""The `memoria` MCP server, exposing `read(ref)` and `search_text(query, filters)`.
 
 The second adapter over the core, after the CLI and before the FastAPI app
 (#64). §40.1 asks that business logic not be duplicated between them, and
 this module is where that stops being an aspiration: it holds no rule the
-other two lack, it imports only ``memoria.records`` and ``memoria.repository``,
-and it opens no file and speaks to no database. Everything it does is call one
-core function and render what comes back.
+other two lack, it imports only ``memoria.records``, ``memoria.repository``
+and (#12) ``memoria.index``, and it opens no file and speaks to no database
+itself. Everything it does is call one core function and render what comes
+back.
 
 `read(ref)` is the single read tool (part 11 §25). Dispatch is read off the
 reference, because the ID scheme already names the type; there are no
@@ -16,7 +17,13 @@ full-source read gives back the record file exactly as it sits on disk. If
 reading through the tool were ever worse than ``cat``, the routing hook would
 stop being a router and become a wall, and people would go around it.
 
-See ``docs/tool-surface.md`` for the forced signature and what is still open.
+`search_text(query, filters)` is the retrieval half (#12). The four §25
+filters - event date, recorded date, source type, contemporaneous/
+retrospective - are implemented in ``memoria.index.search``, not here: the
+tool shapes results, the core computes them, so the same filters reach #64's
+web layer without a second, divergent copy.
+
+See ``docs/tool-surface.md`` for the forced signatures and what is still open.
 """
 
 from __future__ import annotations
@@ -27,6 +34,7 @@ import sys
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
+from memoria.index import SearchFilters, SearchResult, search as search_index
 from memoria.records import Read, ReadError, read as read_ref
 from memoria.repository import Repository, from_env
 
@@ -35,7 +43,9 @@ mcp = MCPServer(
     instructions=(
         "Memoria serves the evidence archive. Read any stable reference with "
         "read(ref): a SRC- record ID, a paragraph of one, or a repository "
-        "path. Evidence comes back verbatim, never summarized."
+        "path. Evidence comes back verbatim, never summarized. Find text "
+        "with search_text(query, filters); each hit's anchor feeds straight "
+        "into read(ref)."
     ),
 )
 
@@ -121,6 +131,43 @@ def read(ref: str) -> str:
         # be reported as "Error executing tool read" with the reason stripped,
         # which is the silent failure #11 exists to forbid.
         raise ToolError(str(exc)) from exc
+
+
+def render_search(results: list[SearchResult]) -> str:
+    """Shape search hits into what the model sees.
+
+    One line per hit, ranked, carrying both the `SRC-` ID and the paragraph
+    anchor - the anchor is what `read(ref)` accepts verbatim, with no
+    reconstruction by the caller (docs/tool-surface.md).
+
+    `SearchResult` carries no text (memoria.index): whatever evidence the
+    model wants, it reads through `read(ref)` with the anchor this line
+    gives it - the same evidence-is-never-summarized discipline `read`
+    itself keeps.
+    """
+    if not results:
+        return "No results."
+    return "\n".join(f"{r.src_id} {r.anchor}" for r in results)
+
+
+@mcp.tool()
+def search_text(query: str, filters: SearchFilters | None = None) -> str:
+    """Full-text search the evidence archive (FTS5), ranked by relevance.
+
+    Returns each hit's `SRC-` ID and paragraph anchor - the anchor feeds
+    straight into `read(ref)` with no reconstruction. Carries no text of its
+    own: evidence is read, not summarized.
+
+    `filters` narrows by `event_date`, `recorded_date`, `source_type` and
+    `contemporaneous` (true excludes retrospective editorial commentary);
+    all compose. Dates match the record's verbatim frontmatter string
+    exactly.
+
+    Returns "No results." rather than an empty string when nothing matches.
+    An unbuilt corpus (no `.memoria/index.db` yet) is the same as an empty
+    one - not an error.
+    """
+    return render_search(search_index(repository(), query, filters))
 
 
 def main(argv=None) -> int:
