@@ -13,8 +13,9 @@ a gap nobody noticed.
 |---|---|
 | `read(ref)` | **Forced** — issue #11, below |
 | `search_text(query, filters)` | Open — issue #12 |
-| `search_global(query, filters, summarize)` | Open — issue #74, scheduled for M2 (ADR-0005) |
-| `search_semantic`, `expand`, `timeline`, `grep_repo`, `trace`, `backlinks`, `list` | Open; §25 does not commit to shipping them |
+| `search_global(query, filters, summarize)` | Open — issue #74, scheduled for M2 (ADR-0005). Settled 2026-09-01: `query` optional, a `level` filter, summaries served from the extraction pass and never generated on the call |
+| `search_semantic(query, filters)` | Open — issue #81, scheduled for M2 (ADR-0007): a `sqlite-vec` table in the index file, a local CPU model at rebuild |
+| `expand`, `timeline`, `grep_repo`, `trace`, `backlinks`, `list` | Open; §25 does not commit to shipping them |
 
 ## The constraint that binds all of it
 

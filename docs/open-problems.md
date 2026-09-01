@@ -97,7 +97,15 @@ not exist in the PoC, so at M5 the surface opens from the Section view only (ADR
 
 Where: `poc-plan.md` §3 and §5, part 19 §19.11.
 
-### 2.2 Semantic embeddings — REOPENED 2026-09-01, with no instrument
+### 2.2 Semantic embeddings — DECIDED 2026-09-01, by choice
+
+**Decided later the same day** (`adr/0007-embeddings-enter-by-choice.md`): embeddings
+enter by choice, shape fixed — a `sqlite-vec` table in the index file, a local CPU model
+at rebuild, `search_semantic` on the surface — built at M2 against fixtures and not
+gated on the archive. The reason is that the gate below can never fire: a retrieval miss
+is invisible (§33.1), so "observe a failure" waits for something unobservable. The
+instrument becomes a labelled query set the author grows once the archive exists. The
+text that follows is the state this decision was taken against, kept as written.
 
 FTS5 first, and it was to stay first only until a number said otherwise. That number
 is gone: the benchmark harness was withdrawn with the corpus that supplied its ground
@@ -220,6 +228,8 @@ failure is recognised as evidence rather than as a surprise.
 | The supplied-context account lists reads the client may have compacted away | ADR-0001 — the account covers the whole session, not just assembly | An author acting on a supplied item the model demonstrably no longer holds |
 | The extraction and `search_global`'s summary mode ship without an observed failure | ADR-0005 — chosen against §1.11 and §45 | Clusters the author never promotes, or summaries the agent quotes in place of evidence |
 | Placement recall is unreported, like gathered-set recall | ADR-0005 — unplaced surface forms stay enumerable | A person the author knows is in the archive with placements missing where the name is plain |
+| Embeddings enter without a measured number | ADR-0007 — chosen because the miss is unobservable | The labelled query set showing FTS5 alone would have done |
+| Every cluster is summarized in session time | ADR-0005 build shape — summaries are the pass's last step | The summary step dominating the pass on the real archive |
 | A fresh archive shows no candidates until the author runs the extraction | ADR-0005 — one engine, author-launched | The first extraction of a real archive being unaffordably long in one session |
 | Quoted replies are dropped from email records, not kept unindexed | part 05 §5.4 — one body per record, the quote is in the raw file and usually the parent record | A quoted message whose original was never exported (a sent-folder-only export) that the author needs to find by search |
 | docx and pdf are one record per file until a real file breaks it | part 05 §5.2 — start simple; the split rule is the amendment path | A journal-style file whose every paragraph carries one date, polluting Timeline candidates |
@@ -240,7 +250,8 @@ Build detail rather than open decisions, from `poc-plan.md` §7:
   read of a spreadsheet is unlikely to be worth it, surfacing that one was attached to
   a message may be (part 05 §5.4);
 - which §25 tools ship, and their exact signatures — `read(ref)` forced
-  2026-09-01 (issue #11, [`tool-surface.md`](tool-surface.md)); the rest open;
+  2026-09-01 (issue #11, [`tool-surface.md`](tool-surface.md)); `search_global` (#74)
+  and `search_semantic` (#81) scheduled for M2; the rest open;
 - the Curator's scope and trigger policy;
 - **the subject and length of the authorship-track piece** — now constrained by §4.1
   above, and forced at part 16's M4;

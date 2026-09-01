@@ -132,8 +132,9 @@ stored.
 | 11 | [Retrieval, Context Builder, Digests](11-retrieval-and-context.md) | 25–30, 32, 33 | reduced |
 | 12 | [Session Modes, Research Workflows, Resumability](12-research-and-resumability.md) | 31, 34, 35, 39 | stable |
 
-**11** — FTS5 only to start; semantic embeddings deferred pending a measured
-number from the cross-reference benchmark. §32's Tier 2 is now the **declared scope**,
+**11** — FTS5 only to start; ~~semantic embeddings deferred pending a measured
+number from the cross-reference benchmark~~ embeddings in by choice, 2026-09-01
+(ADR-0007). §32's Tier 2 is now the **declared scope**,
 which is what bounds the working context. New **§33.1** states the sharper version of
 the search-scope problem: an index reports nothing about its own recall, and that is
 the central risk of the subject system.
@@ -184,8 +185,9 @@ recall@10, gathered-set recall, and the promotion miss rate.
 recon-informed normalizer to the authorship piece, each gated on a concrete
 author-visible act, ending in the resumption gate that only real absence can
 pass. The harness's three numbers land across M0–M2; the authorship piece is
-decided at M4; the embeddings decision is taken at M2's gate by a procedure
-pre-registered at M1. The original M0–M4 is archived in
+decided at M4; ~~the embeddings decision is taken at M2's gate by a procedure
+pre-registered at M1~~ the embeddings decision was taken by choice on 2026-09-01
+(ADR-0007) after the gate lost its instrument. The original M0–M4 is archived in
 `_original-memoria-plan.md` §44.
 **17** — §45's adoption process is the governing rule for every "should we add X"
 question.

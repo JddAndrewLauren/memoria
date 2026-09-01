@@ -113,7 +113,10 @@ Build:
   system's only alias store (§7, part 06 §8.2); a Theme's name entries and relations
   and it gathers by co-occurrence;
 - `search_global(query, filters, summarize)` on the tool surface (part 11 §25), both
-  modes, ledgered;
+  modes, ledgered — query optional, `level` filter, summaries served from the pass
+  (ADR-0005 build shape, issue #74);
+- `search_semantic(query, filters)` over a `sqlite-vec` table in the index file, a
+  local CPU model at rebuild, built against fixtures (ADR-0007, issue #81);
 - gathered sets, and the curated overlay: **pins and exclusions**, attributable
   and rebuild-surviving — the durable-dismissal machinery poc-plan §3 requires
   from the first Curator pass;
@@ -134,10 +137,12 @@ printing three numbers (issue #23). **M2 is left ungated.** No substitute is
 written: inventing gate acts against a corpus that does not exist is ceremony, not
 verification.
 
-The embeddings decision this gate carried is withdrawn with it. It reverts to
+~~The embeddings decision this gate carried is withdrawn with it. It reverts to
 §45's default — observe a real failure before adopting heavier machinery — which
 is weaker than the pre-registered procedure it replaces (`../open-problems.md`
-§2.2).
+§2.2).~~ **Decided 2026-09-01** (`../adr/0007-embeddings-enter-by-choice.md`): the
+failure the default waits for is unobservable, so embeddings enter by choice and
+M2 builds `search_semantic` against fixtures.
 
 ---
 
@@ -281,9 +286,11 @@ gate green and this fails, Memoria advanced while no book did.
 
 The poc-plan §5 reductions stand: no `ModelBackend`, no capacity queue, no
 auth or remote access, no web/phone surface, no Ask Memoria, and the write
-coordinator stays a stale-revision check. Embeddings enter only against an
-observed failure (§45) — there are no M2 numbers to say so. The extraction is the one
-exception, admitted by choice rather than by failure (ADR-0005).
+coordinator stays a stale-revision check. ~~Embeddings enter only against an
+observed failure (§45) — there are no M2 numbers to say so.~~ The extraction is
+admitted by choice rather than by failure (ADR-0005), and so are embeddings
+(ADR-0007, 2026-09-01): a retrieval miss cannot be observed, so M2 builds
+`search_semantic`.
 
 Also deliberately unsequenced: **choosing an evidence corpus at all**
 (open-problems §2.4) and rebuilding a benchmark harness against one — a successor
@@ -302,7 +309,7 @@ observed need, under §45.
 |---|---|
 | M0 | **withdrawn** — the record schema it forced survives (`../normalized-record-schema.md`); the editorial-apparatus representation is re-forced when a corpus is chosen |
 | M1 | exact signatures of `search_text` and `read(ref)`. The rest of §25's tool list stays open |
-| M2 | the exact signature of `search_global`, and the extraction prompt's shape (ADR-0005); the embeddings decision it carried is withdrawn (open-problems §2.2) |
+| M2 | the exact signatures of `search_global` and `search_semantic`, and the extraction prompt's shape (ADR-0005); ~~the embeddings decision it carried is withdrawn~~ embeddings decided by choice 2026-09-01 (ADR-0007) |
 | M3 | nothing open — it builds what earlier decisions already settled |
 | M4 | at its start: the authorship piece's subject and length (open-problems §4.1, §6) |
 | M5 | nothing new — it spends decisions forced earlier |

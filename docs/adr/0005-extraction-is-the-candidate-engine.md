@@ -107,3 +107,65 @@ an engine underneath and a per-subject `auto-promote` switch.
   the same structural mitigation applies: unplaced surface forms stay enumerable.
 - §42's rebuild list already named "entity enrichment", "dependency graph" and
   "provenance graph" as derived state. This ADR is what fills those entries.
+
+## Build shape, settled 2026-09-01 (second session)
+
+The database shape this ADR left open was grilled the same day against a fuller
+GraphRAG, with two `/tradeoff` analyses. Nothing above is changed; this records what
+the extraction is built *as*, and what was declined.
+
+1. **Derived rows in the existing SQLite file; clustering in Python; extraction
+   in-session.** Placements, unplaced surface forms, relations, clusters and their
+   membership, proposed match terms and the memo cache are tables in
+   `.memoria/index.db` beside the FTS5 table — the memo cache being the one table the
+   delete-and-regenerate rebuild skips. Clusters are **hierarchical**: Leiden over the
+   entry co-occurrence graph (`graspologic-native`, a local call with no model; networkx
+   Louvain if the wheel is unavailable), so Themes are proposed at several grains.
+   **Declined:** the Microsoft `graphrag` library whole (it resolves identity by exact
+   entity title, so communities and reports are computed over Bob, Robert and "my
+   brother-in-law" as three people — the misidentification path decision 4 rejects —
+   and its query modes return synthesized answers the grep rule cannot serve; what it
+   has that we want, the prompts and Leiden, is borrowable); **FalkorDBLite and Neo4j**
+   (every query #17, #18 and #74 ask for is a one-hop join; the one workload a graph
+   store wins on, variable-depth traversal, is the transitive expansion part 11 forbids;
+   both add a second store with a process model to a system whose three adapters share
+   one file safely; and §45 still gates graph databases). **Named flip:** if the first
+   extraction of the real archive, or a subject-prompt change that re-reads it, cannot
+   finish in a session the author will sit through, run *our own* extraction prompt
+   through the Batch API — reversing decision 3 alone, not adopting the library. Graph
+   databases re-enter only through a committed `trace` tool whose path query recursive
+   CTEs cannot serve.
+
+2. **No entity descriptions.** GraphRAG describes every entity in every chunk and
+   merges the descriptions; we do not. A candidate is made legible by a **derived
+   gloss** — its surface forms and its most frequent relations, computed from rows the
+   extraction already writes, the same rule #17 and #74 state for cluster labels. No
+   new model output, and nothing enters an entry body: prose about an entry keeps its
+   designed producer, the research memo (part 12), and the record extractor's restraint
+   rules stay out of the index pass. **Named flip:** if the first real candidate list
+   is illegible from relations alone, add an on-demand, index-only, memoized
+   `[inferred]` gloss keyed on the candidate's membership hash.
+
+3. **Every cluster is summarized, in the author-launched pass.** A finding forced this:
+   **no adapter can call a model** — the MCP server imports two core modules and speaks
+   to no database, and poc-plan §3 forbids a model-driving service — so
+   `search_global(summarize=true)` can only *serve* text that already exists. Summaries
+   are therefore the last step of the extraction pass: leaves from their member
+   paragraphs, parents from their children's summaries (never from raw text at upper
+   levels), memoized on the cluster's membership hash so re-clustering touches only
+   clusters whose membership changed, and resumable so a §24.3 capacity limit leaves a
+   complete extraction and a partial summary set. On the stated assumptions (a
+   5M-token archive, 50–90 clusters) this adds 5–10% to the run. "Promotable clusters
+   only" was declined because the summary half exists for §29's unasked patterns, which
+   live in the clusters nobody promotes. The ledger line records whether a summary was
+   *served*, not run.
+
+4. **`search_global` gains an optional query and a `level` filter.** GraphRAG's global
+   search reads every community report at one level and map-reduces an answer. With no
+   model in the server, the session agent does that itself: `search_global(query=None,
+   filters={level: n}, summarize=true)` returns every cluster at a level with its
+   summary under a scope line — the map — and the §28 loop is the reduce. DRIFT is the
+   same loop seeded by summaries. No new tool.
+
+Embeddings, walked in the same session, are a separate decision:
+`0007-embeddings-enter-by-choice.md`.

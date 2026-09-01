@@ -211,6 +211,12 @@ rather than after months of vague dissatisfaction. Adding local embeddings later
 is cheap — bge-base on CUDA and a recall/precision harness over 80k messages are
 already proven in a separate project.
 
+> **Decided 2026-09-01** (`adr/0007-embeddings-enter-by-choice.md`): embeddings enter
+> by choice, because the failure §45 waits for is a retrieval miss and a retrieval miss
+> is never observed. The shape is a `sqlite-vec` table in the index file and a local CPU
+> model — production has no GPU, so the CUDA path above is prior art only. Built at M2
+> against fixtures.
+
 **This only works if the benchmark harness is built early.** FTS5-first without
 measurement is just under-building.
 
@@ -300,7 +306,7 @@ with uncommitted human modifications. Full mechanism: part 06 §8.2, part 08 §1
 | §40.5 auth, HTTPS, tailnet | Out — localhost only |
 | §40.6 write coordinator | Reduced to a stale-revision check |
 | §40.3 "Home / Ask Memoria" | Deferred — the only surface needing a model driver |
-| Semantic embeddings | Deferred — pending the benchmark number |
+| Semantic embeddings | ~~Deferred — pending the benchmark number~~ In by choice, 2026-09-01 (ADR-0007); built at M2 against fixtures |
 | Web/phone access | Out — costs interface coverage, not invariant coverage |
 
 Nothing in §1-23 (provenance, temporal discipline, attribution, the interpretation

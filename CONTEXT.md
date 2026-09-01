@@ -84,9 +84,22 @@ _Avoid_: Edge, triple, relationship, connection
 
 **Cluster**:
 A grouping of paragraphs the extraction proposes from the entries and relations that
-recur together, offered as a candidate under Themes or Arcs. A promoted entry keeps
-the entries and relations as its match terms and forgets the cluster.
-_Avoid_: Community, community summary, topic, graph
+recur together, offered as a candidate under Themes or Arcs. Clusters nest: a broad
+one contains narrower ones, each at its own [[level]]. A promoted entry keeps the
+entries and relations as its match terms and forgets the cluster.
+_Avoid_: Community, topic, graph
+
+**Level**:
+Where a cluster sits in the nesting the extraction proposes — the broadest clusters
+at the top, the narrowest at the bottom. A global search may ask for every cluster at
+one level.
+_Avoid_: Tier, depth, layer, hierarchy level
+
+**Cluster summary**:
+The `[inferred]` text Memoria holds about a cluster, written during the extraction
+and served afterwards; a surface only ever serves one, never composes one. Never
+evidence, and never loaded in place of the paragraphs it compresses.
+_Avoid_: Community report, cluster text, answer, synthesis
 
 **Auto-promote**:
 A subject's declaration that its candidates above the recurrence filter become entries

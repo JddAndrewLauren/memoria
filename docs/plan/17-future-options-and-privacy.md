@@ -5,11 +5,13 @@
 
 Memoria initially does **not** require:
 
-- Qdrant;
+- Qdrant — and semantic embeddings themselves are **in, 2026-09-01**, without a
+  vector database: `../adr/0007-embeddings-enter-by-choice.md`;
 - ~~GraphRAG;~~ **in, 2026-09-01** — `../adr/0005-extraction-is-the-candidate-engine.md`;
-- Neo4j;
+- Neo4j — considered and declined 2026-09-01, still gated: ADR-0005 "Build shape";
 - Open WebUI;
-- a graph database;
+- a graph database — FalkorDB considered and declined 2026-09-01, still gated: ADR-0005
+  "Build shape";
 - a hierarchical summary pyramid;
 - persistent specialist agents.
 

@@ -14,7 +14,7 @@ Core tools:
 
 ```text
 search_text(query, filters)
-search_semantic(query, filters)
+search_semantic(query, filters)   <- in by choice, 2026-09-01 (ADR-0007)
 
 read(ref)
 
@@ -35,7 +35,11 @@ grouped by **cluster**, each group labelled by the entries and relations that de
 it, under a §33-style scope line — *"clustered 1,842 paragraphs across 2009–2014;
 3 clusters matched"*. With `summarize=true` it also returns each cluster's synthesized
 text, marked `[inferred]` and never served as evidence. Both modes are ledgered, with
-the mode named. It is a superset of grep in the poc-plan §7 sense: every reference
+the mode named. **Settled later that day** (ADR-0005, "Build shape"): the query is
+optional and the filters include `level`, so a call with no query returns every
+cluster at one level of the nesting — the map step of a whole-corpus question, which
+the session agent then reduces through §28's loop. Summaries are *served* from what
+the extraction pass memoized, never generated on the call: no adapter can run a model. It is a superset of grep in the poc-plan §7 sense: every reference
 resolves through `read(ref)`, and the summary is a compression under §1.5, not an
 answer.
 
@@ -65,6 +69,7 @@ chapter
 record class
 subject            e.g. SUB-people
 entry              e.g. SUB-people/bob, SUB-themes/control
+level              a cluster level, for search_global
 ```
 
 `person`, `theme` and `arc` are no longer separate filters. They are entries, and an
@@ -198,6 +203,12 @@ Heavier machinery earns its place against observed failures.
 > section's risk but part 06's gap — nothing proposed a Theme or gathered for one.
 > The rest of the list (graph databases, clustering, topic models, summary structures)
 > still enters only against an observed failure.
+>
+> **Build shape, later the same day** (ADR-0005 "Build shape"; ADR-0007): the
+> whole-corpus reasoning this section worries about is done by the session agent, not
+> a service — `search_global` with no query hands it every cluster summary at one level
+> and §28's loop is the reduce. Embeddings enter by choice for the reason this section's
+> discipline cannot cover: a retrieval miss is never observed.
 
 ---
 
