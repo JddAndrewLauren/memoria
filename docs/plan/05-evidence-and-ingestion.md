@@ -2,6 +2,8 @@
 <!-- Source sections: 5, 6, 7 of the original memoria-plan.md -->
 <!-- §7 rewritten 2026-08-31: the canonical alias map is withdrawn; aliasing lives -->
 <!-- in entry match terms and subject hazards. Original §7 in _original-memoria-plan.md. -->
+<!-- §5.1-5.4 amended 2026-09-01: raw units, the ID ledger, record boundaries per format, -->
+<!-- quoted-reply policy, conversion via MarkItDown, skip-unchanged runs. ADR-0006. -->
 
 # 5. Source Ingestion
 
@@ -16,6 +18,14 @@ sources/raw/
 They are never rewritten by the Curator.
 
 Where practical, hashes of raw files should be stored to detect accidental modification.
+
+**A raw unit is what receives a `SRC-` ID** (added 2026-09-01): a file, or one message
+inside an email export. The evidence manifest (`raw/manifest.yaml`) lists every raw unit
+with its hash, and it is also the **ID ledger**: a unit is numbered on first appearance
+and keeps that number forever, a deleted unit keeps its number reserved, and nothing is
+reused. IDs are therefore stable under a growing archive and under re-normalization —
+which every citation, and since ADR-0005 every extraction placement, depends on. See
+`../adr/0006-src-ids-are-allocated-by-the-manifest-ledger.md`.
 
 ---
 
@@ -43,13 +53,31 @@ A natural documentary boundary should normally define a record:
 - journal entry;
 - email;
 - individual note;
-- message or logical message thread;
+- ~~message or logical message thread~~ one message, never a thread (2026-09-01);
 - meeting transcript;
 - document section.
 
 Search-time chunking occurs only in the index.
 
 The normalized record remains the unit of evidence.
+
+**The boundary rules as decided 2026-09-01.** Working assumption, unconfirmed: the real
+archive's top formats are docx, pdf and email exports. Everything else is a raw unit with
+a stub record until it matters.
+
+- **Email: one message per record.** Placements, relations and `recorded_date` are per
+  paragraph and inherit the record's date; a thread spans dates and cannot carry an
+  honest one. The thread is metadata (`thread_id`) the index groups by, never the unit
+  of evidence. Attachments are listed on the message record by name and type, kept
+  under `raw/` and hashed, and get a record of their own only when they are a format
+  Memoria converts.
+- **docx and pdf: one record per file.** Start simple. A file that holds many dated
+  entries gives every paragraph one date, which the Timeline subject will feel; the
+  amendment path, not built, is a per-collection split rule such as
+  split-on-dated-heading, declared in the manifest. Revisit at the first such file.
+- **A scanned pdf is a stub record**: ID, frontmatter, Open original, no body. OCR is
+  out of scope. A stub has no paragraphs, so neither the index nor the extraction sees
+  it, and nothing is invented.
 
 ---
 
@@ -80,6 +108,61 @@ Event date
 Source type
 Provenance metadata
 ```
+
+---
+
+## 5.4 Conversion
+
+Added 2026-09-01. "Conversion" means format conversion into the normalized record and
+nothing else — no language translation, no OCR. The raw file is the original; the
+record is a reading of it that a person can always check against **Open original**.
+
+**The converter is MarkItDown** (Microsoft, MIT, deterministic when no model client is
+configured) for docx and for HTML-bodied email. The record keeps whatever it emits —
+headings, lists, tables, links, bold and italic — with no stripping pass; FTS5 and the
+extraction read words either way, and the raw file holds the rest. Images in a docx are
+listed in frontmatter by name, not embedded.
+
+**pdf goes through pdfplumber directly**, page by page, because MarkItDown's own pdf
+path discards page boundaries. A page marker is written between pages so that a
+citation to a paragraph deep in a long report is followable to a page, which is what
+`original_locator`'s "a string a person can follow" rule requires. The marker is not a
+paragraph: the paragraph splitter skips it, so it never earns an anchor, an index row or
+an extraction read.
+
+**Email parsing is Memoria's own** — the standard library for mbox and `.eml`,
+MarkItDown's Outlook converter only when the export is `.msg` — because the boundary,
+the headers and the quoted-reply policy are all decisions the converter cannot make.
+
+**Quoted replies are cut and dropped.** Most exported messages carry the earlier thread
+quoted below; left in, every message re-indexes its ancestors, search hits land on the
+wrong message, and under ADR-0005 the parent's people and relations are placed again
+under the child, inflating co-occurrence. A deterministic splitter cuts at the first
+standard marker — `>` prefixes, an "On … wrote:" line, an Outlook "From:/Sent:/To:"
+header block — and for interleaved replies removes the `>` lines and keeps the sender's
+lines in order. The record then carries `in_reply_to`, resolved from `Message-ID` and
+`In-Reply-To` within the same export, and `quoted_excised: true` whenever anything was
+cut, so a reader knows the body is partial. The excised text is not kept in the record:
+it is in the raw file, and usually in the parent record. The accepted gap is a quoted
+message whose original was never exported, which is then not searchable.
+
+**A run reconverts only what changed.** Each record's frontmatter carries the raw unit's
+hash and the converter version that produced it; a unit is reconverted when the
+manifest hash or the pinned converter version differs, and `--all` forces everything.
+The record is the state — there is no second store of what was done. Over unchanged
+input a run produces no diff, which is the idempotence check; after a new export it
+produces only new records, because the ID ledger renumbers nothing.
+
+**Converter drift is a priced event.** The paragraph hash is the extraction's memo key
+(part 06 §8.12), so converter output that shifts by a space invalidates a model read.
+Converter versions are pinned and recorded in the manifest, and a version bump is an
+explicit re-normalize that reports how many paragraph hashes changed *before* the
+extraction is run.
+
+**Written down for later, not built:** images, charts and spreadsheets. A deep read of
+a spreadsheet is unlikely to ever be worth it; surfacing that a spreadsheet was attached
+to a particular message may be. Attachment presence lives in frontmatter, which the
+extraction does not read, so that is the seam to reopen if it is wanted.
 
 ---
 
