@@ -8,7 +8,7 @@ caller.
 import pytest
 
 from memoria import references
-from memoria.index import build_index, search
+from memoria.index import INDEX_RELATIVE_PATH, build_index, search
 from memoria.records import NormalizedRecord
 from memoria.references import (
     BadReference,
@@ -16,6 +16,7 @@ from memoria.references import (
     SourceReference,
     UnknownReference,
 )
+from memoria.repository import Repository
 
 
 def test_parse_resolves_a_bare_src_id():
@@ -138,8 +139,9 @@ def test_a_search_result_anchor_is_a_reference_with_no_reconstruction(tmp_path):
         original_locator="Journal I, entry dated Oct. 22.",
         paragraphs=["Nothing here.", "A blue heron flew over."],
     )
-    build_index(tmp_path / "index.db", [record])
+    repository = Repository(root=tmp_path)
+    build_index(repository.root / INDEX_RELATIVE_PATH, [record])
 
-    (hit,) = search(tmp_path / "index.db", "heron")
+    (hit,) = search(repository, "heron")
 
     assert references.parse(hit.anchor) == SourceReference("SRC-000184", 2)

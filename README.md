@@ -111,6 +111,10 @@ derived state carries no authority and can always be thrown away).
 the index from whatever records are already on disk and reports that no producer
 is wired in. Restoring it is part of choosing a corpus, not a gap to patch.
 
-Use `memoria.index.search(db_path, query)` to query the index; pass
-`exclude_editorial=True` to search evidence records only, excluding editorial
-voice.
+Use `memoria.index.search(repository, query, filters)` to query the index —
+it takes the frozen `Repository` value, like every other core read (ADR-0004).
+Pass `SearchFilters(contemporaneous=True)` to search evidence records only,
+excluding retrospective editorial commentary; `SearchFilters.source_type` is
+an exact match with no negation, so narrowing to one type (not "everything
+except editorial") is what a `source_type` filter alone can express. See
+`docs/tool-surface.md`'s `search_text` section for the full filter set.

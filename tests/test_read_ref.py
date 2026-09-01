@@ -221,12 +221,12 @@ def test_a_citation_retyped_in_capitals_still_resolves(tmp_path, ref):
 
 
 def test_a_search_result_anchor_reads_the_paragraph_that_matched(tmp_path):
-    from memoria.index import build_index, search
+    from memoria.index import INDEX_RELATIVE_PATH, build_index, search
 
     repository = _repo(tmp_path)
-    build_index(tmp_path / "index.db", [_record()])
+    build_index(repository.root / INDEX_RELATIVE_PATH, [_record()])
 
-    (hit,) = search(tmp_path / "index.db", "heron")
+    (hit,) = search(repository, "heron")
 
     assert read(repository, hit.anchor).text == AWKWARD[0]
 
