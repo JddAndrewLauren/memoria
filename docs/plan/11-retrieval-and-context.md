@@ -1,6 +1,7 @@
 <!-- Part of the Memoria build plan. Index: ./plan-index.md -->
 <!-- Source sections: 25, 26, 27, 28, 29, 30, 32, 33 of the original memoria-plan.md -->
 <!-- §25 revised 2026-08-31: per-type read tools unified into read(ref). -->
+<!-- §25 read(ref) signature forced 2026-09-01 (issue #11): see ../tool-surface.md. -->
 <!-- §33.1 revised 2026-08-31: index recall is gathered-set recall, a set metric. -->
 
 # 25. Retrieval Architecture

@@ -1,55 +1,16 @@
 """Memoria CLI entry point."""
 
 import argparse
-import os
 import sys
-from pathlib import Path
 
 from memoria.index import INDEX_RELATIVE_PATH, rebuild
+from memoria.repository import NoEvidenceRoot, from_env, require_evidence_root
 from memoria.validate import validate
 
-EVIDENCE_ROOT_ENV_VAR = "MEMORIA_EVIDENCE_ROOT"
-
-
-class NoEvidenceRoot(Exception):
-    """Raised when a command that reads evidence has no corpus configured."""
-
-
-def evidence_root() -> Path:
-    """The configured evidence corpus root.
-
-    There is no default. It used to be ``../thoreau-evidence``, which was
-    correct only when run from beside that sibling checkout; the corpus was
-    retired 2026-09-01 (docs/open-problems.md §2.4) and a default pointing at
-    a path that is not there fails later and less clearly than refusing here.
-
-    Called only by the commands that actually read evidence, so anything
-    working from this repo's own normalized records never needs the variable
-    set.
-    """
-    configured = os.environ.get(EVIDENCE_ROOT_ENV_VAR)
-    if not configured:
-        raise NoEvidenceRoot(
-            f"{EVIDENCE_ROOT_ENV_VAR} is not set, and there is no default: "
-            "no evidence corpus is currently chosen "
-            "(see docs/open-problems.md 2.4). Set it to the absolute path of "
-            "an evidence repository to run this command."
-        )
-    return Path(configured)
-
-
-def repo_root() -> Path:
-    """Locate the Memoria repo root by walking up from the current
-    directory looking for pyproject.toml, so `memoria validate` and
-    `memoria rebuild` find sources/normalized/ regardless of which
-    subdirectory they are run from. Falls back to the current directory
-    (rather than raising) if no pyproject.toml is found above it.
-    """
-    candidate = Path.cwd()
-    for directory in (candidate, *candidate.parents):
-        if (directory / "pyproject.toml").is_file():
-            return directory
-    return candidate
+# Where the repository is, and where evidence is, are `memoria.repository`'s
+# to answer (ADR-0004). The CLI held both until the core grew a read side; it
+# is one adapter of three, and the MCP server would otherwise have had to
+# import from it.
 
 
 def main(argv=None):
@@ -65,13 +26,15 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
 
+    repository = from_env()
+
     if args.command == "validate":
         try:
-            root = evidence_root()
+            evidence_root = require_evidence_root(repository)
         except NoEvidenceRoot as exc:
             print(f"validate: {exc}", file=sys.stderr)
             return 1
-        errors = validate(root, repo_root())
+        errors = validate(evidence_root, repository.root)
         for error in errors:
             print(error)
         if errors:
@@ -80,11 +43,10 @@ def main(argv=None):
         return 0
 
     if args.command == "rebuild":
-        root = repo_root()
-        records = rebuild(root)
+        records = rebuild(repository)
         print(
             f"rebuild: indexed {len(records)} records to "
-            f"{root / INDEX_RELATIVE_PATH}"
+            f"{repository.root / INDEX_RELATIVE_PATH}"
         )
         if not records:
             print(
