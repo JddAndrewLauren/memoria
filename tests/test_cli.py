@@ -1,14 +1,20 @@
 import hashlib
+import os
 import subprocess
 import sys
 
+import pytest
 
-def run_cli(*args, env=None):
+EVIDENCE_ROOT_ENV_VAR = "MEMORIA_EVIDENCE_ROOT"
+
+
+def run_cli(*args, env=None, cwd=None):
     return subprocess.run(
         [sys.executable, "-m", "memoria.cli", *args],
         capture_output=True,
         text=True,
         env=env,
+        cwd=cwd,
     )
 
 
@@ -16,6 +22,12 @@ def test_help_lists_validate():
     result = run_cli("--help")
     assert result.returncode == 0
     assert "validate" in result.stdout
+
+
+def test_help_lists_normalize():
+    result = run_cli("--help")
+    assert result.returncode == 0
+    assert "normalize" in result.stdout
 
 
 def _make_valid_corpus(tmp_path):
@@ -56,3 +68,35 @@ def test_validate_exits_nonzero_when_file_tampered(tmp_path):
 
     assert result.returncode != 0
     assert "pg57393.txt" in result.stdout
+
+
+def test_validate_exits_nonzero_when_normalized_record_has_dangling_src_id(
+    tmp_path,
+):
+    evidence_root, _ = _make_valid_corpus(tmp_path)
+    repo_root = tmp_path / "repo"
+    normalized_dir = repo_root / "sources" / "normalized"
+    normalized_dir.mkdir(parents=True)
+    (normalized_dir / "SRC-000001.md").write_text(
+        "---\nid: SRC-000001\n---\n\nSee SRC-999999.\n"
+    )
+    env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=str(evidence_root))
+
+    result = run_cli("validate", env=env, cwd=repo_root)
+
+    assert result.returncode != 0
+    assert "SRC-999999" in result.stdout
+
+
+@pytest.mark.skipif(
+    EVIDENCE_ROOT_ENV_VAR not in os.environ,
+    reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
+)
+def test_normalize_writes_records_under_sources_normalized(tmp_path):
+    env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=os.environ[EVIDENCE_ROOT_ENV_VAR])
+
+    result = run_cli("normalize", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0
+    written = list((tmp_path / "sources" / "normalized").glob("SRC-*.md"))
+    assert len(written) == 558

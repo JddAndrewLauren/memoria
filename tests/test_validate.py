@@ -97,3 +97,53 @@ def test_validate_passes_against_the_real_evidence_corpus():
     errors = validate(real_evidence_root)
 
     assert errors == []
+
+
+def _write_normalized_record(repo_root, record_id, extra_body=""):
+    normalized_dir = repo_root / "sources" / "normalized"
+    normalized_dir.mkdir(parents=True, exist_ok=True)
+    (normalized_dir / f"{record_id}.md").write_text(
+        f"---\nid: {record_id}\nsource_type: journal\n---\n\n{extra_body}\n"
+    )
+
+
+def test_validate_passes_when_no_normalized_records_directory_exists(tmp_path):
+    evidence_root = _make_corpus(
+        tmp_path, {"raw/gutenberg/57393-journal-01/pg57393.txt": "hello thoreau"}
+    )
+    _write_manifest(evidence_root, ["raw/gutenberg/57393-journal-01/pg57393.txt"])
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    errors = validate(evidence_root, repo_root)
+
+    assert errors == []
+
+
+def test_validate_passes_when_every_referenced_src_id_resolves(tmp_path):
+    evidence_root = _make_corpus(
+        tmp_path, {"raw/gutenberg/57393-journal-01/pg57393.txt": "hello thoreau"}
+    )
+    _write_manifest(evidence_root, ["raw/gutenberg/57393-journal-01/pg57393.txt"])
+    repo_root = tmp_path / "repo"
+    _write_normalized_record(repo_root, "SRC-000001")
+    _write_normalized_record(repo_root, "SRC-000002", extra_body="See SRC-000001.")
+
+    errors = validate(evidence_root, repo_root)
+
+    assert errors == []
+
+
+def test_validate_fails_and_names_a_dangling_src_id_reference(tmp_path):
+    evidence_root = _make_corpus(
+        tmp_path, {"raw/gutenberg/57393-journal-01/pg57393.txt": "hello thoreau"}
+    )
+    _write_manifest(evidence_root, ["raw/gutenberg/57393-journal-01/pg57393.txt"])
+    repo_root = tmp_path / "repo"
+    _write_normalized_record(repo_root, "SRC-000001", extra_body="See SRC-999999.")
+
+    errors = validate(evidence_root, repo_root)
+
+    assert len(errors) == 1
+    assert "SRC-999999" in errors[0]
+    assert "SRC-000001.md" in errors[0]
