@@ -118,6 +118,31 @@ def test_normalize_writes_records_under_sources_normalized(tmp_path):
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
 )
+def test_normalize_writes_cross_references_under_sources_normalized(tmp_path):
+    env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=os.environ[EVIDENCE_ROOT_ENV_VAR])
+
+    result = run_cli("normalize", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0
+    cross_references_path = (
+        tmp_path / "sources" / "normalized" / "cross-references.yaml"
+    )
+    assert cross_references_path.is_file()
+    rows = yaml.safe_load(cross_references_path.read_text())
+    # See tests/test_cross_references.py's TestAgainstTheRealEvidenceCorpus
+    # for the reconciliation against RECON.md §4(b)'s 628/364.
+    assert len(rows) == 651
+    resolvable = [r for r in rows if r["resolvable"]]
+    assert len(resolvable) == 369
+    for row in rows:
+        assert row["source_record_id"].startswith("SRC-")
+        assert row["target_work"]
+
+
+@pytest.mark.skipif(
+    EVIDENCE_ROOT_ENV_VAR not in os.environ,
+    reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
+)
 def test_normalize_writes_editorial_records_under_sources_editorial(tmp_path):
     env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=os.environ[EVIDENCE_ROOT_ENV_VAR])
 
@@ -150,6 +175,15 @@ def test_rebuild_writes_normalized_records_and_the_index(tmp_path):
     table = yaml.safe_load(recipients_path.read_text())
     assert len(table) == 43
     assert (tmp_path / ".memoria" / "index.db").is_file()
+    cross_references_path = (
+        tmp_path / "sources" / "normalized" / "cross-references.yaml"
+    )
+    assert cross_references_path.is_file()
+    # rebuild() must produce the cross-reference table too (issue #8's own
+    # instance of the class of defect test_rebuild_produces_byte_identical_
+    # output_to_normalize guards, below) - not just the normalized records
+    # and index.
+    assert len(yaml.safe_load(cross_references_path.read_text())) == 651
 
 
 @pytest.mark.skipif(
@@ -219,3 +253,9 @@ def test_rebuild_produces_byte_identical_output_to_normalize(tmp_path):
 
         assert normalize_files.keys() == rebuild_files.keys(), subdir
         assert normalize_files == rebuild_files, subdir
+
+        # Issue #8's own instance of this defect class: cross-references.yaml
+        # is derived state produced alongside recipients.yaml, so it must be
+        # covered here too, not just picked up incidentally by the glob above.
+        if subdir == "normalized":
+            assert "cross-references.yaml" in normalize_files

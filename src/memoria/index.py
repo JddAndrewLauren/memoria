@@ -14,6 +14,11 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from memoria.cross_references import (
+    CROSS_REFERENCES_RELATIVE_PATH,
+    extract_cross_references,
+    write_cross_references_table,
+)
 from memoria.editorial import (
     EDITORIAL_RELATIVE_PATH,
     EditorialRecord,
@@ -131,8 +136,8 @@ def search(
 
 def rebuild(evidence_root: Path, repo_root: Path) -> list[NormalizedRecord]:
     """Delete and regenerate all derived state - the normalized records,
-    the recipients table, the editorial records, and the FTS5 index -
-    from evidence, losing nothing (§42).
+    the recipients table, the cross-reference table, the editorial
+    records, and the FTS5 index - from evidence, losing nothing (§42).
 
     Normalized records are themselves rebuildable derived state (see
     ``docs/normalized-record-schema.md``): this re-derives them from
@@ -184,6 +189,10 @@ def rebuild(evidence_root: Path, repo_root: Path) -> list[NormalizedRecord]:
     write_normalized_records(records, output_root)
     write_recipients_table(
         recipients_table(letter_records), output_root / "recipients.yaml"
+    )
+    write_cross_references_table(
+        extract_cross_references(editorial_records),
+        repo_root / CROSS_REFERENCES_RELATIVE_PATH,
     )
     write_editorial_records(editorial_records, repo_root / EDITORIAL_RELATIVE_PATH)
     build_index(repo_root / INDEX_RELATIVE_PATH, records, editorial_records)
