@@ -49,7 +49,7 @@ def _make_valid_corpus(tmp_path):
     manifest_dir = evidence_root / "raw"
     manifest_dir.mkdir(parents=True, exist_ok=True)
     (manifest_dir / "manifest.yaml").write_text(
-        f"base: raw\nfiles:\n  - path: {rel_path}\n    sha256: {digest}\n"
+        f"units:\n  - id: SRC-000001\n    path: {rel_path}\n    sha256: {digest}\n"
     )
     return evidence_root, file_path
 
@@ -112,6 +112,35 @@ def test_validate_refuses_clearly_when_no_corpus_is_configured(tmp_path):
     assert "no default" in result.stderr
 
 
+def test_normalize_converts_a_plain_text_unit(tmp_path):
+    evidence_root = tmp_path / "evidence"
+    raw_file = evidence_root / "raw" / "a.txt"
+    raw_file.parent.mkdir(parents=True)
+    raw_file.write_text("First paragraph.\n\nSecond paragraph.")
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "pyproject.toml").write_text("")
+    env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=str(evidence_root))
+
+    result = run_cli("normalize", env=env, cwd=repo_root)
+
+    assert result.returncode == 0, result.stderr
+    assert "converted 1" in result.stdout
+    assert (repo_root / "sources" / "normalized" / "SRC-000001.md").is_file()
+
+
+def test_normalize_refuses_clearly_when_no_corpus_is_configured(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "pyproject.toml").write_text("")
+    env = {k: v for k, v in os.environ.items() if k != "MEMORIA_EVIDENCE_ROOT"}
+
+    result = run_cli("normalize", env=env, cwd=repo_root)
+
+    assert result.returncode == 1
+    assert "MEMORIA_EVIDENCE_ROOT" in result.stderr
+
+
 def test_rebuild_needs_no_corpus_at_all(tmp_path):
     """It reads this repo's own records, so it must not demand an evidence
     root it never uses."""
@@ -121,7 +150,7 @@ def test_rebuild_needs_no_corpus_at_all(tmp_path):
     result = run_cli("rebuild", env=env, cwd=tmp_path)
 
     assert result.returncode == 0, result.stderr
-    assert "no normalizer is wired in" in result.stdout
+    assert "run `memoria normalize` to produce them" in result.stdout
     assert "wrote 0 change projection(s)" in result.stdout
 
 

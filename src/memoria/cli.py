@@ -5,6 +5,8 @@ import sys
 
 from memoria import changes
 from memoria.index import INDEX_RELATIVE_PATH, rebuild
+from memoria.normalize import normalize as run_normalize
+from memoria.records import NORMALIZED_RELATIVE_PATH
 from memoria.repository import NoEvidenceRoot, from_env, require_evidence_root
 from memoria.validate import validate
 from memoria.write import Checkpointed, checkpoint
@@ -29,6 +31,15 @@ def main(argv=None):
         "checkpoint",
         help="Commit any outside edits to durable files under one CHG- id",
     )
+    normalize_parser = subparsers.add_parser(
+        "normalize",
+        help="Append new raw units to the manifest ledger and convert what changed",
+    )
+    normalize_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Reconvert every unit, not only those whose hash or converter changed",
+    )
 
     args = parser.parse_args(argv)
 
@@ -48,6 +59,27 @@ def main(argv=None):
         print("validate: OK")
         return 0
 
+    if args.command == "normalize":
+        try:
+            evidence_root = require_evidence_root(repository)
+        except NoEvidenceRoot as exc:
+            print(f"normalize: {exc}", file=sys.stderr)
+            return 1
+        report = run_normalize(repository, evidence_root, force_all=args.all)
+        if report.added_units:
+            print(f"normalize: added {len(report.added_units)} new unit(s) to the ledger")
+        print(
+            f"normalize: converted {len(report.converted)}, skipped "
+            f"{len(report.skipped)} (unchanged) to "
+            f"{repository.root / NORMALIZED_RELATIVE_PATH}"
+        )
+        if report.unconvertible:
+            print(
+                f"normalize: {len(report.unconvertible)} unit(s) have no "
+                "converter registered for their format yet"
+            )
+        return 0
+
     if args.command == "rebuild":
         records = rebuild(repository)
         print(
@@ -56,8 +88,8 @@ def main(argv=None):
         )
         if not records:
             print(
-                "rebuild: no normalized records found, and no normalizer is "
-                "wired in - no evidence corpus is currently chosen "
+                "rebuild: no normalized records found - run `memoria "
+                "normalize` to produce them, or choose an evidence corpus "
                 "(see docs/open-problems.md 2.4)"
             )
         change_ids = changes.rebuild(repository)

@@ -71,8 +71,19 @@ _ID_SHAPED = re.compile(r"^(?P<kind>[A-Z]{2,5})-")
 
 # Kinds part 04 §4 defines that nothing implements yet. Used only to tell
 # "not built yet" from "never heard of it" in the message; the mechanism that
-# rejects them is the shape rule above, not this list.
-NOT_YET_IMPLEMENTED_KINDS = ("SES", "CLM", "RES", "DEC", "SUB")
+# rejects them is the shape rule above, not this list. `CHG` and `SUB` are not
+# here: they are implemented, below, and need their own malformed-reference
+# messages rather than the generic "not resolvable in this build yet" one.
+NOT_YET_IMPLEMENTED_KINDS = ("SES", "CLM", "RES", "DEC")
+
+# A subject or entry slug: lowercase, directory-name shaped (part 04 §2's
+# `subjects/people/bob.md`). Uppercase is refused rather than folded, the
+# same call `_ID_SHAPED` makes for a kind prefix - a `SUB-People` typo is a
+# malformed reference, not a second accepted spelling.
+_SLUG = r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*"
+_SUBJECT_ID = rf"SUB-{_SLUG}"
+_BARE_SUBJECT = re.compile(rf"^(?P<id>{_SUBJECT_ID})$")
+_SUBJECT_ENTRY = re.compile(rf"^(?P<subject>{_SUBJECT_ID})/(?P<entry>{_SLUG})$")
 
 
 @dataclass(frozen=True)
@@ -115,6 +126,17 @@ class ChangeReference:
 
 
 @dataclass(frozen=True)
+class SubjectReference:
+    """A subject, or one entry under it (part 04 §4's ``SUB-x`` / ``SUB-x/y``).
+
+    ``entry_slug`` is ``None`` for a bare subject reference.
+    """
+
+    subject_id: str
+    entry_slug: str | None = None
+
+
+@dataclass(frozen=True)
 class UnknownReference:
     """A reference whose kind this build cannot resolve.
 
@@ -129,6 +151,7 @@ class UnknownReference:
 
 Reference = (
     SourceReference
+    | SubjectReference
     | PathReference
     | ChapterReference
     | SectionReference
@@ -225,6 +248,14 @@ def parse(ref: str) -> Reference:
         record_id, paragraph = split_anchor(match.group("anchor"))
         return SourceReference(record_id, paragraph)
 
+    match = _SUBJECT_ENTRY.match(ref)
+    if match:
+        return SubjectReference(match.group("subject"), match.group("entry"))
+
+    match = _BARE_SUBJECT.match(ref)
+    if match:
+        return SubjectReference(match.group("id"), None)
+
     match = _ID_SHAPED.match(ref)
     if match:
         kind = match.group("kind")
@@ -250,6 +281,15 @@ def parse(ref: str) -> Reference:
             raise BadReference(
                 f"malformed change reference: {ref!r} - expected a "
                 "CHG-YYYYMMDD-NNN ID like CHG-20261014-003"
+            )
+        if kind.upper() == "SUB":
+            # Same call as SRC above: this is a subject reference, and it is
+            # malformed - lowercase slugs is the form, and neither pattern
+            # above matched.
+            raise BadReference(
+                f"malformed subject reference: {ref!r} - expected SUB-<subject> "
+                "or SUB-<subject>/<entry>, with lowercase slugs (e.g. "
+                "SUB-people or SUB-people/bob)"
             )
         return UnknownReference(
             kind=kind.upper(), known=kind.upper() in NOT_YET_IMPLEMENTED_KINDS
@@ -299,6 +339,10 @@ def format_citation(reference: Reference) -> str:
         if reference.paragraph is None:
             return reference.record_id
         return f"{reference.record_id} ¶{reference.paragraph}"
+    if isinstance(reference, SubjectReference):
+        if reference.entry_slug is None:
+            return reference.subject_id
+        return f"{reference.subject_id}/{reference.entry_slug}"
     if isinstance(reference, PathReference):
         return str(reference.path)
     if isinstance(reference, ChapterReference):

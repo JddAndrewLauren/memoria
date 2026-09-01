@@ -41,6 +41,8 @@ ALLOWED_IMPORTS = {
     "memoria.mcp",       # the package's own modules
     "memoria.records",
     "memoria.repository",
+    "memoria.index",      # #12: search_text calls memoria.index.search
+    "memoria.ledger",      # #13: every served call is ledgered
 }
 
 FILE_OPENING_CALLS = {"open", "read_text", "read_bytes", "write_text", "write_bytes"}
@@ -71,9 +73,11 @@ def _repo(tmp_path):
 def _restore_server_repository():
     """`server._repository` is a module global; leaking it across tests would
     make them order-dependent."""
-    original = server._repository
+    original_repository = server._repository
+    original_session_id = server._session_id
     yield
-    server._repository = original
+    server._repository = original_repository
+    server._session_id = original_session_id
 
 
 # --- the adapter reaches nothing on its own --------------------------------
@@ -150,13 +154,14 @@ def _snapshot(*roots):
     }
 
 
-def test_no_read_writes_anything_under_either_root(tmp_path):
-    """#11: the server never writes to the evidence repo.
+def test_no_read_writes_anything_under_either_root_but_the_ledger(tmp_path):
+    """#11: the server never writes to the evidence repo. #13 adds the one
+    intentional write: the ledger, under `sessions/**`.
 
-    Snapshots both roots and asserts no changed bytes *and no new paths* - the
-    second half is what would catch a stray `.memoria/index.db` appearing as a
-    side effect of a read, which `search()` is already known to do on an empty
-    corpus.
+    Snapshots both roots and asserts no changed bytes *and no new paths*
+    outside `sessions/` - what would catch a stray `.memoria/index.db`
+    appearing as a side effect of a read, which `search()` is already known
+    to do on an empty corpus.
     """
     repo_root = tmp_path / "repo"
     evidence_root = tmp_path / "evidence"
@@ -183,9 +188,13 @@ def test_no_read_writes_anything_under_either_root(tmp_path):
             server.read(ref)
         except Exception:
             pass
-    after = _snapshot(repo_root, evidence_root)
+    after = {
+        path: content
+        for path, content in _snapshot(repo_root, evidence_root).items()
+        if repo_root / "sessions" not in path.parents
+    }
 
-    assert set(after) == set(before), "a read created or removed a file"
+    assert set(after) == set(before), "a read created or removed a file outside sessions/"
     assert after == before, "a read changed a file's bytes"
 
 
@@ -255,10 +264,173 @@ def test_the_server_registers_a_read_tool(tmp_path):
     assert "verbatim" in (tool.description or "")
 
 
-def test_the_tool_surface_is_one_read_tool():
-    """Part 11 §25 withdrew the per-type read tools; there is no read_source."""
+def test_the_tool_surface_is_read_and_search_text():
+    """Part 11 §25 withdrew the per-type read tools; there is no read_source.
+
+    #12 adds exactly one more tool, search_text - not one per filter or one
+    per source type.
+    """
     names = {t.name for t in asyncio.run(server.mcp.list_tools())}
-    assert names == {"read"}
+    assert names == {"read", "search_text"}
+
+
+# --- search_text --------------------------------------------------------
+
+
+def _index(tmp_path, records):
+    from memoria.index import INDEX_RELATIVE_PATH, build_index
+
+    build_index(tmp_path / INDEX_RELATIVE_PATH, records)
+    return Repository(root=tmp_path)
+
+
+def test_search_text_returns_the_src_id_and_anchor_of_each_hit(tmp_path):
+    repository = _index(
+        tmp_path,
+        [_record(paragraphs=["A blue heron flew over.", "Nothing to do with birds."])],
+    )
+    server._repository = repository
+
+    rendered = server.search_text("heron")
+
+    assert "SRC-000184" in rendered
+    assert "src-000184-p1" in rendered
+
+
+def test_search_text_returns_no_results_rather_than_an_empty_string(tmp_path):
+    server._repository = _index(tmp_path, [_record()])
+
+    rendered = server.search_text("nonexistentterm")
+
+    assert rendered == "No results."
+
+
+def test_search_text_over_an_unbuilt_index_returns_no_results(tmp_path):
+    server._repository = Repository(root=tmp_path)
+
+    assert server.search_text("anything") == "No results."
+
+
+def test_search_text_filters_compose(tmp_path):
+    from memoria.index import SearchFilters
+
+    repository = _index(
+        tmp_path,
+        [
+            _record(id="SRC-000001", source_type="journal", paragraphs=["A fox ran."]),
+            _record(
+                id="SRC-000002", source_type="editorial", paragraphs=["A fox, noted."]
+            ),
+        ],
+    )
+    server._repository = repository
+
+    rendered = server.search_text("fox", SearchFilters(source_type="journal"))
+
+    assert "SRC-000001" in rendered
+    assert "SRC-000002" not in rendered
+
+
+# --- the ledger (#13) -------------------------------------------------------
+
+
+def _events(tmp_path, session_id):
+    path = tmp_path / "sessions" / session_id / "events.jsonl"
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_a_served_read_is_ledgered_full_source_included(tmp_path):
+    """The undecorated full-source path is not an unlogged path."""
+    server._repository = _repo(tmp_path)
+    server._session_id = "SES-test"
+
+    server.read("SRC-000184")
+
+    (event,) = _events(tmp_path, "SES-test")
+    assert event["tool"] == "read"
+    assert event["ref"] == "SRC-000184"
+    assert event["served"] == ["SRC-000184"]
+
+
+def test_a_failed_read_is_not_ledgered(tmp_path):
+    """Only what was served is ledgered - a ToolError supplied nothing."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    server._repository = _repo(tmp_path)
+    server._session_id = "SES-test"
+
+    with pytest.raises(ToolError):
+        server.read("SRC-000999")
+
+    assert not (tmp_path / "sessions").exists()
+
+
+def test_a_served_search_is_ledgered(tmp_path):
+    server._repository = _index(
+        tmp_path, [_record(paragraphs=["A blue heron flew over."])]
+    )
+    server._session_id = "SES-test"
+
+    server.search_text("heron")
+
+    (event,) = _events(tmp_path, "SES-test")
+    assert event["tool"] == "search_text"
+    assert event["query"] == "heron"
+    assert event["served"] == ["src-000184-p1"]
+
+
+def test_several_served_tool_calls_reconstruct_exactly_what_the_server_returned(tmp_path):
+    """Drives real `server.read` / `server.search_text` tool calls - not
+    `ledger.append_*` directly with hand-built values - against a fixture
+    repo, then checks the ledger against what the server *actually*
+    returned for each call, independently recomputed through the core.
+    """
+    from memoria.index import INDEX_RELATIVE_PATH, build_index
+    from memoria.index import search as search_core
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    records = [
+        _record(paragraphs=["A blue heron flew over.", "Nothing to do with birds."])
+    ]
+    write_normalized_records(records, tmp_path / NORMALIZED_RELATIVE_PATH)
+    build_index(tmp_path / INDEX_RELATIVE_PATH, records)
+    repository = Repository(root=tmp_path)
+    server._repository = repository
+    server._session_id = "SES-test"
+
+    full = read(repository, "SRC-000184")
+    rendered_full = server.read("SRC-000184")
+
+    paragraph = read(repository, "SRC-000184 P1")
+    rendered_paragraph = server.read("SRC-000184 P1")
+
+    hits = search_core(repository, "heron")
+    rendered_search = server.search_text("heron")
+
+    with pytest.raises(ToolError):
+        server.read("SRC-000999")
+
+    events = _events(tmp_path, "SES-test")
+    assert [e["tool"] for e in events] == ["read", "read", "search_text"]
+
+    assert events[0]["served"] == [full.citation]
+    assert server.render(full) == rendered_full
+
+    assert events[1]["served"] == [paragraph.citation]
+    assert server.render(paragraph) == rendered_paragraph
+
+    assert events[2]["served"] == [hit.anchor for hit in hits]
+    assert server.render_search(hits) == rendered_search
+
+
+def test_the_server_registers_a_search_text_tool():
+    """The one other test that touches the SDK for this tool."""
+    tools = asyncio.run(server.mcp.list_tools())
+
+    (tool,) = [t for t in tools if t.name == "search_text"]
+    assert set(tool.input_schema["properties"]) == {"query", "filters"}
+    assert tool.input_schema["required"] == ["query"]
+    assert "ranked" in (tool.description or "")
 
 
 # --- the committed registration ---------------------------------------------

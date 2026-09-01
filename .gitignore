@@ -5,10 +5,11 @@ __pycache__/
 .pytest_cache/
 
 # Derived from the evidence corpus; not committed, same as the raw evidence
-# it derives from. Nothing regenerates these today -- the normalizer was
-# written for the retired Thoreau corpus (docs/open-problems.md 2.4) and no
-# replacement is chosen. Ignored still, so that records restored by hand or
-# by a future normalizer are not committed by accident.
+# it derives from. `memoria normalize` regenerates them from the raw units it
+# has a converter for; the rest of the retired Thoreau corpus's ingestion layer
+# has no replacement yet (docs/open-problems.md 2.4). Ignored either way, so
+# that records restored by hand or by the normalizer are not committed by
+# accident.
 sources/normalized/
 sources/editorial/
 

@@ -8,7 +8,7 @@ caller.
 import pytest
 
 from memoria import references
-from memoria.index import build_index, search
+from memoria.index import INDEX_RELATIVE_PATH, build_index, search
 from memoria.records import NormalizedRecord
 from memoria.references import (
     BadReference,
@@ -17,8 +17,10 @@ from memoria.references import (
     PathReference,
     SectionReference,
     SourceReference,
+    SubjectReference,
     UnknownReference,
 )
+from memoria.repository import Repository
 
 
 def test_parse_resolves_a_bare_src_id():
@@ -108,8 +110,6 @@ def test_parse_resolves_a_repository_path():
         ("CLM-0041", "CLM"),
         ("RES-20261018-003", "RES"),
         ("DEC-0088", "DEC"),
-        ("SUB-people", "SUB"),
-        ("SUB-people/bob", "SUB"),
     ],
 )
 def test_a_kind_the_archive_defines_but_this_build_lacks_is_a_value_not_a_path(
@@ -125,6 +125,43 @@ def test_a_kind_the_archive_defines_but_this_build_lacks_is_a_value_not_a_path(
 
 def test_an_unheard_of_id_shaped_reference_is_unknown_rather_than_a_path():
     assert references.parse("FOO-0001") == UnknownReference(kind="FOO", known=False)
+
+
+def test_parse_resolves_a_bare_subject_id():
+    assert references.parse("SUB-people") == SubjectReference("SUB-people", None)
+
+
+def test_parse_resolves_a_subject_entry_id():
+    assert references.parse("SUB-people/bob") == SubjectReference(
+        "SUB-people", "bob"
+    )
+
+
+def test_parse_resolves_a_hyphenated_subject_and_entry_slug():
+    assert references.parse("SUB-arcs/bob-relationship") == SubjectReference(
+        "SUB-arcs", "bob-relationship"
+    )
+
+
+@pytest.mark.parametrize(
+    "ref",
+    ["SUB-People", "SUB-people/Bob", "SUB-", "SUB-people/", "SUB-people/bob/extra"],
+)
+def test_a_malformed_subject_reference_says_so(ref):
+    with pytest.raises(BadReference, match="malformed subject reference"):
+        references.parse(ref)
+
+
+def test_format_citation_of_a_bare_subject():
+    assert references.format_citation(SubjectReference("SUB-people", None)) == (
+        "SUB-people"
+    )
+
+
+def test_format_citation_of_a_subject_entry():
+    assert references.format_citation(
+        SubjectReference("SUB-people", "bob")
+    ) == "SUB-people/bob"
 
 
 def test_a_malformed_src_id_says_so_rather_than_claiming_the_kind_is_unknown():
@@ -190,8 +227,9 @@ def test_a_search_result_anchor_is_a_reference_with_no_reconstruction(tmp_path):
         original_locator="Journal I, entry dated Oct. 22.",
         paragraphs=["Nothing here.", "A blue heron flew over."],
     )
-    build_index(tmp_path / "index.db", [record])
+    repository = Repository(root=tmp_path)
+    build_index(repository.root / INDEX_RELATIVE_PATH, [record])
 
-    (hit,) = search(tmp_path / "index.db", "heron")
+    (hit,) = search(repository, "heron")
 
     assert references.parse(hit.anchor) == SourceReference("SRC-000184", 2)

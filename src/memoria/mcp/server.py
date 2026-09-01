@@ -1,11 +1,12 @@
-"""The `memoria` MCP server, exposing `read(ref)`.
+"""The `memoria` MCP server, exposing `read(ref)` and `search_text(query, filters)`.
 
 The second adapter over the core, after the CLI and before the FastAPI app
 (#64). §40.1 asks that business logic not be duplicated between them, and
 this module is where that stops being an aspiration: it holds no rule the
-other two lack, it imports only ``memoria.records`` and ``memoria.repository``,
-and it opens no file and speaks to no database. Everything it does is call one
-core function and render what comes back.
+other two lack, it imports only ``memoria.records``, ``memoria.repository``,
+(#12) ``memoria.index`` and (#13) ``memoria.ledger``, and it opens no file
+and speaks to no database itself. Everything it does is call one core
+function and render what comes back.
 
 `read(ref)` is the single read tool (part 11 §25). Dispatch is read off the
 reference, because the ID scheme already names the type; there are no
@@ -16,7 +17,13 @@ full-source read gives back the record file exactly as it sits on disk. If
 reading through the tool were ever worse than ``cat``, the routing hook would
 stop being a router and become a wall, and people would go around it.
 
-See ``docs/tool-surface.md`` for the forced signature and what is still open.
+`search_text(query, filters)` is the retrieval half (#12). The four §25
+filters - event date, recorded date, source type, contemporaneous/
+retrospective - are implemented in ``memoria.index.search``, not here: the
+tool shapes results, the core computes them, so the same filters reach #64's
+web layer without a second, divergent copy.
+
+See ``docs/tool-surface.md`` for the forced signatures and what is still open.
 """
 
 from __future__ import annotations
@@ -27,6 +34,8 @@ import sys
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
+from memoria.index import SearchFilters, SearchResult, search as search_index
+from memoria.ledger import append_read, append_search, session_id_from_env
 from memoria.records import Read, ReadError, read as read_ref
 from memoria.repository import Repository, from_env
 
@@ -35,7 +44,9 @@ mcp = MCPServer(
     instructions=(
         "Memoria serves the evidence archive. Read any stable reference with "
         "read(ref): a SRC- record ID, a paragraph of one, or a repository "
-        "path. Evidence comes back verbatim, never summarized."
+        "path. Evidence comes back verbatim, never summarized. Find text "
+        "with search_text(query, filters); each hit's anchor feeds straight "
+        "into read(ref)."
     ),
 )
 
@@ -45,6 +56,11 @@ mcp = MCPServer(
 # buy nothing here but a layer to unwrap.
 _repository: Repository | None = None
 
+# Set lazily, the first time a served call needs it, and held for the rest of
+# this process's life - a stdio server is spawned per client (docs/poc-plan.md
+# §3), so the process is the session (#13).
+_session_id: str | None = None
+
 
 def repository() -> Repository:
     """The repository this server serves.
@@ -53,6 +69,14 @@ def repository() -> Repository:
     not require main() to have run.
     """
     return _repository if _repository is not None else from_env()
+
+
+def session_id() -> str:
+    """The session this server's served calls belong to (#13)."""
+    global _session_id
+    if _session_id is None:
+        _session_id = session_id_from_env()
+    return _session_id
 
 
 def render(result: Read) -> str:
@@ -103,24 +127,70 @@ def read(ref: str) -> str:
 
     Accepts a normalized source record by ID (`SRC-000184`), one paragraph of
     one (`SRC-000184 P17`, `#src-000184-p17`, or a search result's anchor
-    `src-000184-p17` as-is), or a repository-relative path
+    `src-000184-p17` as-is), a subject or one of its entries
+    (`SUB-people`, `SUB-people/bob`), or a repository-relative path
     (`docs/poc-plan.md`).
 
-    A record ID with no paragraph returns the whole record file exactly as it
-    is on disk, frontmatter and anchors included - the undecorated full-source
-    read. Evidence text is never summarized, abridged or reformatted.
+    A record ID with no paragraph, or a SUB- reference, returns the whole
+    file exactly as it is on disk, frontmatter included - the undecorated
+    full-source read. Evidence text is never summarized, abridged or
+    reformatted.
 
     Reference kinds the archive defines but this build does not resolve yet -
-    SES-, CHG-, CLM-, RES-, DEC-, SUB- - return an error naming the kind.
+    SES-, CHG-, CLM-, RES-, DEC- - return an error naming the kind.
     """
     try:
-        return render(read_ref(repository(), ref))
+        result = read_ref(repository(), ref)
     except ReadError as exc:
         # ToolError is the SDK's anticipated-failure type: it reaches the
         # model as is_error with this message intact. A bare exception would
         # be reported as "Error executing tool read" with the reason stripped,
         # which is the silent failure #11 exists to forbid.
+        #
+        # Not ledgered: the ledger records what was served (#13), and a
+        # failed read served nothing.
         raise ToolError(str(exc)) from exc
+    append_read(repository(), session_id(), result)
+    return render(result)
+
+
+def render_search(results: list[SearchResult]) -> str:
+    """Shape search hits into what the model sees.
+
+    One line per hit, ranked, carrying both the `SRC-` ID and the paragraph
+    anchor - the anchor is what `read(ref)` accepts verbatim, with no
+    reconstruction by the caller (docs/tool-surface.md).
+
+    `SearchResult` carries no text (memoria.index): whatever evidence the
+    model wants, it reads through `read(ref)` with the anchor this line
+    gives it - the same evidence-is-never-summarized discipline `read`
+    itself keeps.
+    """
+    if not results:
+        return "No results."
+    return "\n".join(f"{r.src_id} {r.anchor}" for r in results)
+
+
+@mcp.tool()
+def search_text(query: str, filters: SearchFilters | None = None) -> str:
+    """Full-text search the evidence archive (FTS5), ranked by relevance.
+
+    Returns each hit's `SRC-` ID and paragraph anchor - the anchor feeds
+    straight into `read(ref)` with no reconstruction. Carries no text of its
+    own: evidence is read, not summarized.
+
+    `filters` narrows by `event_date`, `recorded_date`, `source_type` and
+    `contemporaneous` (true excludes retrospective editorial commentary);
+    all compose. Dates match the record's verbatim frontmatter string
+    exactly.
+
+    Returns "No results." rather than an empty string when nothing matches.
+    An unbuilt corpus (no `.memoria/index.db` yet) is the same as an empty
+    one - not an error.
+    """
+    results = search_index(repository(), query, filters)
+    append_search(repository(), session_id(), query, filters, results)
+    return render_search(results)
 
 
 def main(argv=None) -> int:
