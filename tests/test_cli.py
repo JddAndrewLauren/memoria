@@ -153,9 +153,11 @@ def test_normalize_writes_editorial_records_under_sources_editorial(tmp_path):
 
     assert result.returncode == 0
     written = list((tmp_path / "sources" / "editorial").glob("ED-*.md"))
-    # 880 footnotes (508 J01 + 372 J02) + 232 spans (asides + interpolations,
-    # 83 + 149) + 2 introductions (Torrey, Sanborn) - see test_editorial.py.
-    assert len(written) == 1126
+    # 990 footnotes (508 J01 + 372 J02 + 110 letters) + 101 standalone
+    # asides (90 journals + 11 letters) + 193 interpolations (154 journals
+    # + 39 letters) - issue #56 extended extraction to the letters volume
+    # - + 2 introductions (Torrey, Sanborn) - see test_editorial.py.
+    assert len(written) == 1286
 
 
 @pytest.mark.skipif(
@@ -205,17 +207,15 @@ def test_rebuild_writes_editorial_records_and_strips_them_from_normalized(tmp_pa
 
     assert result.returncode == 0
     editorial_written = list((tmp_path / "sources" / "editorial").glob("ED-*.md"))
-    assert len(editorial_written) == 1126
-    # Scoped to journal records (issue #6 rebase, round 3): #5's
-    # extract_editorial_apparatus only ever processes JOURNAL_VOLUMES, so
-    # letters keep their own bracketed footnote markers inline by design
-    # (issue #6's own scope decision, mirroring #3's original "left inline
-    # for this slice" call for journals before #5 existed) - segregating
-    # Familiar Letters' apparatus was never built by either issue.
+    assert len(editorial_written) == 1286
+    # Issue #56 extended extract_editorial_apparatus() to the letters
+    # volume too, so both journal and letter records must come out
+    # apparatus-free - not just journals, as issue #6 originally scoped
+    # letters out of #5's segregation.
     for path in (tmp_path / "sources" / "normalized").glob("SRC-*.md"):
         content = path.read_text(encoding="utf-8")
         frontmatter, body = content.split("---\n", 2)[1:]
-        if "source_type: journal" not in frontmatter:
+        if "source_type: journal" not in frontmatter and "source_type: letter" not in frontmatter:
             continue
         assert "[" not in body and "]" not in body, path.name
 

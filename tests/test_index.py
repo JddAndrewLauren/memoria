@@ -197,4 +197,38 @@ def test_rebuild_strips_editorial_apparatus_and_exclude_editorial_excludes_it(
     assert {r.source_type for r in with_editorial} == {"editorial"}
 
     editorial_written = list((repo_root / "sources" / "editorial").glob("ED-*.md"))
-    assert len(editorial_written) == 1126
+    # See tests/test_cli.py::test_normalize_writes_editorial_records_under_sources_editorial
+    # for the count breakdown (issue #56 extended this to the letters volume).
+    assert len(editorial_written) == 1286
+
+
+@pytest.mark.skipif(
+    EVIDENCE_ROOT_ENV_VAR not in os.environ,
+    reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
+)
+def test_search_excludes_letters_editorial_content(tmp_path):
+    # Issue #56's own acceptance criterion: search(..., exclude_editorial=
+    # True) must exclude the letters volume's editorial content too, not
+    # just the journals' - proven against real corpus content, not a
+    # synthetic record. "Concord Battle-Ground" is Sanborn's illustration
+    # caption for a real letter (SRC-000592) - a standalone bracketed
+    # aside stripped from the letter's own evidence text and extracted as
+    # its own editorial record.
+    evidence_root = os.environ[EVIDENCE_ROOT_ENV_VAR]
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    rebuild(evidence_root, repo_root)
+    db_path = repo_root / ".memoria" / "index.db"
+
+    with_editorial = search(db_path, '"Battle-Ground"')
+    without_editorial = search(db_path, '"Battle-Ground"', exclude_editorial=True)
+
+    assert any(
+        r.source_type == "editorial" and r.anchor == "src-000592-p7"
+        for r in with_editorial
+    )
+    assert not any(
+        r.source_type == "editorial" and r.anchor == "src-000592-p7"
+        for r in without_editorial
+    )

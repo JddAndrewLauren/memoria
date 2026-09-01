@@ -12,7 +12,7 @@ from memoria.editorial import (
     extract_editorial_apparatus,
     write_editorial_records,
 )
-from memoria.normalize import JOURNAL_VOLUMES, normalize_journals
+from memoria.normalize import JOURNAL_VOLUMES, normalize_journals, normalize_letters
 
 from test_normalize import _FAKE_VOLUME_TEXT, _write_fake_volumes
 
@@ -91,6 +91,71 @@ _FAKE_LETTERS_TEXT = (
 
 _LETTERS_RAW_PATH = "raw/gutenberg/43523-familiar-letters/pg43523.txt"
 
+# A letters volume carrying the same apparatus shapes as the real corpus
+# (issue #56): a footnote marker in a letter's body, that footnote's body
+# in a "FOOTNOTES:" block (plural, unlike the journals' single "FOOTNOTES"
+# back-matter section - see docs/editorial-record-schema.md), a standalone
+# bracketed aside, a sentence-completing interpolation, a second footnote
+# marker sitting in a letter's own heading line rather than its body text
+# - the real corpus's own "known gap" shape (footnotes 15, 41, 42), left
+# unlinked rather than dropped - and, resuming right after that first
+# footnote's own body, the two other shapes PR #63 review round 1 found
+# body text actually resumes in on the real corpus: a two-line chapter
+# heading (bare roman numeral, then an all-caps title) and a letter
+# addressed *to* Thoreau from another correspondent (which, unlike
+# Thoreau's own "TO ..." letters, does not start with "TO ").
+_FAKE_LETTERS_WITH_APPARATUS = (
+    "The Project Gutenberg eBook of Familiar Letters\r\n"
+    "\r\n"
+    "*** START OF THE PROJECT GUTENBERG EBOOK FAMILIAR LETTERS ***\r\n"
+    "\r\n"
+    "INTRODUCTION\r\n"
+    "\r\n"
+    "Thoreau's letters give us the man behind the journal.\r\n"
+    "\r\n"
+    "FAMILIAR LETTERS OF THOREAU\r\n"
+    "\r\n"
+    "TO HELEN THOREAU (AT TAUNTON).\r\n"
+    "\r\n"
+    "     CONCORD, October 27, 1837.\r\n"
+    "\r\n"
+    "DEAR HELEN,--Please you, let the defendant say a few words.[2]\r\n"
+    "\r\n"
+    "[Illustration: _The Old Manse_]\r\n"
+    "\r\n"
+    "Give my love to brother [John].\r\n"
+    "\r\n"
+    "     Your affectionate brother,\r\n"
+    "     H. D. THOREAU.\r\n"
+    "\r\n"
+    "FOOTNOTES:\r\n"
+    "\r\n"
+    "[2] Helen's reply has not survived.\r\n"
+    "\r\n"
+    "II\r\n"
+    "\r\n"
+    "A CHAPTER HEADING\r\n"
+    "\r\n"
+    "This chapter narrative must never appear in any footnote body.\r\n"
+    "\r\n"
+    "A CORRESPONDENT TO THOREAU (AT CONCORD).\r\n"
+    "\r\n"
+    "DEAR THOREAU,--This letter to Thoreau must never appear in any\r\n"
+    "footnote body.\r\n"
+    "\r\n"
+    "TO JOHN THOREAU[3] (AT TAUNTON).\r\n"
+    "\r\n"
+    "DEAR JOHN,--Nothing much to report.\r\n"
+    "\r\n"
+    "FOOTNOTES:\r\n"
+    "\r\n"
+    "[3] This letter's dating is uncertain.\r\n"
+    "\r\n"
+    "GENERAL INDEX\r\n"
+    "\r\n"
+    "*** END OF THE PROJECT GUTENBERG EBOOK FAMILIAR LETTERS ***\r\n"
+)
+
 
 def _write_fake_corpus(evidence_root):
     _write_fake_volumes(
@@ -101,10 +166,25 @@ def _write_fake_corpus(evidence_root):
     letters_path.write_bytes(_FAKE_LETTERS_TEXT.encode("utf-8"))
 
 
+def _write_fake_corpus_with_letters_apparatus(evidence_root):
+    _write_fake_volumes(
+        evidence_root, [_FAKE_JOURNAL_WITH_APPARATUS, _FAKE_JOURNAL_WITH_APPARATUS]
+    )
+    letters_path = evidence_root / _LETTERS_RAW_PATH
+    letters_path.parent.mkdir(parents=True, exist_ok=True)
+    letters_path.write_bytes(_FAKE_LETTERS_WITH_APPARATUS.encode("utf-8"))
+
+
 def _extract(evidence_root):
     records = normalize_journals(evidence_root)
     editorial = extract_editorial_apparatus(evidence_root, records)
     return records, editorial
+
+
+def _extract_letters(evidence_root):
+    letter_records = normalize_letters(evidence_root)
+    editorial = extract_editorial_apparatus(evidence_root, letter_records)
+    return letter_records, editorial
 
 
 def test_footnote_markers_are_stripped_from_evidence_paragraphs(tmp_path):
@@ -278,6 +358,93 @@ def test_write_editorial_records_removes_stale_orphans(tmp_path):
     write_editorial_records(editorial, output_root)
 
     assert not stale_path.exists()
+
+
+def test_letters_footnote_marker_is_stripped_and_body_extracted_and_linked(tmp_path):
+    evidence_root = tmp_path / "thoreau-evidence"
+    _write_fake_corpus_with_letters_apparatus(evidence_root)
+
+    records, editorial = _extract_letters(evidence_root)
+
+    full_text = "\n".join(p for r in records for p in r.paragraphs)
+    assert "[2]" not in full_text
+    assert "say a few words." in full_text
+
+    footnotes = [e for e in editorial if e.editorial_type == "footnote"]
+    footnote_2 = next(e for e in footnotes if e.original_locator.endswith("footnote 2"))
+    assert "Helen's reply has not survived." in footnote_2.text
+    helen_letter = next(r for r in records if r.recipient == "HELEN THOREAU (AT TAUNTON).")
+    assert footnote_2.linked_record_id == helen_letter.id
+    assert footnote_2.recorded_date == "1906"
+    assert footnote_2.retrospective is True
+
+
+def test_letters_footnote_block_ends_at_a_chapter_heading_or_a_letter_to_thoreau(
+    tmp_path,
+):
+    # PR #63 review round 1: the block-end terminator only recognized
+    # "FOOTNOTES:", a "TO ..." letter heading, and "GENERAL INDEX" - so a
+    # two-line chapter heading ("II" / "A CHAPTER HEADING") or a letter
+    # addressed *to* Thoreau ("A CORRESPONDENT TO THOREAU (AT CONCORD).",
+    # which does not start with "TO ") never closed the block, and both
+    # got appended to the last footnote seen as if they were more of its
+    # own text.
+    evidence_root = tmp_path / "thoreau-evidence"
+    _write_fake_corpus_with_letters_apparatus(evidence_root)
+
+    _, editorial = _extract_letters(evidence_root)
+
+    footnotes = [e for e in editorial if e.editorial_type == "footnote"]
+    footnote_2 = next(e for e in footnotes if e.original_locator.endswith("footnote 2"))
+    assert footnote_2.text == "Helen's reply has not survived."
+    assert "CHAPTER HEADING" not in footnote_2.text
+    assert "must never appear in any footnote body" not in footnote_2.text
+
+
+def test_letters_footnote_with_marker_in_heading_line_is_unlinked(tmp_path):
+    # The real corpus's own "known gap" shape (footnotes 15, 41, 42,
+    # docs/editorial-record-schema.md): a footnote marker sitting in a
+    # letter's own recipient heading rather than its body text has no
+    # paragraph to link to - extracted (nothing is silently dropped) but
+    # left unlinked rather than dropped.
+    evidence_root = tmp_path / "thoreau-evidence"
+    _write_fake_corpus_with_letters_apparatus(evidence_root)
+
+    _, editorial = _extract_letters(evidence_root)
+
+    footnotes = [e for e in editorial if e.editorial_type == "footnote"]
+    footnote_3 = next(e for e in footnotes if e.original_locator.endswith("footnote 3"))
+    assert "dating is uncertain" in footnote_3.text
+    assert footnote_3.linked_record_id is None
+    assert footnote_3.linked_anchor is None
+
+
+def test_letters_bracketed_aside_is_extracted_and_removed(tmp_path):
+    evidence_root = tmp_path / "thoreau-evidence"
+    _write_fake_corpus_with_letters_apparatus(evidence_root)
+
+    records, editorial = _extract_letters(evidence_root)
+
+    full_text = "\n".join(p for r in records for p in r.paragraphs)
+    assert "The Old Manse" not in full_text
+
+    spans = [e for e in editorial if e.editorial_type == "bracketed-span"]
+    span = next(e for e in spans if "The Old Manse" in e.text)
+    assert span.linked_record_id is not None
+    assert span.linked_anchor is not None
+
+
+def test_letters_interpolation_is_kept_in_evidence_text(tmp_path):
+    evidence_root = tmp_path / "thoreau-evidence"
+    _write_fake_corpus_with_letters_apparatus(evidence_root)
+
+    records, editorial = _extract_letters(evidence_root)
+
+    full_text = "\n".join(p for r in records for p in r.paragraphs)
+    assert "Give my love to brother John." in full_text
+
+    interpolations = [e for e in editorial if e.editorial_type == "interpolation"]
+    assert any(e.text == "John" for e in interpolations)
 
 
 @pytest.mark.skipif(
@@ -511,3 +678,148 @@ class TestAgainstTheRealEvidenceCorpus:
         _, editorial = extracted
         for record in editorial:
             assert record.text.strip() != ""
+
+
+@pytest.mark.skipif(
+    EVIDENCE_ROOT_ENV_VAR not in os.environ,
+    reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
+)
+class TestLettersAgainstTheRealEvidenceCorpus:
+    """Issue #56: the same segregation #5 built for the journals, over the
+    Familiar Letters volume's real apparatus."""
+
+    @pytest.fixture(scope="class")
+    @staticmethod
+    def extracted():
+        evidence_root = Path(os.environ[EVIDENCE_ROOT_ENV_VAR])
+        letter_records = normalize_letters(evidence_root)
+        editorial = extract_editorial_apparatus(evidence_root, letter_records)
+        return letter_records, editorial
+
+    def test_footnote_and_span_counts(self, extracted):
+        # Mechanically counted directly against the real corpus (see this
+        # PR's own verification): 110 footnote bodies (numbers 2-111;
+        # footnote 1 belongs to Sanborn's Introduction, extracted whole as
+        # its own "introduction" record rather than decomposed further -
+        # see docs/editorial-record-schema.md), 11 standalone asides, and
+        # 39 interpolations among the letters' in-entry bracket spans.
+        _, editorial = extracted
+        letters_path = "raw/gutenberg/43523-familiar-letters/pg43523.txt"
+        footnotes = [
+            e
+            for e in editorial
+            if e.editorial_type == "footnote" and e.original_file == letters_path
+        ]
+        asides = [
+            e
+            for e in editorial
+            if e.editorial_type == "bracketed-span" and e.original_file == letters_path
+        ]
+        interpolations = [
+            e
+            for e in editorial
+            if e.editorial_type == "interpolation" and e.original_file == letters_path
+        ]
+        assert len(footnotes) == 110
+        assert len(asides) == 11
+        assert len(interpolations) == 39
+
+    def test_footnote_bodies_stop_at_the_next_chapter_or_letter_to_thoreau(
+        self, extracted
+    ):
+        # PR #63 review round 1 (blocking): the block-end terminator only
+        # recognized "FOOTNOTES:", a "TO ..." letter heading, and "GENERAL
+        # INDEX" - missing the shapes that actually resume body text after
+        # a footnote block in this volume (a two-line chapter heading, a
+        # letter addressed *to* Thoreau, "APPENDIX"). Footnote 34 ran on
+        # 8259 chars past its real end, footnote 106 4881 chars, footnote
+        # 41 21 chars - swallowing chapter II's heading, Sanborn's
+        # narrative, Ellery Channing's full March 5 1845 letter, and
+        # Charles Lane's three letters into footnote 34's body, and the
+        # APPENDIX heading into footnote 106's. Pinned on the real corpus
+        # since the fake fixture cannot see this class of bug: the fake
+        # text has no chapter heading or "TO"-less correspondent heading
+        # shape at all until this PR added one (see
+        # test_letters_footnote_block_ends_at_a_chapter_heading_or_a_letter_to_thoreau).
+        _, editorial = extracted
+        footnote_34 = next(
+            e for e in editorial if e.original_locator == "Familiar Letters, footnote 34"
+        )
+        footnote_106 = next(
+            e for e in editorial if e.original_locator == "Familiar Letters, footnote 106"
+        )
+        assert footnote_34.text.startswith(
+            'This inkstand was presented by Miss Hoar, with a note dated "Boston, May 2, 1843,"'
+        )
+        assert footnote_34.text.endswith("Truly your friend, E. HOAR.")
+        assert len(footnote_34.text) < 1200
+        for junk in (
+            "GOLDEN AGE OF ACHIEVEMENT",
+            "MY DEAR THOREAU",
+            "christened",  # Channing's letter: '"Briars;" ... christened'
+            "CHARLES LANE",
+            "Walden Woods",
+        ):
+            assert junk not in footnote_34.text, junk
+
+        assert footnote_106.text.startswith(
+            "This was a short-lived monthly, edited at Cincinnati (1861-62)"
+        )
+        assert len(footnote_106.text) < 400
+        assert "APPENDIX" not in footnote_106.text
+
+    def test_most_footnote_markers_link_back_to_a_letter_paragraph(self, extracted):
+        # 9 of the 110 footnotes are known gaps (docs/editorial-record-
+        # schema.md): 6 markers (footnotes 2-7) sit in Sanborn's own
+        # biographical preamble before the first "TO ..." heading, which
+        # #6 discards as front matter rather than recovering as a record
+        # (unlike the journals' undated-opening recovery); 3 more
+        # (footnotes 15, 41, 42) sit in a letter's own recipient heading
+        # line rather than its body text, the same category of gap as
+        # J02's chapter-heading marker.
+        _, editorial = extracted
+        footnotes = [e for e in editorial if e.editorial_type == "footnote"]
+        linked = [e for e in footnotes if e.linked_record_id is not None]
+        unlinked = [e for e in footnotes if e.linked_record_id is None]
+        assert len(linked) == 101
+        assert [e.original_locator for e in unlinked] == [
+            f"Familiar Letters, footnote {n}" for n in (2, 3, 4, 5, 6, 7, 15, 41, 42)
+        ]
+
+    def test_every_letters_span_links_to_a_record_and_anchor(self, extracted):
+        _, editorial = extracted
+        spans = [
+            e
+            for e in editorial
+            if e.editorial_type in ("bracketed-span", "interpolation")
+        ]
+        for span in spans:
+            assert span.linked_record_id is not None
+            assert span.linked_anchor is not None
+
+    def test_no_letter_paragraph_contains_bracket_delimited_text_anywhere(
+        self, extracted
+    ):
+        records, _ = extracted
+        for record in records:
+            for paragraph in record.paragraphs:
+                assert "[" not in paragraph and "]" not in paragraph, (
+                    record.id,
+                    paragraph,
+                )
+
+    def test_letters_interpolations_kept_in_evidence_text(self, extracted):
+        # Real examples the issue itself names: "[a college classmate]"
+        # completes a sentence describing a correspondent and must survive
+        # in the evidence text with only its brackets removed.
+        records, _ = extracted
+        full_text = "\n".join(p for r in records for p in r.paragraphs)
+        assert "Peabody a college classmate" in full_text
+
+    def test_letters_editorial_records_are_marked_retrospective_with_the_edition_date(
+        self, extracted
+    ):
+        _, editorial = extracted
+        for record in editorial:
+            assert record.retrospective is True
+            assert record.recorded_date == "1906"
