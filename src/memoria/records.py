@@ -463,9 +463,8 @@ def read(repository: Repository, ref: str) -> Read:
             entry = manuscript.resolve_chapter(repository, reference.chapter_id)
         except manuscript.ManuscriptError as exc:
             raise ReadError(str(exc)) from exc
-        path = entry.dir / "chapter.md"
         return Read(
-            ref=ref, citation=citation, text=path.read_text(encoding="utf-8")
+            ref=ref, citation=citation, text=entry.path.read_text(encoding="utf-8")
         )
 
     if isinstance(reference, references.SectionReference):
@@ -473,9 +472,8 @@ def read(repository: Repository, ref: str) -> Read:
             entry = manuscript.resolve_section(repository, reference.section_id)
         except manuscript.ManuscriptError as exc:
             raise ReadError(str(exc)) from exc
-        path = entry.dir / "section.md"
         return Read(
-            ref=ref, citation=citation, text=path.read_text(encoding="utf-8")
+            ref=ref, citation=citation, text=entry.path.read_text(encoding="utf-8")
         )
 
     record = load(repository, reference.record_id)

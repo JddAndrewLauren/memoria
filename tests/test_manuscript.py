@@ -273,30 +273,150 @@ def test_resolving_an_unknown_id_is_a_named_error(tmp_path):
 
 # --- a brief is writable only by a deliberate act on it (#35) ---------------
 
+# Modules allowed to call the functions that write a brief. Empty today: the
+# author's surface that will call them (#66's write path, an MCP tool, the
+# React client's adapter) gets named here when it lands, and a
+# finding-resolution module (#40-#42) never does.
+_BRIEF_WRITERS = ("manuscript.py",)
+_WRITING_FUNCTIONS = {
+    "write_brief",
+    "confirm_brief",
+    "create_book",
+    "create_chapter",
+    "create_section",
+    "_write_brief_file",
+}
 
-def test_only_manuscript_reaches_the_one_place_a_brief_is_written():
-    """`_write_brief_file` is where a brief's bytes reach disk, and nothing
-    outside this module names it - so nothing outside a deliberate call to
-    `write_brief`/`confirm_brief`/`create_*` can write one. There is no
-    finding-resolution module in this codebase yet (#40-#42 are unbuilt); this
-    is what makes the constraint checkable rather than merely intended, now
-    and once one exists.
-    """
+
+def _names_in(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.add(node.attr)
+        elif isinstance(node, ast.alias):
+            names.add(node.name.split(".")[-1])
+    return names
+
+
+def _string_constants_in(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+
+
+def _package_sources() -> list[Path]:
     sources = sorted(SRC_ROOT.rglob("*.py"))
     assert sources, "no memoria package sources found - has the package moved?"
+    return [path for path in sources if path.name not in _BRIEF_WRITERS]
 
-    for path in sources:
-        if path == SRC_ROOT / "manuscript.py":
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            name = None
-            if isinstance(node, ast.Name):
-                name = node.id
-            elif isinstance(node, ast.Attribute):
-                name = node.attr
-            assert name != "_write_brief_file", (
-                f"{path.name} reaches manuscript._write_brief_file directly - "
-                "a brief may only be written through write_brief/confirm_brief/"
-                "create_book/create_chapter/create_section"
-            )
+
+def test_no_module_but_manuscript_knows_where_a_brief_lives():
+    """The brief filenames appear in no other module's source. A module that
+    wrote `chapter_dir / "chapter.md"` with `Path.write_text` - how a
+    finding-resolution path would actually edit a brief - has to name the
+    file, and naming it here fails the suite. `records.read` reads a brief
+    through the entry's own `path` for the same reason."""
+    for path in _package_sources():
+        found = _string_constants_in(path) & set(manuscript.BRIEF_FILENAMES)
+        assert not found, (
+            f"{path.name} names {sorted(found)} - only manuscript.py knows a brief's "
+            "filename; read one through ChapterEntry.path / SectionEntry.path"
+        )
+
+
+def test_no_module_but_manuscript_calls_the_functions_that_write_a_brief():
+    """Nothing outside the allowed writers references `write_brief`,
+    `confirm_brief` or the `create_*` functions, so no finding card and no
+    batch action reaches the author write path. There is no
+    finding-resolution module yet (#40-#42); when one lands, this is the
+    test it must not be added to."""
+    for path in _package_sources():
+        found = _names_in(path) & _WRITING_FUNCTIONS
+        assert not found, (
+            f"{path.name} reaches {sorted(found)} - a brief is written only by a "
+            "deliberate act on it, through a surface named in _BRIEF_WRITERS"
+        )
+
+
+def test_the_isolation_tests_would_catch_a_module_that_wrote_a_brief(tmp_path):
+    """The two tests above are only worth having if they fail for the
+    thing they guard against."""
+    offender = tmp_path / "findings.py"
+    offender.write_text(
+        'from pathlib import Path\n'
+        'def resolve(chapter_dir):\n'
+        '    (chapter_dir / "chapter.md").write_text("rewritten")\n'
+        '    write_brief(chapter_dir / "chapter.md", "rewritten")\n',
+        encoding="utf-8",
+    )
+    assert _string_constants_in(offender) & set(manuscript.BRIEF_FILENAMES)
+    assert _names_in(offender) & _WRITING_FUNCTIONS
+
+
+# --- the admitted gap: IDs reuse after a deletion (contradicts ADR-0006) ----
+
+
+def test_deleting_the_highest_chapter_lets_its_id_be_reminted(tmp_path):
+    """Pins the behaviour the module docstring admits: the next ID is one more
+    than the highest on disk, so a deleted highest chapter's ID comes back.
+    ADR-0006 says a deleted unit's number stays reserved; that needs a
+    high-water source that survives deletion, which this slice does not
+    build. When one lands, this test flips to assert `CHP-0003`."""
+    import shutil
+
+    repository = _repo(tmp_path)
+    create_chapter(repository, "One.")
+    second = create_chapter(repository, "Two.")
+    shutil.rmtree(second.dir)
+
+    reminted = create_chapter(repository, "A different chapter.")
+
+    assert reminted.brief.id == "CHP-0002"
+    assert resolve_chapter(repository, "CHP-0002").brief.text == "A different chapter."
+
+
+# --- edges the reviewer named ----------------------------------------------
+
+
+def test_create_book_refuses_to_overwrite_an_existing_brief(tmp_path):
+    repository = _repo(tmp_path)
+    create_book(repository, "The author's brief.", unconfirmed=True)
+
+    with pytest.raises(ManuscriptError, match="already exists"):
+        create_book(repository, "Something else.")
+
+    kept = parse_brief(manuscript.book_path(repository).read_text(encoding="utf-8"))
+    assert kept.text == "The author's brief."
+    assert kept.unconfirmed is True
+
+
+def test_a_single_digit_chapter_directory_is_in_the_outline(tmp_path):
+    """An author-created `chapters/9` counts, and sorts after `chapters/08`
+    and before `chapters/10`."""
+    repository = _repo(tmp_path)
+    for name, id_ in (("08", "CHP-0008"), ("9", "CHP-0009"), ("10", "CHP-0010")):
+        path = tmp_path / "chapters" / name / "chapter.md"
+        path.parent.mkdir(parents=True)
+        path.write_text(brief_to_markdown(Brief(id=id_, text=name)), encoding="utf-8")
+
+    assert [entry.brief.id for entry in list_chapters(repository)] == [
+        "CHP-0008",
+        "CHP-0009",
+        "CHP-0010",
+    ]
+
+
+def test_a_leftover_from_an_interrupted_reorder_is_named_not_tripped_over(tmp_path):
+    repository = _repo(tmp_path)
+    first = create_chapter(repository, "First.")
+    second = create_chapter(repository, "Second.")
+    (tmp_path / "chapters" / ".reorder-0").mkdir()
+
+    with pytest.raises(ManuscriptError, match=r"\.reorder-0"):
+        reorder_chapters(repository, [second.brief.id, first.brief.id])

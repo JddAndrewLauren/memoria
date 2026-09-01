@@ -16,12 +16,25 @@ across the move.
 **Only a deliberate act on the brief may write one** (part 04 §2.1 /
 part 10 §19): the author writing or editing it, or - not built here - an AI
 writing it from a conversation the author answered. No finding card and no
-batch action may write a brief. That is why every file write in this module
-funnels through the one private ``_write_brief_file`` helper: nothing outside
-this module can reach it, so nothing outside a deliberate call to
-``write_brief`` or ``confirm_brief`` can change a brief's text or clear its
-unconfirmed state.  ``tests/test_manuscript.py`` asserts the isolation
-directly.
+batch action may write a brief. This module is the only one that knows the
+brief filenames (``book.md``, ``chapter.md``, ``section.md``) and the only
+one that calls the functions that write them; ``tests/test_manuscript.py``
+asserts both over the package's sources, so a finding-resolution module
+that reached for ``Path.write_text`` on a brief, or for ``write_brief``
+itself, would fail the suite rather than pass unnoticed.
+
+**Stable IDs, with one admitted gap.** ``CHP-``/``SEC-`` IDs are minted as
+one more than the highest ID found on disk. That contradicts ADR-0006, which
+settles that a number is reserved forever and never reused even when its
+unit is deleted: here, deleting the highest-numbered chapter or section (in
+Obsidian, say) lets the next ``create_*`` mint that ID again, and a stale
+reference to the deleted one then resolves to the newcomer. The choice is
+deliberate for this slice and pinned by a test, not an oversight: the
+durable fix is a high-water source that survives deletion, and the two
+sources this repository allows - ADR-0006's committed manifest, ADR-0008's
+git history - are each a design decision of their own, while a separate
+allocation file is what both ADRs reject. Until that decision is taken,
+this is the gap.
 
 This is the brief's own write path, built to this issue's (#35) scope. It is
 **not** issue #66's single write coordinator - no staleness token, no commit.
@@ -50,7 +63,9 @@ BOOK_ID = "BOOK"
 CHAPTERS_RELATIVE_PATH = "chapters"
 
 _REQUIRED_FIELDS = ("id", "unconfirmed")
-_DIRECTORY_NUMBER = re.compile(r"^\d{2,}$")
+_DIRECTORY_NUMBER = re.compile(r"^\d+$")
+BRIEF_FILENAMES = ("book.md", "chapter.md", "section.md")
+_SCRATCH_PREFIX = ".reorder-"
 _CHAPTER_ID_PATTERN = re.compile(r"^CHP-(\d{4})$")
 _SECTION_ID_PATTERN = re.compile(r"^SEC-(\d{4})$")
 
@@ -162,8 +177,7 @@ def _write_brief_file(path: Path, brief: Brief) -> None:
     Atomic - written to a temp file in the same directory, then ``rename()``
     into place - so a crash never leaves a half-written brief and no reader
     ever sees one (the same shape ADR-0003 settles for the write path
-    proper). Private, and unreferenced outside this module by contract; see
-    the module docstring.
+    proper).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     text = brief_to_markdown(brief)
@@ -215,6 +229,7 @@ def section_path(repository: Repository, chapter_number: int, section_number: in
 class ChapterEntry:
     number: int
     dir: Path
+    path: Path
     brief: Brief
 
 
@@ -222,6 +237,7 @@ class ChapterEntry:
 class SectionEntry:
     number: int
     dir: Path
+    path: Path
     brief: Brief
 
 
@@ -230,7 +246,9 @@ def _numbered_dirs(root: Path) -> list[tuple[int, Path]]:
 
     Numeric order rather than name order, so a chapter directory that grows
     past two digits still sorts correctly (``chapters/9`` before
-    ``chapters/10`` reads wrong as strings and right as ints).
+    ``chapters/10`` reads wrong as strings and right as ints). Any run of
+    digits counts: an author who creates ``chapters/9`` by hand is in the
+    outline, not silently missing from it.
     """
     if not root.is_dir():
         return []
@@ -248,7 +266,9 @@ def list_chapters(repository: Repository) -> list[ChapterEntry]:
     for number, directory in _numbered_dirs(chapters_root(repository)):
         path = directory / "chapter.md"
         if path.is_file():
-            entries.append(ChapterEntry(number=number, dir=directory, brief=_load(path)))
+            entries.append(
+                ChapterEntry(number=number, dir=directory, path=path, brief=_load(path))
+            )
     return entries
 
 
@@ -258,7 +278,9 @@ def list_sections(repository: Repository, chapter_number: int) -> list[SectionEn
     for number, directory in _numbered_dirs(sections_root(repository, chapter_number)):
         path = directory / "section.md"
         if path.is_file():
-            entries.append(SectionEntry(number=number, dir=directory, brief=_load(path)))
+            entries.append(
+                SectionEntry(number=number, dir=directory, path=path, brief=_load(path))
+            )
     return entries
 
 
@@ -269,8 +291,11 @@ def _next_directory_number(root: Path) -> int:
 
 # --- ID minting -------------------------------------------------------------
 #
-# No allocation ledger (ADR-0006's reasoning applied here too): the next ID
-# is a function of the IDs already on disk, so there is nothing to drift.
+# One more than the highest ID on disk. Contradicts ADR-0006 (a deleted
+# unit keeps its number reserved; no number is ever reused): delete the
+# highest chapter and the next one re-mints its ID. Admitted for this slice
+# and pinned by ``test_deleting_the_highest_chapter_lets_its_id_be_reminted``;
+# the module docstring says why and what the durable fix would take.
 
 
 def _mint_id(prefix: str, pattern: re.Pattern[str], existing_ids: list[str]) -> str:
@@ -308,8 +333,14 @@ def _mint_section_id(repository: Repository) -> str:
 
 
 def create_book(repository: Repository, text: str, *, unconfirmed: bool = False) -> Brief:
+    """Write the book's brief for the first time. Refuses if one exists:
+    replacing an author's brief is ``write_brief``'s job, and creating over
+    one would discard its text and its unconfirmed state without a word."""
+    path = book_path(repository)
+    if path.exists():
+        raise ManuscriptError(f"a book brief already exists at {path}; use write_brief")
     brief = Brief(id=BOOK_ID, text=text, unconfirmed=unconfirmed)
-    _write_brief_file(book_path(repository), brief)
+    _write_brief_file(path, brief)
     return brief
 
 
@@ -320,7 +351,7 @@ def create_chapter(
     brief = Brief(id=_mint_chapter_id(repository), text=text, unconfirmed=unconfirmed)
     path = chapter_path(repository, number)
     _write_brief_file(path, brief)
-    return ChapterEntry(number=number, dir=path.parent, brief=brief)
+    return ChapterEntry(number=number, dir=path.parent, path=path, brief=brief)
 
 
 def create_section(
@@ -330,7 +361,7 @@ def create_section(
     brief = Brief(id=_mint_section_id(repository), text=text, unconfirmed=unconfirmed)
     path = section_path(repository, chapter_number, number)
     _write_brief_file(path, brief)
-    return SectionEntry(number=number, dir=path.parent, brief=brief)
+    return SectionEntry(number=number, dir=path.parent, path=path, brief=brief)
 
 
 # --- the author write path, for briefs that already exist ------------------
@@ -345,6 +376,14 @@ def write_brief(path: Path, text: str) -> Brief:
     this call can be redirected at a brief other than the one ``path``
     names, which is what keeps it out of reach of a batch action or a
     finding card operating over many files at once.
+
+    ``path`` is a bare path, not a repository-relative reference: this is
+    the author's own act on a file the author already holds, unlike the
+    read side, which confines a caller-supplied reference to the repository
+    (``records.read``). The parse in ``_load`` limits what the call can
+    touch to a file that already is a brief; a caller that hands it a path
+    outside the repository has stepped outside the author path, not found a
+    hole in it.
     """
     existing = _load(path)
     brief = Brief(id=existing.id, text=text, unconfirmed=False)
@@ -371,10 +410,23 @@ def _renumber_directories(root: Path, ordered_dirs: list[Path]) -> None:
     final slot. One pass would let a swap (01 <-> 02) have the second rename
     clobber the first, since the destination of one move is the source of
     another.
+
+    Not atomic: a crash between the passes leaves chapters parked under
+    ``.reorder-N`` names the outline cannot see, and the next reorder would
+    trip over them. So the leftover is named up front rather than stumbled
+    into, and the fix is a hand rename back into numbered slots.
     """
+    leftover = sorted(
+        entry.name for entry in root.iterdir() if entry.name.startswith(_SCRATCH_PREFIX)
+    )
+    if leftover:
+        raise ManuscriptError(
+            f"{root} holds {', '.join(leftover)} from an interrupted reorder; "
+            "rename them back into numbered directories before reordering again"
+        )
     scratch = []
     for index, directory in enumerate(ordered_dirs):
-        holding = root / f".reorder-{index}"
+        holding = root / f"{_SCRATCH_PREFIX}{index}"
         directory.rename(holding)
         scratch.append(holding)
     for index, holding in enumerate(scratch, start=1):
