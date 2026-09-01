@@ -125,6 +125,11 @@ def search(
     only to carry the query params across the boundary, and every hit is
     ``memoria.index.search``'s own result, unmodified - no hydration, no SQL,
     written in this package (#64's acceptance criteria).
+
+    ``snippet=True`` is the one thing this route asks for that the MCP tool
+    does not: the search dialog draws a fragment per hit (part 19 §19.8) and
+    the core computes it, so the adapter still opens no database and reads no
+    evidence. It is a locator, not evidence - #95.
     """
     filters = SearchFilters(
         event_date=event_date,
@@ -132,13 +137,14 @@ def search(
         source_type=source_type,
         contemporaneous=contemporaneous,
     )
-    results = search_index(repository, q, filters)
+    results = search_index(repository, q, filters, snippet=True)
     return SearchResponse(
         results=[
             SearchResultOut(
                 src_id=result.src_id,
                 anchor=result.anchor,
                 source_type=result.source_type,
+                snippet=result.snippet,
             )
             for result in results
         ]

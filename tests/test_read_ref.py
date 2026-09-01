@@ -222,10 +222,10 @@ def test_a_citation_retyped_in_capitals_still_resolves(tmp_path, ref):
 
 
 def test_a_search_result_anchor_reads_the_paragraph_that_matched(tmp_path):
-    from memoria.index import INDEX_RELATIVE_PATH, build_index, search
+    from memoria.index import build_index, search
 
     repository = _repo(tmp_path)
-    build_index(repository.root / INDEX_RELATIVE_PATH, [_record()])
+    build_index(repository, [_record()])
 
     (hit,) = search(repository, "heron")
 
@@ -563,3 +563,30 @@ def test_a_malformed_entry_file_reaches_read_as_a_readerror_not_a_subjecterror(
 
     assert isinstance(raised, ReadError)
     assert not isinstance(raised, SubjectError)
+
+
+def test_a_snippet_is_not_a_reference(tmp_path):
+    """A snippet can never be round-tripped into `read` (#95).
+
+    It is a match locator, not an identifier: it falls through to the
+    documented path fallback (`references.parse`) and fails as a read, rather
+    than resolving to anything. The anchor beside it is what `read` takes.
+    """
+    from memoria.index import (
+        SNIPPET_MATCH_END,
+        SNIPPET_MATCH_START,
+        build_index,
+        search,
+    )
+
+    repository = _repo(tmp_path)
+    build_index(repository, [_record()])
+
+    (hit,) = search(repository, "heron", snippet=True)
+    assert SNIPPET_MATCH_START in hit.snippet and SNIPPET_MATCH_END in hit.snippet
+
+    with pytest.raises(ReadError):
+        read(repository, hit.snippet)
+
+    # The anchor on the same hit does resolve - that is the path evidence takes.
+    assert read(repository, hit.anchor).text
