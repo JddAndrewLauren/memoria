@@ -402,7 +402,11 @@ sanity-checked against aliases; for Control there is no ground truth at all.
 ## 8.12 Memoization, and when anything runs
 
 Both the appearances pass and the audit evaluate the same unit: one paragraph against
-one entry. Every such judgement is cached on the three things it depends on.
+one entry. Every such judgement is cached on the things it depends on — and the two
+kinds of judgement do not depend on the same things.
+
+An **engagement judgement** — the appearances pass — asks whether the paragraph
+engages the entry. It depends on three inputs:
 
 ```text
 key    = hash(paragraph text)
@@ -411,8 +415,27 @@ key    = hash(paragraph text)
 value  = { engages: yes/no, note: "frames episode as ambition" }
 ```
 
+An **audit verdict** asks the subject's questions of the paragraph, and its answer can
+turn on evidence — findings cite sources (§8.10). Its key therefore carries a fourth
+hash:
+
+```text
+key    = the three above
+       + hash(gathered-set membership, pins and exclusions applied)
+```
+
+Membership, not content: evidence is immutable (Invariant 3), so only *which* sources
+belong to an entry can change. A newly ingested source that joins the gathered set
+stales the entry's audit verdicts — never its engagement judgements, whose answers do
+not depend on evidence and would otherwise churn on every ingest. A pin or an
+exclusion stales audit verdicts too, deliberately: a finding that leaned on an
+excluded source should be recomputed. One cache, two key compositions.
+
 The audit-visible body (§8.2) includes settlements. `[open]` lines and Memoria notes
-sit outside it, so appending either invalidates nothing.
+sit outside it, so appending either invalidates nothing. Under ownership by badge the
+body hash often moves when the Curator folds new evidence into `[source]` statements,
+staling the same verdicts twice over — harmless, since both hashes point at the same
+re-evaluation.
 
 Three consequences follow, and they replace a good deal of machinery.
 
@@ -436,13 +459,20 @@ only when the author asks for it.** So Memoria always knows what is **not curren
 never audits unasked.
 
 A paragraph is not current when it has never been audited, when it has been edited
-since, or when an entry or subject prompt it touches has changed since. All three are
-cache misses and are shown identically — a quiet tint on the paragraph — with the
-distinction carried in the summary line above the prose, where it can be acted on:
+since, when an entry or subject prompt it touches has changed since, or — for audit
+verdicts — when a source has joined or left a gathered set it was judged against. All
+four are cache misses and are shown identically — a quiet tint on the paragraph —
+with the distinction carried in the summary line above the prose, where it can be
+acted on:
 
 ```text
-142 paragraphs not current · 12 stale since you revised Control · Audit section
+142 paragraphs not current · 12 stale since you revised Control ·
+37 stale since 4 sources joined Bob · Audit section
 ```
+
+There is no act that marks a stale count acknowledged without re-evaluating: the
+count clears only through an audit. An acknowledgement affordance would be structure
+with no earned existence (§1.11).
 
 This trims **Invariant 8**. The invariant granted autonomy in observation, reasoning
 and recommendation, reserving authorization for canonical authorship. Evaluation is no

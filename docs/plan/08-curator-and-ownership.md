@@ -25,7 +25,7 @@ The Curator runs after events such as:
 | Human edits an entry | Propagate to derived non-manuscript material; invalidate that entry's cached judgements — **no manuscript pass runs** |
 | **New or edited manuscript prose exists** | Mark it **not current**. The audit itself runs only when the author asks |
 | Research memo completes | Append supported findings to entry bodies as badged `[source]`/`[inferred]` statements; testimony is never machine-written (part 06 §8.2) |
-| New evidence ingested | Index, match against every subject, refresh candidates and gathered sets |
+| New evidence ingested | Index, match against every subject, refresh candidates and gathered sets; audit verdicts of entries whose gathered set changed become **not current** (part 06 §8.12) |
 | **A subject is added or its prompt changes** | **Re-match that subject across the corpus; refresh its candidates** |
 
 Passes are debounced and materiality-gated.

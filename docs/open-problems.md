@@ -121,6 +121,7 @@ failure is recognised as evidence rather than as a surprise.
 | A deliberately loose brief reports drift constantly | part 11 §32 | The pressure to tighten reading as noise rather than as useful |
 | A legacy import audits from a cold cache | part 06 §8.12 | First audit of a real chapter being unaffordably slow |
 | Assembly is reproducible per session, not globally deterministic | part 11 §32 | Needing to reproduce an old assembly exactly and being unable to |
+| Ingest stales audit verdicts across every touched entry | part 06 §8.12 — fourth hash | Not-current counts so noisy after routine ingest that the author stops trusting the tint |
 
 ---
 

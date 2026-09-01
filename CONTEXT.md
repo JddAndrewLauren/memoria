@@ -61,10 +61,12 @@ _Avoid_: Review, check, validation, impact analysis, scan
 
 **Not current**:
 The state of a paragraph whose audit judgement is missing or stale — never audited,
-edited since, or touching an entry or subject prompt that has changed since. Judgements
-are memoized per paragraph, entry and subject prompt, so this is a hash comparison: it
-costs nothing, needs no model, and is known across the whole manuscript at all times
-even though evaluation never runs unasked. It is what the manuscript view tints.
+edited since, touching an entry or subject prompt that has changed since, or (for
+audit verdicts) judged against a gathered set whose membership has since changed.
+Judgements are memoized per paragraph, entry and subject prompt — audit verdicts
+additionally on gathered-set membership — so this is a hash comparison: it costs
+nothing, needs no model, and is known across the whole manuscript at all times even
+though evaluation never runs unasked. It is what the manuscript view tints.
 _Avoid_: Stale, unaudited, dirty, pending
 
 ### Author knowledge
