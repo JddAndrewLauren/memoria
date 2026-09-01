@@ -338,21 +338,30 @@ class TestAgainstTheRealEvidenceCorpus:
         introductions = [e for e in editorial if e.editorial_type == "introduction"]
 
         assert len(footnotes) == 880  # 508 (J01) + 372 (J02) footnote bodies
-        assert len(asides) == 86  # 25 (J01) + 61 (J02) standalone asides
-        assert len(interpolations) == 146  # 58 (J01) + 88 (J02) interpolations
-        assert len(asides) + len(interpolations) == 232  # in-entry bracket spans
+        assert len(asides) == 90  # 25 (J01) + 65 (J02) standalone asides
+        assert len(interpolations) == 154  # 58 (J01) + 96 (J02) interpolations
+        assert len(asides) + len(interpolations) == 244  # in-entry bracket spans
         assert len(introductions) == 2
 
     def test_most_footnote_markers_link_back_to_an_evidence_paragraph(self, extracted):
-        # 851 of the 880 footnotes (505 J01 + 346 J02) have their marker
-        # inside an extracted entry; the rest are orphaned by known,
-        # already-documented gaps - Torrey's Introduction (3, J01) and
-        # J02's undated opening fragments discarded by #3 (26, J02) - not
-        # by a bug in this slice.
+        # 876 of the 880 footnotes (505 J01 + 371 J02) have their marker
+        # inside an extracted entry. Only 4 are orphaned, and each by text
+        # this slice does not cover: Torrey's Introduction (3, J01) and
+        # J02's chapter-heading marker, "1850 (ÆT. 32-33)[1]", which is
+        # chapter apparatus rather than any record's evidence. Recovering
+        # J02 Chapter I's undated opening fragments as records linked the
+        # 25 (J02 footnotes 2-26) that used to be orphaned with them.
         _, editorial = extracted
         footnotes = [e for e in editorial if e.editorial_type == "footnote"]
         linked = [e for e in footnotes if e.linked_record_id is not None]
-        assert len(linked) == 851
+        unlinked = [e for e in footnotes if e.linked_record_id is None]
+        assert len(linked) == 876
+        assert [e.original_locator for e in unlinked] == [
+            "Journal I, footnote 1",
+            "Journal I, footnote 2",
+            "Journal I, footnote 3",
+            "Journal II, footnote 1",
+        ]
 
     def test_every_span_links_to_a_record_and_anchor(self, extracted):
         _, editorial = extracted

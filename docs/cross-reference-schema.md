@@ -35,12 +35,16 @@ rows, each:
 | `citation` | The footnote's full body text, verbatim - never parsed apart to isolate one work's page numbers from another's (see "One footnote, more than one citation" below). |
 
 A footnote whose marker falls outside the entries `normalize_journals`
-covers - Torrey's Introduction, or J02's undated opening fragments discarded
-by issue #3 (both pre-existing, already-documented gaps; see
+covers - Torrey's Introduction, or J02 Chapter I's own heading line (see
 `docs/editorial-record-schema.md`'s "Known gaps") - has no `SRC-` ID or
 anchor to point at, and is excluded from the table entirely rather than
-carried with a null source. 17 footnotes fall in this gap; every one of
-them is a citation whose marker sits inside J02's undated fragments.
+carried with a null source. Only 4 footnotes now fall in this gap, and none
+of them is a citation, so the table loses nothing to it.
+
+Until J02 Chapter I's undated opening fragments were recovered as records
+(`docs/normalized-record-schema.md`), 29 footnotes fell in this gap, 17 of
+them citations - 10 *Walden*, 5 *Excursions*, 2 *Cape Cod*. Those 17 are in
+the table below.
 
 ## One footnote, more than one citation
 
@@ -80,9 +84,10 @@ RECON.md §4(b) states 628 cross-references (430 J01 + 198 J02), 364 landing
 on held works (`Week`, `Walden`). Mechanically re-deriving the table from
 the footnote bodies (rather than trusting RECON's own summary count -
 the same discipline issues #3-#6 already applied to date headings, the
-weekday checksum, and footnote/span counts) finds **651** cross-references
-after excluding the 17 unlinked-footnote citations above, of which **369**
-resolvable and **282** unresolvable.
+weekday checksum, and footnote/span counts) finds **668** cross-references,
+of which **379** resolvable and **289** unresolvable. (651/369/282 on the
+first pass, before the 17 citations stranded on J02's undated opening
+fragments were recovered with them.)
 
 The gap traces to three things RECON's own count appears to miss:
 

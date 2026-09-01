@@ -32,12 +32,12 @@ original_locator: "Journal I, entry dated Oct. 22."
 |---|---|
 | `id` | Stable `SRC-NNNNNN` identifier (six digits, zero-padded — part 04 §4's `SRC-000184` form; the `SRC-0184` seen in the desktop mockup is a noted divergence, part 19 §19.11). Assigned sequentially: volume order, then entry order within the volume. Stable across re-runs over unchanged input because the assignment is a deterministic function of that input, not a hash or a counter file. |
 | `source_type` | `journal` or `letter` (the 130 *Familiar Letters*, issue #6). Other source types (email, ...) are later slices. |
-| `recorded_date` | The date heading text, verbatim, exactly as it appears in the source — never rewritten by year resolution. |
-| `event_date` | `recorded_date` with its resolved year appended (`"Oct. 22., 1845"`), or unchanged from `recorded_date` where the heading already states its own year, or where no year could be resolved at all (`date_confidence: chapter-only` or `unresolved` — no invented date). Journals have no retrospective/contemporaneous date split within one entry, so before year resolution `recorded_date` and `event_date` were identical; year resolution (`src/memoria/year_resolution.py`, issue #4) is what makes them diverge. |
-| `date_confidence` | `exact` only where a weekday in the heading confirmed the resolved year against a real calendar; `inferred` where the year came from an unambiguous chapter heading, an explicit year in the entry heading itself, or position within a multi-year chapter, without a weekday to confirm it; `chapter-only` where no chapter marker precedes the entry at all, so no year context exists (RECON.md §3's description of J02 Chapter I's undated opening fragments — none of the corpus's 558 records currently exercise this branch, since `normalize_journals` discards those fragments before this stage; see "Known data loss" below); `unresolved` for all 130 letters: their datelines do carry an explicit year (see the `dateline` row below), but year resolution is a separate M0 step from letters parsing, so that year is left unparsed rather than absent. A weekday that does not match any candidate year is never silently accepted as `exact`; `memoria normalize` prints it as a warning instead. |
+| `recorded_date` | The date heading text, verbatim, exactly as it appears in the source — never rewritten by year resolution. Empty for the 29 undated opening fragments of J02's Chapter I (`date_confidence: chapter-only`), which have no date heading to quote; see "J02's undated opening fragments" below. |
+| `event_date` | `recorded_date` with its resolved year appended (`"Oct. 22., 1845"`), or unchanged from `recorded_date` where the heading already states its own year, or where no year could be resolved at all (`date_confidence: unresolved` — no invented date). Empty for the `chapter-only` fragments: their chapter scopes them to 1850, but `event_date` is a date and they have no day, so the field is left empty rather than filled with a year pretending to be one. The chapter's year stays recoverable from `original_locator`. Journals have no retrospective/contemporaneous date split within one entry, so before year resolution `recorded_date` and `event_date` were identical; year resolution (`src/memoria/year_resolution.py`, issue #4) is what makes them diverge. |
+| `date_confidence` | `exact` only where a weekday in the heading confirmed the resolved year against a real calendar; `inferred` where the year came from an unambiguous chapter heading, an explicit year in the entry heading itself, or position within a multi-year chapter, without a weekday to confirm it; `chapter-only` where the record has **no date heading of its own**, so its enclosing chapter is the only date context there is — RECON.md §3's reading of the value exactly ("scoped to 1850, no day"), and the 29 undated opening fragments of J02's Chapter I are the records that carry it (see below); `unresolved` where a resolution was attempted and produced nothing — a dated entry with no chapter marker before it anywhere (no record in the corpus: both volumes open with a chapter heading), and all 130 letters: their datelines do carry an explicit year (see the `dateline` row below), but year resolution is a separate M0 step from letters parsing, so that year is left unparsed rather than absent. A weekday that does not match any candidate year is never silently accepted as `exact`; `memoria normalize` prints it as a warning instead. |
 | `contemporaneous` | `true` for journal entries — a diary entry is contemporaneous evidence by definition (part 05 §6). |
 | `original_file` | Path to the raw source, relative to the evidence root (`MEMORIA_EVIDENCE_ROOT`) — the same convention `manifest.yaml` and `memoria validate` use, e.g. `raw/gutenberg/57393-journal-01/pg57393.txt`. |
-| `original_locator` | Human-readable pointer into the original, e.g. `"Journal I, entry dated Oct. 22."`. |
+| `original_locator` | Human-readable pointer into the original, e.g. `"Journal I, entry dated Oct. 22."`; for an undated fragment, the chapter and its position within the chapter's opening run, e.g. `"Journal II, Chapter I, undated fragment 3 of 29"`. |
 
 ## Paragraph anchors
 
@@ -96,25 +96,54 @@ straight ASCII) so a search phrase matches regardless of which volume's
 convention produced it (RECON.md §6.1: J01/Familiar Letters use straight
 quotes, J02 uses curly).
 
-## Known data loss: J02's undated opening fragments
+## J02's undated opening fragments
 
-Everything before a volume's first date heading is discarded by
-construction (see above). For J01 that is genuinely front matter. For J02
-it also deletes ~1,000 lines of undated Thoreau transcript-book extracts
-that open Chapter I (RECON.md §3: "J02 Chapter I ... opens ... with undated
-fragments separated by `*   *   *   *   *` dividers ... transcript-book
-extracts, not dated entries," needing `date_confidence: chapter-only`).
-Normalizing those fragments into their own records is out of scope for this
-slice (dividers, not date headings, delimit them, and RECON explicitly
-scopes their `chapter-only` confidence to year resolution). Named here so
-it is not silently assumed away.
+Everything before a volume's **first chapter heading** is discarded by
+construction — front matter, in both volumes. Everything between that
+chapter heading and the volume's first *date* heading is not. For J01 it is
+only the chapter's age marker, and yields nothing. For J02 it is ~1,000
+lines of undated Thoreau transcript-book extracts opening Chapter I
+(RECON.md §3: "J02 Chapter I ... opens ... with undated fragments separated
+by `*   *   *   *   *` dividers ... transcript-book extracts, not dated
+entries," needing `date_confidence: chapter-only`).
+
+An earlier pass of this slice discarded them too, since dividers rather
+than date headings delimit them and the entry splitter had no boundary rule
+for a record with no heading. They are now recovered: **29 records,
+`SRC-000402`–`SRC-000430`, holding 129 paragraphs.**
+
+**The divider is the boundary.** A record is bounded by a natural
+documentary boundary (part 05 §5.2); with no date heading available, the
+divider the 1906 edition sets between one extract and the next is the only
+boundary the source offers. This applies *only* in a volume's undated
+opening: the same dividers also separate thoughts inside dated entries (156
+in J02, 581 in J01), where the date heading is the boundary and a divider
+is not one.
+
+**They carry no date.** `recorded_date` and `event_date` are both empty and
+`date_confidence` is `chapter-only`. Chapter I scopes them to 1850, which
+`original_locator` records; the source gives no day, and `event_date` is a
+date, not a range, so it is left empty rather than filled with something
+the source never said.
+
+**The chapter heading itself is not evidence.** The chapter's numeral (`I`)
+and its year line (`1850 (ÆT. 32-33)[1]`) are apparatus. They are excluded
+from the first fragment, which is why that line's footnote marker `[1]`
+stays unlinked (see `docs/editorial-record-schema.md`).
+
+Recovering these fragments is what makes `chapter-only` a value the corpus
+actually carries, and it links 25 footnotes — J02's footnotes 2–26 — whose
+markers previously fell outside every record, restoring 17 cross-references
+with them (`docs/cross-reference-schema.md`).
 
 ## Deviation from RECON.md's date-heading count
 
 RECON.md §3 states 299 (J01) and 149 (J02) date headings — 448 total.
 Mechanically re-implementing RECON's own stated detection rule (line-initial
 italic date, closed set of month/weekday/qualifier forms) against the raw
-corpus finds more: **401 (J01) and 157 (J02) — 558 total.**
+corpus finds more: **401 (J01) and 157 (J02) — 558 total.** (558 *date
+headings*, and so 558 dated records; the 29 undated fragments above bring
+the journals to 587 records in total.)
 
 This was checked twice, independently:
 
@@ -123,7 +152,8 @@ This was checked twice, independently:
   RECON's own claim: J02's Chapter I (RECON.md §3, "has no date headings at
   all") in fact contains 22 line-initial date headings within RECON's own
   stated line range for that chapter (June–Nov 1850 entries after the
-  undated opening fragments noted above).
+  undated opening fragments above — it is the chapter's *opening* that is
+  undated, not the chapter).
 - **Independent review pass, round 1 on PR #48 (558 total).** Confirmed the
   implementer's finding mechanically — every match is preceded by a blank
   line, RECON's own J02 `_Mon. N._` count matches exactly, and the gap
@@ -137,7 +167,8 @@ This was checked twice, independently:
   count from 554 to 558.
 
 `tests/test_normalize.py`'s `TestAgainstTheRealEvidenceCorpus` asserts the
-mechanically verified count (558) alongside structural invariants — every
+mechanically verified count (558 dated records) alongside structural
+invariants — every
 matched heading is preceded by a blank line, no line-initial
 `^_<Month>`-prefixed line in the raw body is left unmatched (the recall
 check that would have caught the regex bug above automatically), and no
@@ -248,7 +279,7 @@ the raw text and a real calendar:
   `"_Sept. 5. Saturday._"`; the source text does read "Saturday", but
   Sept. 5, 1841 (the chapter's single candidate year) was actually a
   Sunday.
-- `SRC-000464`, `raw/gutenberg/59031-journal-02/pg59031.txt:5746` —
+- `SRC-000493`, `raw/gutenberg/59031-journal-02/pg59031.txt:5746` —
   `"_May 6. Monday._"`, under the `MAY, 1851` chapter; May 6, 1851 was
   actually a Tuesday.
 
@@ -257,7 +288,9 @@ normalize`) rather than silently accepted as `exact` — RECON.md §3's own
 prediction: "where it does not [match], it flags a genuine editorial
 problem worth surfacing rather than guessing."
 
-Final counts across all 558 records: **exact=150, inferred=408,
-chapter-only=0** (`tests/test_year_resolution.py`'s
+Final counts across all 587 journal records: **exact=150, inferred=408,
+chapter-only=29** (`tests/test_year_resolution.py`'s
 `TestAgainstTheRealEvidenceCorpus` asserts this distribution, alongside the
-invariant that no record is `exact` without a weekday in its heading).
+invariant that no record is `exact` without a weekday in its heading, and
+that a `chapter-only` record carries neither a `recorded_date` nor an
+`event_date`). The 130 letters are `unresolved`, for 717 records in all.

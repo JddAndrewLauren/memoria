@@ -279,13 +279,18 @@ class TestAgainstTheRealEvidenceCorpus:
         # a handful of citations to "Week" missing its italic markup, and
         # a citation to a sixth published work ("Maine Woods") RECON's own
         # table never names at all.
-        assert len(cross_references) == 651
+        #
+        # 668, not the 651 of the first pass: recovering J02 Chapter I's
+        # undated opening fragments as records (this branch) linked 17
+        # footnotes whose markers used to fall outside every record - 10
+        # _Walden_, 5 _Excursions_, 2 _Cape Cod_.
+        assert len(cross_references) == 668
 
     def test_resolvable_and_unresolvable_counts(self, cross_references):
         resolvable = [c for c in cross_references if c.resolvable]
         unresolvable = [c for c in cross_references if not c.resolvable]
-        assert len(resolvable) == 369
-        assert len(unresolvable) == 282
+        assert len(resolvable) == 379
+        assert len(unresolvable) == 289
         assert len(resolvable) + len(unresolvable) == len(cross_references)
 
     @pytest.fixture(scope="class")
