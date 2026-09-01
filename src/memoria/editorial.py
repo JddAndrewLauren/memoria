@@ -28,7 +28,12 @@ from pathlib import Path
 
 import yaml
 
-from memoria.normalize import JOURNAL_VOLUMES, LETTERS_VOLUME, NormalizedRecord
+from memoria.normalize import (
+    JOURNAL_VOLUMES,
+    LETTERS_FOOTNOTE_BLOCK_END_RE,
+    LETTERS_VOLUME,
+    NormalizedRecord,
+)
 
 # Both journal volumes and Familiar Letters are the same 1906 Houghton
 # Mifflin "Writings" edition (RECON.md's corpus table) - the date an
@@ -199,9 +204,11 @@ _LETTERS_FOOTNOTES_HEADING_RE = re.compile(r"^FOOTNOTES:\s*$", re.M)
 # (docs/editorial-record-schema.md): no footnote body in any of its four
 # blocks contains such a line - even a footnote that quotes a whole letter
 # keeps every line of that quote indented or mixed-case.
-_LETTERS_FOOTNOTE_BLOCK_END_RE = re.compile(
-    r"""^[A-Z][A-Z0-9 '"().,:;_-]*$""", re.M
-)
+#
+# Defined in normalize.py, which needs the same boundary to excise a block
+# from a letter's own lines without taking the text after it: one rule, so
+# the two passes cannot disagree about where a block ends.
+_LETTERS_FOOTNOTE_BLOCK_END_RE = LETTERS_FOOTNOTE_BLOCK_END_RE
 
 
 def _parse_letters_footnote_bodies(raw_text: str) -> dict[int, str]:
@@ -324,7 +331,9 @@ def _strip_editorial_apparatus_from_record(
         # doubled space, a stray space before punctuation). A paragraph
         # with no bracket at all passes through untouched, byte-identical
         # to what normalize_journals produced from the raw source.
-        stripped = _clean_ws(substituted) if substituted != paragraph else paragraph
+        stripped = (
+            _clean_ws(substituted) if _BRACKET_RE.search(paragraph) else paragraph
+        )
         if stripped:
             cleaned.append(stripped)
             survives_at[original_index] = len(cleaned)

@@ -202,7 +202,7 @@ def test_rebuild_strips_editorial_apparatus_and_exclude_editorial_excludes_it(
     editorial_written = list((repo_root / "sources" / "editorial").glob("ED-*.md"))
     # See tests/test_cli.py::test_normalize_writes_editorial_records_under_sources_editorial
     # for the count breakdown (issue #56 extended this to the letters volume).
-    assert len(editorial_written) == 1286
+    assert len(editorial_written) == 1287
 
 
 @pytest.mark.skipif(

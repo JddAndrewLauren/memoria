@@ -107,7 +107,7 @@ def test_normalize_letters_splits_on_letter_headings(tmp_path):
     assert len(records) == 3
     assert [r.recipient for r in records] == [
         "HELEN THOREAU (AT TAUNTON).",
-        "JOHN THOREAU[7] (AT TAUNTON).",
+        "JOHN THOREAU (AT TAUNTON).",
         "R. W. EMERSON (AT CONCORD).",
     ]
 
@@ -245,6 +245,52 @@ def test_normalize_letters_excludes_trailing_footnotes_and_general_index(tmp_pat
     assert "titles of the volumes" not in full_text
 
 
+def test_normalize_letters_keeps_the_text_after_a_midvolume_footnote_block(
+    tmp_path,
+):
+    # The FOOTNOTES: blocks scattered through this volume are followed by
+    # ordinary body text - a chapter heading, connective narrative, a
+    # letter written *to* Thoreau. Cutting a letter's lines at the marker
+    # dropped all of it, so text that exists in the source reached no
+    # record at all; only the block itself may be excised.
+    evidence_root = tmp_path / "thoreau-evidence"
+    _write_fake_letters_volume(
+        evidence_root,
+        _FAKE_LETTERS_TEXT.replace(
+            "TO R. W. EMERSON (AT CONCORD).\r\n",
+            "FOOTNOTES:\r\n"
+            "\r\n"
+            "[6] A mid-volume footnote that must never appear in any record.\r\n"
+            "\r\n"
+            "\r\n"
+            "II\r\n"
+            "\r\n"
+            "GOLDEN AGE OF ACHIEVEMENT\r\n"
+            "\r\n"
+            "This chapter narrative follows a footnote block and must survive.\r\n"
+            "\r\n"
+            "\r\n"
+            "ELLERY CHANNING TO THOREAU (AT CONCORD).\r\n"
+            "\r\n"
+            "     March 5, 1845.\r\n"
+            "\r\n"
+            "MY DEAR THOREAU,--you are the same old sixpence.\r\n"
+            "\r\n"
+            "\r\n"
+            "TO R. W. EMERSON (AT CONCORD).\r\n",
+        ),
+    )
+
+    records = normalize_letters(evidence_root)
+
+    john = next(r for r in records if r.recipient.startswith("JOHN THOREAU"))
+    body = "\n".join(john.paragraphs)
+    assert "must never appear in any record" not in body
+    assert "This chapter narrative follows a footnote block" in body
+    assert "ELLERY CHANNING TO THOREAU (AT CONCORD)." in body
+    assert "same old sixpence" in body
+
+
 def test_normalize_letters_handles_crlf_line_endings(tmp_path):
     evidence_root = tmp_path / "thoreau-evidence"
     _write_fake_letters_volume(evidence_root)
@@ -351,7 +397,7 @@ def test_recipients_table_groups_letters_by_verbatim_recipient_string(tmp_path):
 
     assert table == {
         "HELEN THOREAU (AT TAUNTON).": ["SRC-000001"],
-        "JOHN THOREAU[7] (AT TAUNTON).": ["SRC-000002"],
+        "JOHN THOREAU (AT TAUNTON).": ["SRC-000002"],
         "R. W. EMERSON (AT CONCORD).": ["SRC-000003"],
     }
 
@@ -402,27 +448,50 @@ class TestAgainstTheRealEvidenceCorpus:
         assert len(records) == 130
 
     def test_recipient_count_matches_recon(self, records):
-        # RECON.md §5 / §7: 43 distinct recipients.
+        # RECON.md §5 / §7 counts 43 distinct recipients - 43 distinct
+        # *heading strings*, three of which carry a footnote marker. The
+        # marker is apparatus, not part of the recipient, so it is
+        # stripped: two of the three then collapse onto a heading already
+        # in the table ("MRS. LUCY BROWN[15] (AT PLYMOUTH)." and "R. W.
+        # EMERSON[42] (AT CONCORD)."), leaving 41.
         table = recipients_table(records)
-        assert len(table) == 43
+        assert len(table) == 41
+        assert not [k for k in table if "[" in k], sorted(table)
 
     def test_emersons_four_location_forms_are_distinct_recipients(self, records):
         # RECON.md §5/§6: R. W. Emerson appears under four location forms -
         # AT CONCORD, AT NEW YORK, IN ENGLAND, and one bare "TO R. W.
-        # EMERSON." (no location). Verbatim preservation also keeps the two
-        # footnote-marked variants of these headings as distinct strings
-        # (issue #6: "Recipient strings are preserved verbatim"), so the
-        # full R. W. Emerson group in the table is larger than 4; this
-        # asserts the four location forms specifically are present and
-        # distinct, not merged.
+        # EMERSON." (no location). Location forms are never merged (issue
+        # #6's alias-resolution hazard material); only the apparatus
+        # footnote marker is stripped, which is what makes the bare form
+        # read "R. W. EMERSON." rather than "R. W. EMERSON.[41]".
         table = recipients_table(records)
         location_forms = {
             "R. W. EMERSON (AT CONCORD).",
             "R. W. EMERSON (AT NEW YORK).",
             "R. W. EMERSON (IN ENGLAND).",
-            "R. W. EMERSON.[41]",
+            "R. W. EMERSON.",
         }
         assert location_forms <= table.keys()
+
+    def test_a_heading_footnote_marker_is_not_part_of_the_recipient(self, records):
+        # Three headings carry an inline footnote marker (footnotes 15,
+        # 41, 42 - "TO MRS. LUCY BROWN[15] (AT PLYMOUTH)."). The marker is
+        # Sanborn's apparatus, not the recipient, and used to be carried
+        # verbatim into `recipient`, splitting two correspondents into
+        # spurious extra rows of the recipients table. Pinned per source
+        # id so a regression cannot hide behind the count alone.
+        by_id = {r.id: r for r in records}
+        assert by_id["SRC-000009"].recipient == "MRS. LUCY BROWN (AT PLYMOUTH)."
+        assert by_id["SRC-000048"].recipient == "R. W. EMERSON."
+        assert by_id["SRC-000056"].recipient == "R. W. EMERSON (AT CONCORD)."
+        # The stripped marker is not left behind in the locator either.
+        assert by_id["SRC-000009"].original_locator == (
+            "Familiar Letters, letter to MRS. LUCY BROWN (AT PLYMOUTH)."
+        )
+        # No letter's recipient carries a bracket anywhere.
+        for record in records:
+            assert "[" not in record.recipient, (record.id, record.recipient)
 
     def test_every_letters_dateline_is_plausibly_shaped_or_empty(self, records):
         # Recall/shape check (review round 1 on PR #52's blocking defect
@@ -547,6 +616,37 @@ class TestAgainstTheRealEvidenceCorpus:
         for record in records:
             if record.date_confidence == "inferred":
                 assert record.event_date == record.dateline, record.id
+
+    def test_every_letter_to_thoreau_reaches_a_record(self, records):
+        # Six letters in this volume are headed by a correspondent's name
+        # rather than Thoreau's "TO ...", so none of them starts a record
+        # of its own; each is carried inline in the record it sits in, the
+        # same way Sanborn's connective narrative is
+        # (docs/normalized-record-schema.md). Two of them - Channing's and
+        # Lane's (three letters under the one heading) - used to reach no
+        # record at all, because they follow a "FOOTNOTES:" block and the
+        # whole tail was cut. A regression here means real source text is
+        # silently absent from the archive again, in either direction.
+        body = "\n".join(p for r in records for p in r.paragraphs)
+        for heading in (
+            "ELLERY CHANNING TO THOREAU (AT CONCORD).",
+            "CHARLES LANE TO THOREAU (AT CONCORD).",
+            "AGASSIZ TO THOREAU (AT CONCORD).",
+            "T. CHOLMONDELEY TO THOREAU (IN MINNESOTA).",
+            "SOPHIA THOREAU TO DANIEL RICKETSON (AT NEW BEDFORD).",
+            "BRONSON ALCOTT TO DANIEL RICKETSON (AT NEW BEDFORD).",
+        ):
+            assert heading in body, heading
+
+    def test_no_footnote_block_text_reaches_a_letter_record(self, records):
+        # The other direction of the same boundary: excising only the block
+        # must not let Sanborn's endnotes back into the evidence. Each of
+        # the volume's four blocks opens with a bracketed number at the
+        # start of a paragraph, which no letter's own prose ever does.
+        for record in records:
+            for paragraph in record.paragraphs:
+                assert "FOOTNOTES:" not in paragraph, record.id
+                assert not re.match(r"^\[\d+\] ", paragraph), record.id
 
     def test_letter_ids_do_not_collide_with_journal_ids(self, records):
         from memoria.normalize import normalize_journals

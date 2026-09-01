@@ -75,10 +75,22 @@ LETTERS_VOLUME = {
 # re-verified directly against the raw corpus: exactly 130 such headings,
 # 43 distinct verbatim strings, matching RECON's own counts exactly, with
 # zero false positives anywhere in this file (review round 1 on PR #52).
+# Three of those 43 differ from another only by a footnote marker, which
+# `_HEADING_FOOTNOTE_MARKER_RE` below strips, leaving 41 recipients.
 # Deliberately loose (any text after "TO "): safe for this one volume, but
 # would need tightening (a real correspondent-name shape) before it could
 # be trusted against a second letters volume with different formatting.
 _LETTER_HEADING_RE = re.compile(r"^TO .+")
+
+# Three of the 130 headings carry an inline footnote marker (footnotes 15,
+# 41, 42 - "TO MRS. LUCY BROWN[15] (AT PLYMOUTH)."). That marker is
+# Sanborn's apparatus, not part of the recipient, so it is stripped out of
+# `recipient` rather than carried into the alias material. Nothing is lost:
+# the footnote itself is still extracted from the volume's FOOTNOTES: block
+# by the editorial slice, unlinked because a heading is no record's evidence
+# paragraph (docs/editorial-record-schema.md, "Known gaps"), and the raw
+# heading line is untouched in the source file.
+_HEADING_FOOTNOTE_MARKER_RE = re.compile(r"\[\d+\]")
 
 # The two audit targets (issue #9): the published works the journals'
 # cross-references point at, held in the corpus as Gutenberg text
@@ -161,11 +173,21 @@ _NEVER_RE = re.compile(r"(?!)")
 # excluded by construction rather than swallowed into the last letter.
 _GENERAL_INDEX_MARKER = re.compile(r"^GENERAL INDEX$")
 
-# A trailing footnote collection (Sanborn's endnotes for the preceding
-# stretch of letters) can land inside an entry's own lines, the same way
-# the journals' back matter used to land inside their last entry (PR #48
-# review round 1). Trimmed out of every letter's lines, not just the last.
+# A footnote collection (Sanborn's endnotes for the preceding stretch of
+# letters) can land inside an entry's own lines, the same way the
+# journals' back matter used to land inside their last entry (PR #48
+# review round 1). Excised from every letter's lines, not just the last.
 _FOOTNOTES_MARKER = re.compile(r"^FOOTNOTES:$")
+
+# Where such a block *ends*, so that only the block itself is excised and
+# the letter text, chapter heading, or connective narrative that follows
+# it stays in the record. The rule - a bare, unindented line with no
+# lowercase letter anywhere on it - is editorial.py's, verified there
+# against all four of the real corpus's blocks; ``editorial.py`` imports
+# it from here so the two passes cut at exactly the same line.
+LETTERS_FOOTNOTE_BLOCK_END_RE = re.compile(
+    r"""^[A-Z][A-Z0-9 '"().,:;_-]*$""", re.M
+)
 
 # RECON.md §3: entries open with a line-initial italic date, a small closed
 # set of forms - re-verified against the raw corpus directly rather than
@@ -438,19 +460,37 @@ def normalize_journals(evidence_root: Path) -> list[NormalizedRecord]:
     return records
 
 
-def _trim_trailing_footnotes(entry_lines: list[str]) -> list[str]:
-    """Cut a letter's lines off at a trailing ``FOOTNOTES:`` block, if any.
+def _excise_footnote_blocks(entry_lines: list[str]) -> list[str]:
+    """Remove any ``FOOTNOTES:`` blocks from a letter's lines.
 
     Sanborn's endnotes for the preceding stretch of letters can land inside
     an entry's own lines - the same class of defect the journals' back
     matter caused when swallowed into their last entry (PR #48 review round
     1). Applied to every letter, not just the last, since a footnote block
     is never part of the letter's own body wherever it lands.
+
+    Only the block itself is cut. Cutting the whole tail instead - the
+    behaviour before this - silently dropped every line after the first
+    marker, so Sanborn's connective narrative was kept when it fell before
+    a block and lost when it fell after one, a distinction the source text
+    never makes (docs/normalized-record-schema.md). Four real stretches
+    were lost that way, among them Ellery Channing's letter to Thoreau of
+    March 5, 1845, and Charles Lane's three, which reached no record at
+    all.
     """
-    for i, line in enumerate(entry_lines):
-        if _FOOTNOTES_MARKER.match(line):
-            return entry_lines[:i]
-    return entry_lines
+    kept: list[str] = []
+    i = 0
+    while i < len(entry_lines):
+        if not _FOOTNOTES_MARKER.match(entry_lines[i]):
+            kept.append(entry_lines[i])
+            i += 1
+            continue
+        i += 1
+        while i < len(entry_lines) and not LETTERS_FOOTNOTE_BLOCK_END_RE.match(
+            entry_lines[i]
+        ):
+            i += 1
+    return kept
 
 
 def _split_letters(body_lines: list[str]) -> list[tuple[str, list[str]]]:
@@ -473,8 +513,10 @@ def _split_letters(body_lines: list[str]) -> list[tuple[str, list[str]]]:
             if position + 1 < len(heading_indices)
             else len(body_lines)
         )
-        entry_lines = _trim_trailing_footnotes(body_lines[start:end])
-        recipient = entry_lines[0][len("TO ") :]
+        entry_lines = _excise_footnote_blocks(body_lines[start:end])
+        recipient = _HEADING_FOOTNOTE_MARKER_RE.sub(
+            "", entry_lines[0][len("TO ") :]
+        )
         entries.append((recipient, entry_lines))
     return entries
 
@@ -570,11 +612,20 @@ def _extract_salutation(entry_lines: list[str]) -> str:
     """The letter's salutation: extracted from the first unindented,
     non-annotation paragraph after the dateline (the body's opening
     paragraph), which the body itself keeps in full - this is a
-    non-destructive read of it, not a split. A second or third letter
-    bundled under one recipient heading sometimes continues without a
-    fresh greeting (SRC-000045, SRC-000049, SRC-000050, SRC-000129 in the
-    real corpus): that paragraph's opening prose is not a salutation, so
-    a letter with none gets an empty string rather than an invented one
+    non-destructive read of it, not a split. Five letters in the real
+    corpus come out empty, for two different reasons. Four of them
+    (SRC-000045, SRC-000049, SRC-000050, SRC-000129) are a second or
+    third letter bundled under one recipient heading, continuing without
+    a fresh greeting: the paragraph this lands on is body prose. The
+    fifth, SRC-000002, does have a greeting, but no line-scoped scan
+    reaches it - the scan settles first on that letter's *unindented*
+    pseudo-dateline ("MUSKETAQUID, 202 Summers, two Moons, eleven Suns,
+    ..."), which the indented-only dateline rule has already declined,
+    and the greeting itself wraps across a line break ("TAHATAWAN,
+    Sachimaussan, to his brother sachem, Hopeful of" /
+    "Hopewell,--hoping that he is well:--"), putting its ",--" on a
+    second line where `_SALUTATION_RE` cannot see it. Either way a letter
+    with no salutation gets an empty string rather than an invented one
     (issue #58, the same shape-not-presence remedy #52 applied to
     `dateline`).
     """

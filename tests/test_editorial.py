@@ -701,8 +701,13 @@ class TestLettersAgainstTheRealEvidenceCorpus:
         # PR's own verification): 110 footnote bodies (numbers 2-111;
         # footnote 1 belongs to Sanborn's Introduction, extracted whole as
         # its own "introduction" record rather than decomposed further -
-        # see docs/editorial-record-schema.md), 11 standalone asides, and
+        # see docs/editorial-record-schema.md), 12 standalone asides, and
         # 39 interpolations among the letters' in-entry bracket spans.
+        #
+        # The twelfth aside is "[Illustration: _Walden Woods_]", the loose
+        # end #56 left: it sits in text that used to fall after a
+        # "FOOTNOTES:" marker, so normalize dropped it before editorial
+        # segregation ever saw it.
         _, editorial = extracted
         letters_path = "raw/gutenberg/43523-familiar-letters/pg43523.txt"
         footnotes = [
@@ -721,7 +726,7 @@ class TestLettersAgainstTheRealEvidenceCorpus:
             if e.editorial_type == "interpolation" and e.original_file == letters_path
         ]
         assert len(footnotes) == 110
-        assert len(asides) == 11
+        assert len(asides) == 12
         assert len(interpolations) == 39
 
     def test_footnote_bodies_stop_at_the_next_chapter_or_letter_to_thoreau(

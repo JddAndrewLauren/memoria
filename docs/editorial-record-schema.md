@@ -114,7 +114,12 @@ paragraph list once stripped, and the record's anchors renumber over what
 survives - the same treatment #3 gives chapter-marker-only paragraphs. An
 interpolation's paragraph never empties this way, since its text stays
 behind. Whitespace left by a removed span next to punctuation (e.g. "word
-, next") is closed up the same way line-wrap whitespace is collapsed.
+, next") is closed up, and the paragraph's line-wrap whitespace is
+collapsed along with it - but only in a paragraph a span was actually
+excised from. A paragraph carrying no bracketed span at all is left
+byte-identical to what normalization produced, mid-paragraph newlines
+included (issue #55; see "Whitespace policy" in
+`docs/normalized-record-schema.md` for the full rule).
 
 ## Known gaps
 
@@ -165,9 +170,10 @@ letter's own evidence paragraph and 9 do not, in two shapes:
 - **A letter's own recipient heading line** carries an inline marker in 3
   cases (footnotes 15, 41, 42) - e.g. `TO MRS. LUCY BROWN[15] (AT
   PLYMOUTH).` The heading is apparatus (it becomes the letter's
-  `recipient` field, not its paragraph text), not evidence, so it belongs
-  to no paragraph and its footnote is unlinked for the same reason as
-  J02's chapter-heading marker.
+  `recipient` field - with this marker stripped out of it - not its
+  paragraph text), not evidence, so it belongs to no paragraph and its
+  footnote is unlinked for the same reason as J02's chapter-heading
+  marker.
 
 Nothing is deleted here either: every one of the 9 unlinked letters
 footnotes is extracted with its real body text, just without a

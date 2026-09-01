@@ -204,9 +204,10 @@ The second source type: the 130 letters of *Familiar Letters*
 `normalize_letters` splits on the line-initial `TO <recipient>.` heading
 RECON.md §5 documents — re-verified directly against the raw corpus: exactly
 130 headings, 43 distinct verbatim strings, matching RECON's own counts
-exactly. IDs continue the journals' `SRC-` sequence (`start_id`, default
-`len(journal_records) + 1` when the CLI combines both source types — part
-04 §4's "volume order, then entry order").
+exactly (41 once each heading's footnote marker is stripped as apparatus —
+see "Recipients table" below). IDs continue the journals' `SRC-` sequence
+(`start_id`, default `len(journal_records) + 1` when the CLI combines both
+source types — part 04 §4's "volume order, then entry order").
 
 ### Letter-specific frontmatter fields
 
@@ -218,9 +219,9 @@ journal records:
 
 | Field | Meaning |
 |---|---|
-| `recipient` | The heading text after `TO `, preserved **verbatim** — no stripping, no merging. This is deliberate: R. W. Emerson's four location forms (`(AT CONCORD)`, `(AT NEW YORK)`, `(IN ENGLAND)`, no location) and the Thoreau family's shared surname are the corpus's alias-resolution hazard material (§7), and merging them here would destroy it before M2 ever sees it. |
+| `recipient` | The heading text after `TO `, preserved **verbatim** apart from an inline footnote marker (`TO MRS. LUCY BROWN[15] (AT PLYMOUTH).` → `MRS. LUCY BROWN (AT PLYMOUTH).`, 3 headings: footnotes 15, 41, 42) — that marker is Sanborn's apparatus, not the recipient, and the footnote it points at is still extracted in full by the editorial slice (`docs/editorial-record-schema.md`, "Known gaps"). Nothing else is stripped and nothing is merged. This is deliberate: R. W. Emerson's four location forms (`(AT CONCORD)`, `(AT NEW YORK)`, `(IN ENGLAND)`, no location) and the Thoreau family's shared surname are the corpus's alias-resolution hazard material (§7), and merging them here would destroy it before M2 ever sees it. |
 | `dateline` | The letter's indented dateline paragraph (e.g. `CONCORD, October 27, 1837.`) — the first substantive paragraph after the heading (skipping a leading editorial annotation like `[The first of many letters.]`), if and only if it is indented; empty when the letter has none, rather than scanning further and risking its closing signature block instead (review round 1 on PR #52's blocking defect 1: `SRC-000002`/`SRC-000129` used to get `"TAHATAWAN."`/`"Yrs. in great haste, HENRY D. THOREAU."`). Unlike the journals, letter datelines already carry an explicit year, stated in plain text — landing here verbatim, same as always; `date_confidence` (below) is what turns that stated year into a real value (issue #57). |
-| `salutation` | The opening address (`DEAR HELEN,--`, `MR. BLAKE,--`), extracted non-destructively from the body's first paragraph — the body keeps that paragraph in full, so nothing is lost by also exposing this field. |
+| `salutation` | The opening address (`DEAR HELEN,--`, `MR. BLAKE,--`), extracted non-destructively from the body's first paragraph — the body keeps that paragraph in full, so nothing is lost by also exposing this field; empty when the letter has none, rather than falling back to that paragraph's opening prose and passing Thoreau's own words off as a greeting (issue #58, the same shape-not-presence remedy #52 applied to `dateline` above: `SRC-000002`, `SRC-000045`, `SRC-000049`, `SRC-000050` and `SRC-000129` used to get a sentence of body text). |
 
 `recorded_date` / `event_date` land as the dateline text, same as `dateline`
 (the journals' pattern of landing the heading text verbatim) — a letter's
@@ -257,6 +258,18 @@ but scoped, like #5 was for the journals, to *bracket-delimited* apparatus
 prose between letters, described above, is a different shape of
 editorial voice and stays inline; #56 did not extend to it.
 
+**Letters addressed *to* Thoreau follow from this and get no records of
+their own.** Six letters in the volume are headed by a correspondent's name
+(`ELLERY CHANNING TO THOREAU (AT CONCORD).`,
+`BRONSON ALCOTT TO DANIEL RICKETSON (AT NEW BEDFORD).`) rather than
+Thoreau's own `TO ...`, so `_LETTER_HEADING_RE` does not open a record at
+them and each is carried inline in the record it falls in — exactly the
+treatment Sanborn's connective narrative gets, and what three of the six
+already got. Doing anything else here would insert records into the letters
+range and renumber every `SRC-` after the insertion point, for a question
+part 16 has to answer for the whole archive at once: whose voice a record
+carries. The volume stays at 130 records.
+
 ### Back matter: the General Index and trailing footnotes
 
 The volume's General Index (`GENERAL INDEX`, after the last letter) is cut
@@ -266,19 +279,32 @@ volumes share the same START/END-marker-and-cut logic. A `FOOTNOTES:`
 block — Sanborn's endnotes for the preceding stretch of letters — can land
 inside an entry's own lines the same way the journals' back matter used to
 land inside their last entry (PR #48 review round 1); `_split_letters`
-trims every letter's lines at a trailing `FOOTNOTES:` marker, not just the
-last letter's, since a footnote block is never part of the letter itself
-wherever it lands.
+excises every `FOOTNOTES:` block from a letter's lines, not just a trailing
+one, since a footnote block is never part of the letter itself wherever it
+lands.
 
-**"Editorial narrative is left inline" is not uniformly true**, and #5
-should not assume it is (review round 1 on PR #52): `_trim_trailing_footnotes`
-cuts a letter's lines at its first `FOOTNOTES:` marker, so any connective
-narrative that happens to fall *after* a `FOOTNOTES:` block within that
-same span is silently dropped along with the footnotes, while narrative
-falling *before* one (the ordinary case — narrative between two letters
-elsewhere in the volume) is kept. This is a side effect of trimming at the
-first marker found, not a deliberate distinction between two kinds of
-narrative.
+**Only the block is cut, not the rest of the letter's lines.**
+`_excise_footnote_blocks` runs from a `FOOTNOTES:` marker to the line that
+closes the block — `LETTERS_FOOTNOTE_BLOCK_END_RE`, a bare unindented line
+with no lowercase letter anywhere on it — and then keeps going. That
+boundary rule is `editorial.py`'s, verified there against all four of the
+volume's real blocks; it lives in `normalize.py` and `editorial.py` imports
+it, so the two passes cannot disagree about where a block ends.
+
+An earlier pass cut the whole tail instead, at the first marker found
+(review round 1 on PR #52 flagged this as a side effect of trimming, not a
+deliberate distinction). "Editorial narrative is left inline" was then not
+uniformly true: narrative falling *before* a block was kept, narrative
+falling *after* one was dropped along with the footnotes — a distinction
+the source text never makes. Four real stretches were lost that way and
+reached no normalized record at all: chapter II's heading and opening
+narrative, chapter III's heading, the whole `APPENDIX` preamble, and —
+inside chapter II's stretch — Ellery Channing's letter to Thoreau of
+March 5, 1845 and Charles Lane's three, along with the
+`[Illustration: _Walden Woods_]` caption, which consequently never became a
+`bracketed-span` editorial record (the loose end issue #56 left).
+`tests/test_letters.py` now pins both directions against the real corpus:
+every letter to Thoreau reaches a record, and no footnote body reaches one.
 
 ## Recipients table (issue #6)
 
@@ -286,17 +312,20 @@ narrative.
 `SRC-` IDs of the letters naming them — "a real, checkable table ... not a
 list in a comment" (issue #6). `memoria normalize` writes it as YAML to
 `sources/normalized/recipients.yaml` via `write_recipients_table`. It has
-43 entries against the real corpus, matching RECON.md §5's "43 distinct
-recipients" exactly.
+**41** entries against the real corpus. RECON.md §5 counts "43 distinct
+recipients" — the same set of headings, counting the 3 that carry a
+footnote marker as strings of their own; with the marker stripped as
+apparatus, `MRS. LUCY BROWN[15] (AT PLYMOUTH).` and `R. W. EMERSON[42]
+(AT CONCORD).` collapse onto headings already in the table, and `R. W.
+EMERSON.[41]` becomes the bare `R. W. EMERSON.` form.
 
-**Not person-level ground truth on its own.** The 43 rows are 43 distinct
-verbatim *strings*, over roughly 25 actual people — they include artefacts
-of the source text alongside genuine location-form variants: a stray-comma
-duplicate (`DANIEL RICKETSON, (AT NEW BEDFORD).` vs `DANIEL RICKETSON (AT
-NEW BEDFORD).`), an `(AT MILTON)` / `(IN MILTON)` preposition variant, and
-two footnote-marked Emerson headings alongside his three genuine location
-forms. This is correct as issue #6 specifies it (verbatim, unmerged — the
-alias-resolution hazard material §7 wants intact), but M2's
+**Not person-level ground truth on its own.** The 41 rows are 41 distinct
+verbatim *strings*, over roughly 25 actual people — they still include
+artefacts of the source text alongside genuine location-form variants: a
+stray-comma duplicate (`DANIEL RICKETSON, (AT NEW BEDFORD).` vs `DANIEL
+RICKETSON (AT NEW BEDFORD).`) and an `(AT MILTON)` / `(IN MILTON)`
+preposition variant. This is correct as issue #6 specifies it (verbatim,
+unmerged — the alias-resolution hazard material §7 wants intact), but M2's
 promotion-miss-rate scoring will need an alias layer on top of this table
 before it is ground truth at the level of a *person*, not a heading string.
 

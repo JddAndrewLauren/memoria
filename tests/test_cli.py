@@ -114,7 +114,11 @@ def test_normalize_writes_records_under_sources_normalized(tmp_path):
     recipients_path = tmp_path / "sources" / "normalized" / "recipients.yaml"
     assert recipients_path.is_file()
     table = yaml.safe_load(recipients_path.read_text())
-    assert len(table) == 43
+    # 41 distinct recipients: RECON.md's 43 heading strings, with the
+    # three footnote markers stripped as apparatus (two of them then
+    # collapse onto a heading already present) - see
+    # docs/normalized-record-schema.md, "Recipients table".
+    assert len(table) == 41
 
 
 @pytest.mark.skipif(
@@ -153,11 +157,11 @@ def test_normalize_writes_editorial_records_under_sources_editorial(tmp_path):
 
     assert result.returncode == 0
     written = list((tmp_path / "sources" / "editorial").glob("ED-*.md"))
-    # 990 footnotes (508 J01 + 372 J02 + 110 letters) + 101 standalone
-    # asides (90 journals + 11 letters) + 193 interpolations (154 journals
+    # 990 footnotes (508 J01 + 372 J02 + 110 letters) + 102 standalone
+    # asides (90 journals + 12 letters) + 193 interpolations (154 journals
     # + 39 letters) - issue #56 extended extraction to the letters volume
     # - + 2 introductions (Torrey, Sanborn) - see test_editorial.py.
-    assert len(written) == 1286
+    assert len(written) == 1287
 
 
 @pytest.mark.skipif(
@@ -179,7 +183,11 @@ def test_rebuild_writes_normalized_records_and_the_index(tmp_path):
     recipients_path = tmp_path / "sources" / "normalized" / "recipients.yaml"
     assert recipients_path.is_file()
     table = yaml.safe_load(recipients_path.read_text())
-    assert len(table) == 43
+    # 41 distinct recipients: RECON.md's 43 heading strings, with the
+    # three footnote markers stripped as apparatus (two of them then
+    # collapse onto a heading already present) - see
+    # docs/normalized-record-schema.md, "Recipients table".
+    assert len(table) == 41
     assert (tmp_path / ".memoria" / "index.db").is_file()
     cross_references_path = (
         tmp_path / "sources" / "normalized" / "cross-references.yaml"
@@ -207,7 +215,7 @@ def test_rebuild_writes_editorial_records_and_strips_them_from_normalized(tmp_pa
 
     assert result.returncode == 0
     editorial_written = list((tmp_path / "sources" / "editorial").glob("ED-*.md"))
-    assert len(editorial_written) == 1286
+    assert len(editorial_written) == 1287
     # Issue #56 extended extract_editorial_apparatus() to the letters
     # volume too, so both journal and letter records must come out
     # apparatus-free - not just journals, as issue #6 originally scoped
