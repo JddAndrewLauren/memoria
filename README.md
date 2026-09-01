@@ -20,6 +20,22 @@ MEMORIA_EVIDENCE_ROOT=/absolute/path/to/thoreau-evidence .venv/bin/pytest tests/
 
 This is the one command every issue in this batch uses to run the suite.
 
+## The M0 check-suite
+
+```
+MEMORIA_EVIDENCE_ROOT=/absolute/path/to/thoreau-evidence .venv/bin/python scripts/m0-check.py
+```
+
+One command for the whole M0 gate: `memoria validate`, `memoria rebuild` over the full
+corpus, and the test suite, reporting pass/fail per check. Unlike bare `pytest`, it
+refuses to run without the evidence corpus and treats a skipped real-corpus check as a
+failed one — without the corpus every reconciliation against `RECON.md` skips and the
+suite would otherwise report green having checked nothing.
+
+`docs/m0-check-suite.md` holds the reconciliation table (what each `RECON.md` count was
+re-derived to, and why it differs) and the map from every mismatch found during M0 to
+the regression test that catches it again.
+
 ### Evidence corpus location
 
 The raw evidence corpus (`thoreau-evidence`) is a sibling repository, read-only.

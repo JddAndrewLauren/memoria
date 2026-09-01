@@ -95,6 +95,7 @@ def test_validate_exits_nonzero_when_normalized_record_has_dangling_src_id(
     assert "SRC-999999" in result.stdout
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
@@ -121,6 +122,7 @@ def test_normalize_writes_records_under_sources_normalized(tmp_path):
     assert len(table) == 41
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
@@ -146,6 +148,7 @@ def test_normalize_writes_cross_references_under_sources_normalized(tmp_path):
         assert row["target_work"]
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
@@ -164,6 +167,7 @@ def test_normalize_writes_editorial_records_under_sources_editorial(tmp_path):
     assert len(written) == 1287
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
@@ -200,6 +204,7 @@ def test_rebuild_writes_normalized_records_and_the_index(tmp_path):
     assert len(yaml.safe_load(cross_references_path.read_text())) == 668
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
@@ -228,6 +233,7 @@ def test_rebuild_writes_editorial_records_and_strips_them_from_normalized(tmp_pa
         assert "[" not in body and "]" not in body, path.name
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",

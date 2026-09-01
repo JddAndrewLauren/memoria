@@ -21,3 +21,13 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+# `m0` marks the checks that run against the real evidence corpus. Every one of
+# them is also gated on MEMORIA_EVIDENCE_ROOT, so without the corpus they skip
+# and pytest still exits 0 - the whole reconciliation against RECON.md silently
+# absent rather than failing. scripts/m0-check.py treats a skipped m0 check as a
+# failed one; the marker is how it finds them. See docs/m0-check-suite.md.
+markers = [
+    "m0: runs against the real evidence corpus; a skip here is a failed check, not an absent one",
+]

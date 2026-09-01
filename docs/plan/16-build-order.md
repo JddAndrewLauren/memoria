@@ -52,7 +52,9 @@ Build:
 - SQLite FTS5 over the normalized records;
 - ground truth extraction: all cross-references parsed from the journals —
   668, of which the 379 landing on held targets are tabled with their
-  journal-side anchors; `RECON.md`'s 43 letter recipients tabled;
+  journal-side anchors; the letter recipients tabled — 41 rows, `RECON.md`'s 43
+  heading strings with the three carrying a footnote marker collapsed as
+  apparatus (`docs/m0-check-suite.md`);
 - the **answer key**: the cross-references cite pages of editions the corpus
   does not hold, and `RECON.md` §4 read that as needing adjudication rather
   than lookup. **That premise was wrong** — the cited editions are digitized
@@ -66,8 +68,14 @@ Build:
   `memoria validate` (IDs, links, raw-file hashes) — both grow at every later
   milestone;
 - a mechanical check-suite reconciling the normalizer against `RECON.md`:
-  448 date headings, 130 letters, 43 recipients, footnote and bracketed-span
-  counts, and sampled evidence records containing no editorial voice.
+  date headings, 130 letters, recipients, footnote and bracketed-span counts,
+  and sampled evidence records containing no editorial voice. `RECON.md` is
+  reconnaissance, not ground truth: the suite re-derives each count and asserts
+  the verified figure with RECON's stated alongside it, so four of the five
+  reconcile as documented deviations rather than as equalities — 558 date
+  headings, not RECON's 448; 41 recipient rows, not 43. Every deviation found is
+  an addition. The table, and the map from each M0 mismatch to the regression
+  test that catches it again, are in `docs/m0-check-suite.md`.
 
 ### Gate
 

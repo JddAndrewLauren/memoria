@@ -254,6 +254,7 @@ def test_write_cross_references_table_emits_readable_yaml(tmp_path):
         assert field in rows[0]
 
 
+@pytest.mark.m0
 @pytest.mark.skipif(
     EVIDENCE_ROOT_ENV_VAR not in os.environ,
     reason=f"{EVIDENCE_ROOT_ENV_VAR} not set; skipping real-corpus integration test",
