@@ -243,8 +243,6 @@ def test_a_search_result_anchor_reads_the_paragraph_that_matched(tmp_path):
         ("CLM-0041", "CLM"),
         ("RES-20261018-003", "RES"),
         ("DEC-0088", "DEC"),
-        ("SUB-people", "SUB"),
-        ("SUB-people/bob", "SUB"),
     ],
 )
 def test_a_not_yet_existing_kind_names_the_kind(tmp_path, ref, kind):
@@ -398,3 +396,121 @@ def test_the_boundary_case_is_why_a_round_trip_assertion_is_not_enough():
 
     assert len(parsed.paragraphs) == 2          # not 1, as written
     assert record_to_markdown(parsed) == text   # and the round trip agrees
+
+
+# --- SUB- subjects and entries (issue #16) ----------------------------------
+
+
+def test_a_subject_read_is_byte_identical_to_the_file(tmp_path):
+    from memoria.subjects import subject_to_markdown, write_builtin_subjects
+
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    path = tmp_path / "subjects" / "people" / "_subject.md"
+
+    result = read(repository, "SUB-people")
+
+    assert result.text.encode("utf-8") == path.read_bytes()
+
+
+def test_an_entry_read_is_byte_identical_to_the_file(tmp_path):
+    from memoria.subjects import Entry, entry_to_markdown, write_builtin_subjects
+
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    entry_path = tmp_path / "subjects" / "people" / "bob.md"
+    entry_path.write_text(
+        entry_to_markdown(
+            Entry(id="SUB-people/bob", match_terms=["Bob"], body="Testimony.")
+        ),
+        encoding="utf-8",
+    )
+
+    result = read(repository, "SUB-people/bob")
+
+    assert result.text.encode("utf-8") == entry_path.read_bytes()
+
+
+def test_an_entry_read_resolves_even_after_the_file_is_renamed(tmp_path):
+    from memoria.subjects import Entry, entry_to_markdown, write_builtin_subjects
+
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    entry_path = tmp_path / "subjects" / "people" / "some-other-name.md"
+    entry_path.write_text(
+        entry_to_markdown(
+            Entry(id="SUB-people/bob", match_terms=["Bob"], body="Testimony.")
+        ),
+        encoding="utf-8",
+    )
+
+    result = read(repository, "SUB-people/bob")
+
+    assert result.text.encode("utf-8") == entry_path.read_bytes()
+
+
+def test_a_missing_subject_names_the_subject(tmp_path):
+    with pytest.raises(ReadError, match="no such subject: SUB-nonesuch"):
+        read(Repository(root=tmp_path), "SUB-nonesuch")
+
+
+def test_a_missing_entry_names_the_entry(tmp_path):
+    from memoria.subjects import write_builtin_subjects
+
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+
+    with pytest.raises(ReadError, match="no such entry: SUB-people/nonesuch"):
+        read(repository, "SUB-people/nonesuch")
+
+
+def test_reading_a_renamed_entry_survives_an_unrelated_malformed_sibling(tmp_path):
+    """Reproduces PR #84 review round 1: a typo'd match term in a sibling
+    file must not stop read() from finding a validly renamed entry."""
+    from memoria.subjects import Entry, entry_to_markdown, write_builtin_subjects
+
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    subjects_dir = tmp_path / "subjects" / "people"
+    (subjects_dir / "bob.md").write_text(
+        entry_to_markdown(
+            Entry(id="SUB-people/bob", match_terms=["SUB-People/Bob"], body="Bob.")
+        ),
+        encoding="utf-8",
+    )
+    carol_path = subjects_dir / "renamed-carol.md"
+    carol_path.write_text(
+        entry_to_markdown(Entry(id="SUB-people/carol", body="Carol.")),
+        encoding="utf-8",
+    )
+
+    result = read(repository, "SUB-people/carol")
+
+    assert result.text.encode("utf-8") == carol_path.read_bytes()
+
+
+def test_a_malformed_entry_file_reaches_read_as_a_readerror_not_a_subjecterror(
+    tmp_path,
+):
+    """A SubjectError from the subjects module must never cross read()'s
+    boundary - the same rule already enforced for references.BadReference,
+    and load-bearing at the MCP tool boundary, which catches ReadError
+    alone (docs/tool-surface.md)."""
+    from memoria.subjects import SubjectError, write_builtin_subjects
+
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    subjects_dir = tmp_path / "subjects" / "people"
+    (subjects_dir / "bob.md").write_text(
+        "---\nid: SUB-people/bob\nmatch_terms: [SUB-People/Bob]\n---\n\nBob.\n",
+        encoding="utf-8",
+    )
+
+    try:
+        read(repository, "SUB-people/bob")
+        raised = None
+    except Exception as exc:
+        raised = exc
+
+    assert isinstance(raised, ReadError)
+    assert not isinstance(raised, SubjectError)

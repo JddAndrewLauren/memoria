@@ -113,15 +113,17 @@ def read(ref: str) -> str:
 
     Accepts a normalized source record by ID (`SRC-000184`), one paragraph of
     one (`SRC-000184 P17`, `#src-000184-p17`, or a search result's anchor
-    `src-000184-p17` as-is), or a repository-relative path
+    `src-000184-p17` as-is), a subject or one of its entries
+    (`SUB-people`, `SUB-people/bob`), or a repository-relative path
     (`docs/poc-plan.md`).
 
-    A record ID with no paragraph returns the whole record file exactly as it
-    is on disk, frontmatter and anchors included - the undecorated full-source
-    read. Evidence text is never summarized, abridged or reformatted.
+    A record ID with no paragraph, or a SUB- reference, returns the whole
+    file exactly as it is on disk, frontmatter included - the undecorated
+    full-source read. Evidence text is never summarized, abridged or
+    reformatted.
 
     Reference kinds the archive defines but this build does not resolve yet -
-    SES-, CHG-, CLM-, RES-, DEC-, SUB- - return an error naming the kind.
+    SES-, CHG-, CLM-, RES-, DEC- - return an error naming the kind.
     """
     try:
         return render(read_ref(repository(), ref))
