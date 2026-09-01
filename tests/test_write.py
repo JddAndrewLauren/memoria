@@ -248,18 +248,38 @@ def test_a_failed_git_call_reports_what_git_printed_on_either_stream(tmp_path, m
 # module: `records` is the ingest side, writing normalized records under
 # `sources/normalized/`, and `index` is the index maintainer, writing
 # `.memoria/index.db`. Both are Derived state (§42), not a durable class.
-ALLOWED_WRITERS = {"write.py", "records.py", "index.py"}
+#
+# `manuscript` is a third: #35 has it write a brief's bytes directly
+# (`_write_brief_file`'s `os.replace`, `_renumber_directories`'s
+# `Path.rename`) rather than through this module. Whether that should
+# instead route through `memoria.write` is an open operator decision
+# (issue #66, comment 5501089810), not settled by this guard - it only
+# records who writes today.
+ALLOWED_WRITERS = {"write.py", "records.py", "index.py", "manuscript.py"}
 FILE_WRITING_CALLS = {
     "write_text", "write_bytes",
-    "replace", "rename", "copy", "copy2", "copyfile", "copyfileobj", "move",
+    "rename", "copy2", "copyfile", "copyfileobj", "move",
 }
+# `replace` and `copy` are also generic method names - `str.replace`,
+# `dataclasses.replace`, `dict.copy`/`list.copy` - so matching the bare
+# attribute name alone would flag those too (PR #87 round-2 review, note
+# 2). Require the receiver to be `os`/`shutil`, the only modules this
+# codebase calls them on, so only the real `os.replace`/`shutil.copy`
+# trips the guard.
+QUALIFIED_ONLY_CALLS = {"replace", "copy"}
+FS_MODULES = {"os", "shutil"}
 WRITE_MODES = set("wax+")
 
 
 def _writes_a_file(node: ast.Call) -> str | None:
     """The name of the file-writing call `node` makes, or None."""
     name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
-    if name in FILE_WRITING_CALLS:
+    if name in QUALIFIED_ONLY_CALLS and isinstance(node.func, ast.Attribute):
+        receiver = node.func.value
+        if isinstance(receiver, ast.Name) and receiver.id in FS_MODULES:
+            return name
+        return None
+    if name in FILE_WRITING_CALLS or name in QUALIFIED_ONLY_CALLS:
         return name
     if name == "open":
         mode = next(
@@ -289,6 +309,35 @@ def test_no_other_module_writes_a_file():
                 f"{path.relative_to(SRC_ROOT)} calls {name}(): a durable write "
                 "goes through memoria.write"
             )
+
+
+def test_the_no_other_writer_guard_would_catch_a_real_violator(tmp_path):
+    """The guard above is only worth having if it still fires on a module
+    that writes a file directly - and, since `replace`/`copy` are now
+    qualified-only, only on the real `os`/`shutil` call, not on the
+    `str.replace`, `dataclasses.replace` or `dict.copy` that share its bare
+    attribute name (PR #87 round-2 review, note 2)."""
+    offender = tmp_path / "offender.py"
+    offender.write_text(
+        "import os\n"
+        "def write_it(tmp, path):\n"
+        "    os.replace(tmp, path)\n",
+        encoding="utf-8",
+    )
+    tree = ast.parse(offender.read_text(encoding="utf-8"), filename=str(offender))
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    assert any(_writes_a_file(node) == "replace" for node in calls)
+
+    innocent = tmp_path / "innocent.py"
+    innocent.write_text(
+        "import dataclasses\n"
+        "def normalize(text, brief):\n"
+        "    return text.replace('a', 'b'), dataclasses.replace(brief), {}.copy()\n",
+        encoding="utf-8",
+    )
+    tree = ast.parse(innocent.read_text(encoding="utf-8"), filename=str(innocent))
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    assert all(_writes_a_file(node) is None for node in calls)
 
 
 def test_durable_paths_name_the_state_classes_and_nothing_derived_or_immutable():
