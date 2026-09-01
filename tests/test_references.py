@@ -12,7 +12,9 @@ from memoria.index import build_index, search
 from memoria.records import NormalizedRecord
 from memoria.references import (
     BadReference,
+    ChapterReference,
     PathReference,
+    SectionReference,
     SourceReference,
     UnknownReference,
 )
@@ -20,6 +22,34 @@ from memoria.references import (
 
 def test_parse_resolves_a_bare_src_id():
     assert references.parse("SRC-000184") == SourceReference("SRC-000184", None)
+
+
+def test_parse_resolves_a_bare_chapter_id():
+    assert references.parse("CHP-0001") == ChapterReference("CHP-0001")
+
+
+def test_parse_resolves_a_bare_section_id():
+    assert references.parse("SEC-0001") == SectionReference("SEC-0001")
+
+
+def test_parse_is_case_insensitive_for_chapter_and_section_ids():
+    assert references.parse("chp-0001") == ChapterReference("CHP-0001")
+    assert references.parse("sec-0001") == SectionReference("SEC-0001")
+
+
+def test_a_malformed_chapter_id_says_so_rather_than_claiming_the_kind_is_unknown():
+    with pytest.raises(BadReference, match="four-digit"):
+        references.parse("CHP-1")
+
+
+def test_a_malformed_section_id_says_so_rather_than_claiming_the_kind_is_unknown():
+    with pytest.raises(BadReference, match="four-digit"):
+        references.parse("SEC-1")
+
+
+def test_format_citation_for_chapter_and_section_references():
+    assert references.format_citation(ChapterReference("CHP-0001")) == "CHP-0001"
+    assert references.format_citation(SectionReference("SEC-0001")) == "SEC-0001"
 
 
 @pytest.mark.parametrize(

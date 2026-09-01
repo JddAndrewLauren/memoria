@@ -171,6 +171,19 @@ DEC-0088                  author decision
 
 Subjects, entries, claims, chapters, and sections also carry stable IDs in frontmatter so file renames do not destroy identity.
 
+A **chapter** and a **section** are addressable directly, by the four-digit form #35
+settled (this document did not name one):
+
+```text
+CHP-0001                  chapter
+SEC-0001                  section
+```
+
+Each is one flat namespace across the whole book - sections do not restart per chapter -
+which is what keeps a bare `SEC-0002` in a citation unambiguous without also naming its
+chapter. Directory position (`chapters/08/`) is a different axis entirely: reordering
+renumbers it, and it is never what a reference names (§4.1).
+
 A **subject** and an **entry** are addressable directly:
 
 ```text

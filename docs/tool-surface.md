@@ -58,6 +58,8 @@ enumeration of kinds, and had already drifted.
 | `#src-000184-p17` | that paragraph | the fragment alone |
 | `src-000184-p17` | that paragraph | `index.SearchResult.anchor`, verbatim |
 | `docs/poc-plan.md` | the file, verbatim | a repository-relative path |
+| `CHP-0001` | that chapter's brief, verbatim | part 04 §2.1 / #35 |
+| `SEC-0001` | that section's brief, verbatim | part 04 §2.1 / #35 |
 
 The bare anchor is accepted deliberately. `SearchResult` carries
 `(src_id, anchor, source_type)`, so a search hit feeds straight back into
@@ -65,7 +67,13 @@ The bare anchor is accepted deliberately. `SearchResult` carries
 adapter, which is the duplication §40.1 exists to forbid.
 
 `SRC-` IDs are six digits, zero-padded. `SRC-184` is refused with a message
-saying so, rather than guessed at.
+saying so, rather than guessed at. `CHP-` and `SEC-` IDs are four digits,
+zero-padded, one flat namespace each — a chapter and a section never share an
+ID space, but two sections in different chapters do, so a bare `SEC-0002` in
+a citation is unambiguous without naming its chapter. They resolve by stable
+ID rather than by directory, because reordering renumbers directories (#35);
+the ID in a chapter's or section's own frontmatter is what survives the
+move.
 
 Paths are repository-relative, and reads are confined to the repository by
 **two** checks, because one is not enough. The reference is refused if it says
