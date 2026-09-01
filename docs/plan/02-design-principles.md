@@ -1,5 +1,6 @@
 <!-- Part of the Memoria build plan. Index: ./plan-index.md -->
 <!-- Source sections: 1 of the original memoria-plan.md -->
+<!-- §1.4's CHG- example amended 2026-09-01 to a per-day sequence. ADR-0008. -->
 
 # 1. Core Design Principles
 
@@ -91,7 +92,7 @@ Research memo
 SRC-0184
 SRC-0912
 SES-20260912-1432#T017
-CHG-20261014-0917
+CHG-20261014-003
 ```
 
 The research memo is useful context.
