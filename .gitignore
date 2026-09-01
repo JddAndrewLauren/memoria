@@ -15,3 +15,9 @@ sources/editorial/
 # FTS5 search index; derived state, not durable (§42). Regenerate with
 # `memoria rebuild` (see README).
 .memoria/
+
+# Machine-generated projection of the CHG- commits in git history; derived state,
+# not durable (§42). Git remains canonical and `read(CHG-...)` renders from it
+# directly, so these files are a browsing convenience and are never read back.
+# Regenerate with `memoria rebuild` -- it needs no evidence root (ADR-0008).
+changes/
