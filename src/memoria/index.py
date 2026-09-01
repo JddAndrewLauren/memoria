@@ -163,18 +163,16 @@ def rebuild(evidence_root: Path, repo_root: Path) -> list[NormalizedRecord]:
     ``test_rebuild_produces_byte_identical_output_to_normalize`` is the
     regression test for the whole class of defect, not just this instance.
 
-    Letters do not get year resolution here: ``resolve_years`` filters by
+    ``resolve_years`` does not run over letters: it filters by
     ``original_file`` against ``JOURNAL_VOLUMES`` and leaves letter
-    records untouched, so every letter keeps ``date_confidence:
-    unresolved`` after both ``memoria normalize`` and ``memoria rebuild``
-    - deliberately, not a gap this function is meant to close. A letter's
-    dateline already carries an explicit year as text (unlike a journal
-    heading), but turning that into a resolved ``event_date``/
-    ``date_confidence`` is letters-specific year-resolution work issue #6
-    scoped out (part 16: "year resolution" and "letters parsing" are
-    separate M0 build steps), not something to grow inside ``rebuild()``
-    unasked. Editorial extraction, unlike year resolution, does cover
-    letters as of issue #56 - see ``extract_editorial_apparatus``.
+    records untouched here and in ``memoria normalize`` alike - the
+    journals' chapter-inference/weekday-checksum machinery has no letters
+    analogue to run. A letter's ``date_confidence`` is instead resolved
+    directly inside ``normalize_letters`` itself (issue #57): its dateline
+    already states its own year as plain text, so parsing it needs no
+    second pass over the raw file the way the journals' does. Editorial
+    extraction, like year resolution, does cover letters as of issue #56 -
+    see ``extract_editorial_apparatus``.
     """
     evidence_root = Path(evidence_root)
     repo_root = Path(repo_root)

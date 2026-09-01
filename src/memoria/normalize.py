@@ -542,6 +542,27 @@ def _extract_dateline(entry_lines: list[str]) -> str:
 # "FRIEND X,--", "MY FRIEND X,--", even Latin "CARA SOROR,--").
 _SALUTATION_RE = re.compile(r"^(.*?,--)")
 
+# A letter's dateline already carries its own explicit year as text (issue
+# #6), unlike the journals' headings - no chapter to infer from and no
+# weekday checksum to run, the year is simply stated. A plain 4-digit scan
+# is enough to parse it out; two real letters have a dateline with no
+# parseable year at all (SRC-000024, "CASTLETON, STATEN ISLAND, May 23.",
+# and SRC-000007, whose year is spelled in Roman numerals, "A. D.
+# MDCCCXL.") and stay `unresolved` rather than guessed. No dateline in the
+# real corpus carries more than one 4-digit number, so there is no
+# ambiguity between candidates to resolve.
+_LETTER_DATELINE_YEAR_RE = re.compile(r"\b\d{4}\b")
+
+
+def _letter_date_confidence(dateline: str) -> str:
+    """`unresolved` for an absent or unparseable dateline; `inferred`
+    otherwise - the same value the journals give a heading that already
+    states its own year (docs/normalized-record-schema.md), since a
+    letter's dateline has no weekday to independently confirm the year
+    against a calendar either.
+    """
+    return "inferred" if _LETTER_DATELINE_YEAR_RE.search(dateline) else "unresolved"
+
 
 def _extract_salutation(entry_lines: list[str]) -> str:
     """The letter's salutation: extracted from the first unindented,
@@ -592,11 +613,13 @@ def normalize_letters(
             NormalizedRecord(
                 id=src_id,
                 source_type=LETTERS_VOLUME["source_type"],
-                # Year resolution is a later slice (part 05 §6), same as
-                # the journals: the dateline lands here verbatim.
+                # The dateline already carries its own year as text
+                # (issue #57), so event_date lands identical to
+                # recorded_date either way - unlike the journals, there is
+                # no separate resolved value to append.
                 recorded_date=dateline,
                 event_date=dateline,
-                date_confidence="unresolved",
+                date_confidence=_letter_date_confidence(dateline),
                 contemporaneous=True,
                 original_file=LETTERS_VOLUME["raw_path"],
                 original_locator=(

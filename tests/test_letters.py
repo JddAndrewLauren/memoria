@@ -226,15 +226,62 @@ def test_normalize_letters_source_type_is_letter(tmp_path):
     assert all(r.source_type == "letter" for r in records)
 
 
-def test_normalize_letters_date_confidence_is_unresolved(tmp_path):
-    # Same scale as the journals (docs/normalized-record-schema.md):
-    # unresolved for every record this slice produces.
+def test_normalize_letters_date_confidence_is_inferred_for_an_explicit_year(
+    tmp_path,
+):
+    # Issue #57: a dateline's year is stated in plain text, no chapter
+    # inference or weekday checksum needed or possible - same value the
+    # journals give a heading that already states its own year
+    # (docs/normalized-record-schema.md's `date_confidence` row), since
+    # there is nothing here to independently confirm it against either.
     evidence_root = tmp_path / "thoreau-evidence"
     _write_fake_letters_volume(evidence_root)
 
     records = normalize_letters(evidence_root)
 
-    assert all(r.date_confidence == "unresolved" for r in records)
+    assert all(r.date_confidence == "inferred" for r in records)
+    assert all(r.event_date == r.dateline for r in records)
+
+
+def test_normalize_letters_with_no_dateline_is_unresolved(tmp_path):
+    # A letter with no dateline at all (SRC-000002/SRC-000129 in the real
+    # corpus) has no year to parse - `date_confidence` stays `unresolved`,
+    # never invented.
+    evidence_root = tmp_path / "thoreau-evidence"
+    text = _FAKE_LETTERS_TEXT.replace(
+        "     CONCORD, March 11, 1842.\r\n"
+        "\r\n"
+        "DEAR FRIEND,--I write to you now about the pond.\r\n",
+        "DEAR FRIEND,--I write to you now about the pond, with no dateline\r\n"
+        "at all this time.\r\n",
+    )
+    _write_fake_letters_volume(evidence_root, text)
+
+    records = normalize_letters(evidence_root)
+
+    assert records[2].dateline == ""
+    assert records[2].date_confidence == "unresolved"
+    assert records[2].event_date == ""
+
+
+def test_normalize_letters_with_no_year_in_dateline_is_unresolved(tmp_path):
+    # A dateline can be present but carry no year at all (SRC-000024 in the
+    # real corpus, "CASTLETON, STATEN ISLAND, May 23.") or spell it in
+    # Roman numerals rather than digits (SRC-000007, "A. D. MDCCCXL.") -
+    # both unparseable by a plain year scan, so both stay `unresolved`
+    # rather than guessing.
+    evidence_root = tmp_path / "thoreau-evidence"
+    text = _FAKE_LETTERS_TEXT.replace(
+        "     CONCORD, March 11, 1842.\r\n",
+        "     CONCORD, March 11.\r\n",
+    )
+    _write_fake_letters_volume(evidence_root, text)
+
+    records = normalize_letters(evidence_root)
+
+    assert records[2].dateline == "CONCORD, March 11."
+    assert records[2].date_confidence == "unresolved"
+    assert records[2].event_date == "CONCORD, March 11."
 
 
 def test_normalize_letters_assigns_stable_src_ids_continuing_from_start_id(tmp_path):
@@ -412,6 +459,32 @@ class TestAgainstTheRealEvidenceCorpus:
         for record in records:
             for paragraph in record.paragraphs:
                 assert paragraph.strip() != ""
+
+    def test_date_confidence_split_across_all_130_letters(self, records):
+        # Acceptance criterion (issue #57): a real split, not a bare count -
+        # this would fail if a dateline's year were silently dropped
+        # (every `inferred` record would slide to `unresolved`) or if a
+        # record without a parseable year were wrongly promoted. The four
+        # `unresolved` records are the two known empty datelines
+        # (SRC-000002, SRC-000129) plus two with a dateline but no
+        # parseable year: SRC-000007 ("A. D. MDCCCXL.", a Roman-numeral
+        # year) and SRC-000024 ("CASTLETON, STATEN ISLAND, May 23.", no
+        # year at all).
+        unresolved_ids = {
+            r.id for r in records if r.date_confidence == "unresolved"
+        }
+        assert unresolved_ids == {
+            "SRC-000002",
+            "SRC-000007",
+            "SRC-000024",
+            "SRC-000129",
+        }
+        inferred_ids = {r.id for r in records if r.date_confidence == "inferred"}
+        assert len(inferred_ids) == 126
+        assert inferred_ids | unresolved_ids == {r.id for r in records}
+        for record in records:
+            if record.date_confidence == "inferred":
+                assert record.event_date == record.dateline, record.id
 
     def test_letter_ids_do_not_collide_with_journal_ids(self, records):
         from memoria.normalize import normalize_journals
