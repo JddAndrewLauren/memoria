@@ -356,7 +356,7 @@ Two obligations follow:
 - **Assembly must report what it resolved** — which entries the declared scope named,
   which fell back to unpromoted candidates, and that the gathered sets are indexes
   rather than exhaustive searches.
-- **Recall must be measured, not assumed.** The PoC's 364 resolvable
+- **Recall must be measured, not assumed.** The PoC's 348 resolved
   cross-references are the instrument; **gathered-set recall** over those links —
   a set metric, not recall@10 — is the measure of whether the index is complete
   enough to write from. See `poc-plan.md` §3 and part 15 §43.14.

@@ -112,8 +112,10 @@ If the author authorizes one paragraph, does Memoria leave unrelated manuscript 
 The machine-scored track's harness is built early (`poc-plan.md` §3) and reports
 three numbers:
 
-- **retrieval recall@10** over the 364 resolvable cross-references — the number
-  that decides whether embeddings get built (§45);
+- **retrieval recall@10** over the 348 cross-references the answer key resolves
+  (`docs/answer-key-protocol.md`) — the number that decides whether embeddings
+  get built (§45), and one to read as a stress case rather than a threshold
+  (`open-problems.md` §2.3);
 - **gathered-set recall** — a set metric: whether an entry's gathered set is
   complete enough to write from, the silent recall risk of part 06 §8.3 and part
   11 §33.1;

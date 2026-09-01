@@ -59,8 +59,22 @@ Three things, in this order.
    similarity.
 
 The target recorded is the **span of held paragraphs the cited page covers** —
-typically three or four. A page is what the editors cited, and a page starts and
-ends mid-paragraph, so the paragraphs it touches are the honest unit.
+typically three, and 16 at the widest. A page is what the editors cited, and a
+page starts and ends mid-paragraph, so the paragraphs it touches are the honest
+unit.
+
+**A citation wider than two pages is not a target.** A passage lives on a page
+and sometimes crosses onto the next; seventeen footnotes cite more than that —
+`[See _Week_, pp. 356-420; Riv. 442-518.]` runs to 65 pages — and what they
+record is that a stretch of journal became a stretch of book. True, and not a
+passage-level link. It matters because of the direction the benchmark runs in:
+the target span is the **probe**, so scoring that row would be handing retrieval
+a third of *A Week* and asking it to find one journal entry. Those rows are kept
+with a `not-passage-level` status and are not scored.
+
+The key reports `median_span_paragraphs`, `mean_span_paragraphs` and
+`max_span_paragraphs`. All three, because the median alone concealed exactly the
+problem above: it read 3 while one row spanned 198.
 
 ## What may not be done
 
@@ -78,7 +92,7 @@ them. The audit targets are deliberately left out of the index as well
 itself.
 
 The cost of the rule is accepted openly: the target is page-sized rather than
-paragraph-sized, and `median_span_paragraphs` in the key reports how wide.
+paragraph-sized, and the key reports how wide — median, mean and max.
 
 ## Two checks that are not the same check
 
@@ -113,9 +127,29 @@ This is the general lesson of the slice: **two checks that share an assumption a
 one check.** The eye that found it is not a formality, which is why the spot check
 below is part of the deliverable rather than a nicety.
 
+## What the two-edition check does not certify
+
+Stated because the check reads stronger than it is. **The tolerance is coarser
+than the thing it admits.** Two Riverside pages of slack guard a target that is
+one or two pages wide, so a per-link error of a single page passes it — and a
+one-page error is not hypothetical here: it is the exact class of mistake that
+had put 243 of 360 rows one page late. The running-head check closed that
+instance because the error was *constant across a volume*; nothing in the three
+checks looks at a page-sized error on one link.
+
+The tolerance is also chosen after seeing the data rather than derived. Of the
+349 links where both editions anchor, the median residual is 0.42 pages and only
+three exceed 1.5; the worst admitted is 1.78 and the single rejection is 2.16.
+That spread is what makes the alignment trustworthy in bulk. It is not what makes
+2.0 the right line — the line sits in a 0.38-page gap, and a threshold of 1.9 or
+2.1 would have admitted and rejected the same rows for no better reason.
+
+So what remains unguarded is a per-link error of a page or less, and the only
+thing that looks at it is the spot check below.
+
 ## How uncertainty and rejection are recorded
 
-Every one of the 379 links has a row. A link that could not be resolved keeps its
+Every one of the 379 links has a row. A link that was not admitted keeps its
 row, its citation and a `note` saying why, because coverage that is not in the
 artifact is coverage nobody checks.
 
@@ -123,6 +157,7 @@ artifact is coverage nobody checks.
 |---|---|
 | `resolved` | Both editions anchored and agree. Scored. |
 | `editions-disagree` | Both anchored; the Riverside page sits further from the Manuscript page than the tolerance allows, once drift is taken out. Not scored — this is the check doing its job. |
+| `not-passage-level` | The footnote's Manuscript pages span more than two, so it cites a stretch of the book rather than a passage. Not scored — the span would be the probe, and a probe that size measures something else. |
 | `no-page-pair` | The footnote gives no Manuscript/Riverside page pair for this work: a passing mention, a Roman-numeral front-matter page, or a `Riv.` belonging to a different work in the same footnote. Nothing to corroborate against. |
 | `unanchored` | A cited page could not be placed — its printed number was never read off the leaf (the gaps all have plate leaves interleaved, so there is nothing safe to interpolate from). |
 
@@ -136,14 +171,15 @@ admission rule was applied to.
 | | Week | Walden | Total |
 |---|---|---|---|
 | Cross-references landing on the work | 257 | 122 | 379 |
-| **Resolved** | 248 | 117 | **365** |
+| **Resolved** | 239 | 109 | **348** |
+| `not-passage-level` | 9 | 8 | 17 |
 | `editions-disagree` | 0 | 1 | 1 |
 | `no-page-pair` | 5 | 1 | 6 |
 | `unanchored` | 4 | 3 | 7 |
 
-**365 of 379**, or 96%. Against all 668 cross-references — including the 289
+**348 of 379**, or 92%. Against all 668 cross-references — including the 289
 citing *Excursions*, *Cape Cod*, *The Service* and *Maine Woods*, which the corpus
-does not hold — coverage is 55%, in place of `poc-plan.md` §1's projected 364 of
+does not hold — coverage is 52%, in place of `poc-plan.md` §1's projected 364 of
 628 (58%).
 
 The single `editions-disagree` row is `src-000396-p66/Walden`
@@ -180,10 +216,14 @@ Two consequences:
 
 ## The spot check
 
-`docs/answer-key-spot-check.md` — six rows, fixed seed, three per work. For each:
-does the page the footnote cites hold the text the key names? It is a comparison
-between two printings of one book, so it needs no familiarity with Thoreau and no
-judgement about his rewriting.
+`docs/answer-key-spot-check.md`, regenerated by `scripts/spot-check.py` — six
+rows, fixed seed, three per work. The script refuses to overwrite verdicts that
+have been filled in, because the verdicts are the only part of that file a
+machine did not write.
+
+For each row: does the page the footnote cites hold the text the key names? It is
+a comparison between two printings of one book, so it needs no familiarity with
+Thoreau and no judgement about his rewriting.
 
 It is not a formality. The one-page offset above was found this way and by nothing
 else.

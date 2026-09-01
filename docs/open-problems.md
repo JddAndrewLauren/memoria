@@ -85,7 +85,7 @@ FTS5 first. The resolvable cross-references produce the number that decides whet
 heavier machinery is justified. **This only works if the benchmark harness is built
 early** — FTS5-first without measurement is just under-building.
 
-The answer key now exists (issue #9): **365 of 379** links resolved, by aligning the
+The answer key now exists (issue #9): **348 of 379** links resolved, by aligning the
 editions the footnotes cite rather than by adjudication. See §2.3 before reading the
 number it produces as a threshold.
 

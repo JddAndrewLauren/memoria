@@ -50,16 +50,18 @@ Build:
 - the normalized record schema, stable `SRC-` IDs and paragraph anchors
   (§5.2–5.3);
 - SQLite FTS5 over the normalized records;
-- ground truth extraction: all 628 cross-references parsed from the journals,
-  the 364 that land on held targets tabled with their journal-side anchors;
-  `RECON.md`'s 43 letter recipients tabled;
-- the **answer key**: the cross-references cite pages of editions not held, so
-  each link's target-side passage must be located by adjudication, not lookup
-  (`RECON.md` §4). A hand-resolved pilot of ~30 links proves the protocol; the
-  full key is completed before M1's gate is scored. If adjudication proves
-  unaffordable, the benchmark is re-scoped then — explicitly, to the subset
-  that can be resolved honestly — rather than quietly scored against a key
-  produced by the machinery under test;
+- ground truth extraction: all cross-references parsed from the journals —
+  668, of which the 379 landing on held targets are tabled with their
+  journal-side anchors; `RECON.md`'s 43 letter recipients tabled;
+- the **answer key**: the cross-references cite pages of editions the corpus
+  does not hold, and `RECON.md` §4 read that as needing adjudication rather
+  than lookup. **That premise was wrong** — the cited editions are digitized
+  page by page, so the target side is a page lookup plus an alignment between
+  two printings of one book. The key resolves **348 of 379** links by
+  requiring two independent editions to agree, and uses no part of the
+  retrieval system it will be used to score
+  (`docs/answer-key-protocol.md`, issue #9). Neither the hand-resolved pilot
+  nor the re-scoping escape hatch was needed;
 - `memoria rebuild` over the derived state that exists so far, and
   `memoria validate` (IDs, links, raw-file hashes) — both grow at every later
   milestone;

@@ -103,7 +103,8 @@ class TestAgainstTheRealEvidenceCorpus:
         for row in rows:
             counts[row.status] = counts.get(row.status, 0) + 1
         assert counts == {
-            "resolved": 365,
+            "resolved": 348,
+            "not-passage-level": 17,
             "unanchored": 7,
             "no-page-pair": 6,
             "editions-disagree": 1,
@@ -124,9 +125,41 @@ class TestAgainstTheRealEvidenceCorpus:
             # back half of each volume.
             assert 0 < summary.drift_slope < 0.02, summary.work
             assert summary.pairs_fitted >= 100, summary.work
-            # Every admitted row sits inside the tolerance by construction;
-            # this asserts the tolerance is not doing all the work.
-            assert summary.worst_residual <= 2.0, summary.work
+
+    def test_the_tolerance_is_not_what_admits_the_rows(self, built):
+        # `worst_admitted_residual_pages <= 2` cannot fail - a row past the
+        # tolerance is never admitted - so asserting it proves nothing. The
+        # claim worth testing is about the *distribution*: rows carry their
+        # residual whether admitted or rejected, so the shape below is
+        # measured over both. If the residuals were spread across the whole
+        # tolerance the threshold would be doing the admitting; they are
+        # not, so it is not.
+        rows, _, _, _ = built
+        residuals = sorted(
+            abs(r.residual_pages) for r in rows if r.residual_pages is not None
+        )
+        assert len(residuals) > 300
+        assert residuals[len(residuals) // 2] < 0.6
+        assert sum(1 for r in residuals if r > 1.5) <= 5
+
+    def test_no_scored_row_names_a_stretch_of_book_instead_of_a_passage(self, built):
+        # The target span is what issue #14 hands retrieval as a probe. One
+        # footnote cites "pp. 356-420", which resolved to 198 paragraphs -
+        # a third of A Week - and the summary's median hid it. A citation
+        # wider than two pages is now kept and not scored.
+        rows, summaries, _, _ = built
+        for row in rows:
+            if row.status == "resolved":
+                assert row.manuscript_pages[-1] - row.manuscript_pages[0] < 2, (
+                    row.link_id
+                )
+            elif row.status == "not-passage-level":
+                assert row.manuscript_pages[-1] - row.manuscript_pages[0] >= 2
+                assert not row.target_anchors, row.link_id
+        # And the tail is reported, not just the middle.
+        for summary in summaries:
+            assert summary.max_span_paragraphs <= 16, summary.work
+            assert summary.max_span_paragraphs >= summary.median_span_paragraphs
 
     def test_a_resolved_row_quotes_the_paragraphs_it_names(self, built):
         rows, _, _, by_id = built

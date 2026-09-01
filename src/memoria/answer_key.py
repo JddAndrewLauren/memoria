@@ -22,7 +22,11 @@ operation - similarity between evidence and manuscript prose - is precisely
 what the benchmark measures, and using it here would make the key agree with
 the machinery under test by construction. The target is therefore a
 page-sized span of paragraphs, because a page is what the editors cited.
-See ``docs/answer-key-protocol.md``.
+
+**A citation wider than two pages is not a target.** A handful of footnotes
+cite a stretch of book rather than a passage - one runs to 65 pages - and
+the span such a citation covers is not something retrieval can be asked to
+match. Those rows are kept and not scored. See ``docs/answer-key-protocol.md``.
 """
 
 from __future__ import annotations
@@ -45,12 +49,28 @@ from memoria.normalize import NormalizedRecord
 ANSWER_KEY_RELATIVE_PATH = "benchmark/answer-key.yaml"
 
 # How far the two editions may disagree, in Riverside pages, once the
-# systematic drift between the two page-number series is taken out. Chosen
-# against the observed spread, not guessed: across 147 Week pairs the worst
-# residual is 1.47 pages and across 100 Walden pairs it is 2.17, so a
-# threshold of 2 admits every link where the apparatus is self-consistent
-# and rejects the one where it is not.
+# systematic drift between the two page-number series is taken out.
+#
+# Chosen after seeing the spread, and said plainly because it matters how
+# much weight the number can carry. Of the 349 links where both editions
+# anchor, the median residual is 0.42 pages, 29 are past 1.0 and three past
+# 1.5; the worst admitted is 1.78 and the single rejection sits at 2.16. So
+# the threshold is not separating two populations - it is a line drawn
+# across a 0.38-page gap in one tail. What the tolerance genuinely shows is
+# that the apparatus is self-consistent almost everywhere; what it does not
+# show is that the one row past it is wrong and the row at 1.78 is right.
 _MAX_RESIDUAL_PAGES = 2.0
+
+# The most Manuscript pages one citation may cover and still name a passage.
+# A passage lives on a page, and sometimes crosses onto the next. "[See
+# _Week_, pp. 356-420; Riv. 442-518.]" is the editors recording that a
+# stretch of journal became a stretch of book - true, and not a
+# passage-level link. It matters because the target span is what issue #14
+# hands retrieval as the *probe*: a 65-page citation is not a noisy probe
+# but a different task, and scoring it would quietly corrupt the number the
+# harness exists to produce. Wider citations keep their row with a status
+# saying so and are not scored.
+_MAX_CITED_PAGES = 2
 
 # The first ~160 characters of the journal paragraph, so the key can be
 # read without resolving the SRC- ID against anything.
@@ -111,11 +131,14 @@ class WorkSummary:
     editions_disagree: int
     no_page_pair: int
     unanchored: int
+    not_passage_level: int
     drift_intercept: float | None
     drift_slope: float | None
     pairs_fitted: int
     worst_residual: float | None
     median_span_paragraphs: float | None
+    mean_span_paragraphs: float | None
+    max_span_paragraphs: int | None
 
 
 def _fit_drift(pairs: list[tuple[int, int]]) -> tuple[float, float] | None:
@@ -229,7 +252,13 @@ def build_answer_key(
             distinct[(primary[0], riv[0])] = predicted - riv[0]
         fit = _fit_drift([(p, d) for (p, _), d in distinct.items()])
 
-        counts = {"resolved": 0, "disagree": 0, "no_pair": 0, "unanchored": 0}
+        counts = {
+            "resolved": 0,
+            "disagree": 0,
+            "no_pair": 0,
+            "unanchored": 0,
+            "not_passage_level": 0,
+        }
         residuals: list[float] = []
         spans: list[float] = []
         seen: dict[str, int] = {}
@@ -268,10 +297,31 @@ def build_answer_key(
                 rows.append(row)
                 continue
 
-            if primary[0] not in manuscript.offsets:
+            cited_pages = primary[-1] - primary[0] + 1
+            if cited_pages > _MAX_CITED_PAGES:
+                row.status = "not-passage-level"
+                row.note = (
+                    f"the footnote's Manuscript pages run {primary[0]}-"
+                    f"{primary[-1]}, a {cited_pages}-page stretch rather than "
+                    "the page or two a passage occupies, so it names a part of "
+                    "the book and not a target to score against"
+                )
+                counts["not_passage_level"] += 1
+                rows.append(row)
+                continue
+
+            # Both ends, not just the first: the span below is grown from
+            # one to the other, and an unanchored last page would otherwise
+            # reach `span()` as None.
+            missing = [
+                page
+                for page in (primary[0], primary[-1])
+                if page not in manuscript.offsets
+            ]
+            if missing:
                 row.status = "unanchored"
                 row.note = (
-                    f"Manuscript page {primary[0]} could not be placed in the "
+                    f"Manuscript page {missing[0]} could not be placed in the "
                     "held text"
                 )
                 counts["unanchored"] += 1
@@ -334,11 +384,19 @@ def build_answer_key(
                 editions_disagree=counts["disagree"],
                 no_page_pair=counts["no_pair"],
                 unanchored=counts["unanchored"],
+                not_passage_level=counts["not_passage_level"],
                 drift_intercept=round(fit[0], 4) if fit else None,
                 drift_slope=round(fit[1], 6) if fit else None,
                 pairs_fitted=len(distinct),
                 worst_residual=round(max(residuals), 2) if residuals else None,
                 median_span_paragraphs=_median(spans),
+                # The median alone hid a row spanning 198 paragraphs. The
+                # tail is the part that would corrupt a recall number, so
+                # the tail is reported too.
+                mean_span_paragraphs=(
+                    round(sum(spans) / len(spans), 2) if spans else None
+                ),
+                max_span_paragraphs=int(max(spans)) if spans else None,
             )
         )
 
@@ -372,11 +430,14 @@ def write_answer_key(
                 "editions_disagree": s.editions_disagree,
                 "no_page_pair": s.no_page_pair,
                 "unanchored": s.unanchored,
+                "not_passage_level": s.not_passage_level,
                 "drift_intercept": s.drift_intercept,
                 "drift_slope": s.drift_slope,
                 "pairs_fitted": s.pairs_fitted,
                 "worst_admitted_residual_pages": s.worst_residual,
                 "median_span_paragraphs": s.median_span_paragraphs,
+                "mean_span_paragraphs": s.mean_span_paragraphs,
+                "max_span_paragraphs": s.max_span_paragraphs,
             }
             for s in summaries
         ],

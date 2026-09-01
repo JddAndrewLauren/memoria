@@ -25,7 +25,7 @@ One corpus, two uses, deliberately kept separate.
 
 | | Machine-scored track | Authorship track |
 |---|---|---|
-| **Instrument** | 364 resolvable cross-references | A real short piece of prose |
+| **Instrument** | 348 resolved cross-references (§1, superseded below) | A real short piece of prose |
 | **Author needed?** | No — runs unattended | Yes — must be genuine |
 | **Tests** | Retrieval, provenance, temporal discipline (§43.1, §43.7, §43.11) | Ownership, curator restraint, authorization (§1.7, §13.4, §14, §15, §19-21) |
 | **Output** | Three numbers: retrieval recall@10 / precision@10, gathered-set recall, promotion miss rate (§3) | Observed failures |
@@ -111,6 +111,12 @@ Consequence to carry: the machine-scored track runs at **364 of 628 links (58%
 coverage)**; references to *Excursions*, *Cape Cod* and *The Service* are
 unresolvable.
 
+**Superseded 2026-09-01 (issue #9).** Both numbers were RECON's. Re-deriving the
+cross-references mechanically finds 668, not 628, of which 379 land on held works;
+the answer key resolves **348** of those. Coverage against the full 668 is 52%
+rather than the 58% projected here. The projection is left standing because
+`docs/answer-key-protocol.md` measures itself against it.
+
 ### Runtime — local, no model-driving service
 Everything runs on one machine. Memoria is an **MCP server** exposing the §24.2
 controlled tool surface; **Claude Code in the repo is the client**; Obsidian is
@@ -182,8 +188,10 @@ measurement is just under-building.
 
 **The harness reports three numbers, not one** (2026-08-31):
 
-1. **Retrieval recall@10** over the 364 resolvable cross-references — the number
-   that decides whether embeddings get built (§45 discipline).
+1. **Retrieval recall@10** over the 348 cross-references the answer key resolves
+   (`docs/answer-key-protocol.md`) — the number that decides whether embeddings
+   get built (§45 discipline). What a poor score licenses has to be written down
+   before the number exists; see `open-problems.md` §2.3.
 2. **Gathered-set recall** — a set metric, not @k: of the cross-referenced
    journal passages belonging to an entry, the fraction actually present in that
    entry's gathered set. A writing agent reads the gathered set *instead of*
@@ -278,8 +286,9 @@ interface.
    editorial voice leaks into evidence, every temporal-discipline result and every
    benchmark number is quietly wrong, with no failing test to reveal it.
 4. **Paraphrase matching may be hard enough to swamp the signal.** Thoreau rewrote
-   heavily; if even embeddings score poorly on the 364 links, the benchmark
-   measures the difficulty of the task rather than the quality of Memoria.
+   heavily; if even embeddings score poorly on the 348 links, the benchmark
+   measures the difficulty of the task rather than the quality of Memoria. Half of
+   this is now sharper than a risk — see `open-problems.md` §2.3.
 5. **Ownership — resolved 2026-08-31** (ownership by badge, §4). Both architectural
    deferrals are now closed; what remains open is listed in `open-problems.md` §1.
 6. **The manuscript layer has no test corpus.** Thoreau supplies evidence and audit
@@ -344,7 +353,7 @@ Vocabulary: [`../CONTEXT.md`](../CONTEXT.md).
 
 **What it changes for this PoC.**
 
-- **The headline benchmark gains a second reading.** The 364 resolvable
+- **The headline benchmark gains a second reading.** The 348 resolved
   cross-references already measure retrieval recall. Under the subject system they
   also measure **index recall** — whether an entry's gathered set is complete enough
   to write a chapter from. That is the central and otherwise-silent risk of the
