@@ -71,6 +71,7 @@ class NormalizedRecord:
     # cannot be a dataclass field, so the frontmatter key and the attribute
     # name part ways here (record_to_markdown/parse_record map between them).
     thread_id: str | None = None
+    subject: str | None = None
     email_from: str | None = None
     email_to: str | None = None
     email_cc: str | None = None
@@ -155,6 +156,8 @@ def record_to_markdown(record: NormalizedRecord) -> str:
         frontmatter["chapter"] = record.chapter
     if record.thread_id is not None:
         frontmatter["thread_id"] = record.thread_id
+    if record.subject is not None:
+        frontmatter["subject"] = record.subject
     if record.email_from is not None:
         frontmatter["from"] = record.email_from
     if record.email_to is not None:
@@ -272,7 +275,7 @@ _REQUIRED_FIELDS = (
 )
 _OPTIONAL_FIELDS = (
     "recipient", "dateline", "salutation", "work", "chapter",
-    "thread_id", "in_reply_to", "images",
+    "thread_id", "subject", "in_reply_to", "images",
 )
 # Frontmatter keys whose attribute name differs (#78's email fields): `from`
 # is a reserved word and cannot be a dataclass field / constructor kwarg.

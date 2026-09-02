@@ -13,7 +13,7 @@ choice can eventually be made against measurements rather than against a guess.
 
 Part 05 §5.2's working assumption is that the real archive's top formats are
 docx, pdf and **email exports**. Every email-only field in
-`docs/normalized-record-schema.md` — `thread_id`, `from`/`to`/`cc`,
+`docs/normalized-record-schema.md` — `thread_id`, `subject`, `from`/`to`/`cc`,
 `in_reply_to`, `quoted_excised`, `attachments` — is specified and unexercised,
 as is §5.4's quoted-reply splitter and the whole of the email converter (#78).
 Nothing in the repository can be built against them, because there is no email
@@ -157,8 +157,12 @@ Exchange, and the export preserves Outlook's `Thread-Index` instead — on rough
 a third of messages. That is a deterministic substitute rather than a heuristic:
 the first 22 bytes identify the conversation and each reply appends exactly
 five, so a message's parent is the one whose `Thread-Index` is its own less the
-final five bytes. `thread_id` comes from the 22-byte root; `in_reply_to` from
-the longest proper prefix present in the export.
+final five bytes. That parent edge feeds the same root-walk `in_reply_to`
+already uses, so `thread_id` still resolves to the thread root's own
+`Message-ID`, not a Thread-Index fingerprint — one thread never splits into
+two `thread_id`s by mixing the two mechanisms. **The substitute is now
+implemented** (#115): `_process_email_containers` falls back to it whenever
+`In-Reply-To` is absent and `Thread-Index` is present.
 
 This is a genuine amendment owed to §5.4 and the schema, not a shortcoming of
 the slice. The schema's rule that `in_reply_to` is "empty when the headers are
