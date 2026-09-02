@@ -113,13 +113,20 @@ def download(url: str, target: Path, expected_bytes: int) -> None:
 
 
 def extract(archive_path: Path, into: Path) -> int:
-    """Unpack a custodian archive, refusing any member that escapes ``into``."""
+    """Unpack the ``.eml`` members of a custodian archive.
+
+    Each archive also ships the same messages as ``text_*`` plain text, an XML
+    load file, and loose attachment copies. Only the ``.eml`` are raw units;
+    everything under ``raw/**`` gets a ``SRC-`` ID from the manifest sync
+    (ADR-0006) and never gives it back, so the sidecars stay in the zip.
+    Refuses any member that escapes ``into``.
+    """
     into.mkdir(parents=True, exist_ok=True)
     root = into.resolve()
     count = 0
     with zipfile.ZipFile(archive_path) as zf:
         for member in zf.infolist():
-            if member.is_dir():
+            if member.is_dir() or not member.filename.lower().endswith(".eml"):
                 continue
             destination = (root / member.filename).resolve()
             if not destination.is_relative_to(root):
@@ -139,10 +146,6 @@ def main() -> int:
     parser.add_argument("--custodian", action="append", default=[],
                         help="fetch only these custodians (repeatable)")
     parser.add_argument("--role", help="fetch only archives with this role, e.g. control")
-    parser.add_argument("--verify-only", action="store_true",
-                        help="check what is already on disk; download nothing")
-    parser.add_argument("--keep-archives", action="store_true", default=True,
-                        help="keep the downloaded zips (needed to re-verify)")
     args = parser.parse_args()
 
     if not args.dest:
@@ -168,9 +171,6 @@ def main() -> int:
         stamp = archive_dir / f"{archive.file}.extracted"
 
         if not local.exists():
-            if args.verify_only:
-                print("  not fetched")
-                continue
             download(archive.url, local, archive.bytes)
             changed = True
 
@@ -194,19 +194,15 @@ def main() -> int:
         if stamp.exists() and stamp.read_text(encoding="utf-8").strip() == sha256:
             print("  already unpacked")
             continue
-        if args.verify_only:
-            print("  verified, not unpacked")
-            continue
-
         target = base / archive.custodian
         if target.exists():
             shutil.rmtree(target)
         count = extract(local, target)
         stamp.write_text(sha256 + "\n", encoding="utf-8")
-        print(f"  unpacked {count} files to {target}")
+        print(f"  unpacked {count} .eml to {target}")
         changed = True
 
-    if learned and not args.verify_only:
+    if learned:
         write_back(args.pins, learned)
         print(f"\npinned sha256 for {len(learned)} archive(s) in {args.pins}")
 

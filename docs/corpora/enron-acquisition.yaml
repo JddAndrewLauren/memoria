@@ -26,7 +26,9 @@ source:
     EDRM withdrew v2 over unscreened personally identifiable information; the
     Internet Archive mirror persists. The upstream README warns the content is
     unedited, may be offensive, and may carry viruses. Nothing from this corpus
-    is committed to the Memoria repository except hand-scrubbed test fixtures.
+    is committed to the Memoria repository. The fixtures under
+    tests/fixtures/enron/ are invented, not scrubbed copies - see
+    docs/corpora/enron.md.
 
 # Where a fetched archive is unpacked, relative to the evidence root.
 base: raw/enron

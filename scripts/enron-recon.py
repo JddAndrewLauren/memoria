@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import codecs
 import collections
 import email
 import email.utils
@@ -39,7 +40,8 @@ BOGUS_HEADER = re.compile(rb"^Microsoft Mail Internet Headers Version [\d.]+\r?\
 # rules. It is not the sender's words and must not become a paragraph.
 ZL_FOOTER = re.compile(r"\*{6,}\s*\n\s*EDRM Enron Email Data Set has been produced", re.MULTILINE)
 
-# The three cut rules part 05 §5.4 names, plus the interleaved case.
+# The three cut rules part 05 §5.4 names. Interleaved replies - new text between
+# quoted runs - are not detected here; that is #78's problem to measure.
 QUOTE_MARKERS = {
     "angle-prefix": re.compile(r"^\s*>", re.MULTILINE),
     "on-wrote": re.compile(r"^\s*On .{0,120}\bwrote:\s*$", re.MULTILINE),
@@ -60,11 +62,13 @@ class Custodian:
     charsets: collections.Counter = field(default_factory=collections.Counter)
     quotes: collections.Counter = field(default_factory=collections.Counter)
     attachments: collections.Counter = field(default_factory=collections.Counter)
+    attachment_types: collections.Counter = field(default_factory=collections.Counter)
     anomalies: collections.Counter = field(default_factory=collections.Counter)
     crlf: int = 0
     zl_footer: int = 0
     empty_body: int = 0
     dates: list = field(default_factory=list)
+    sizes: list = field(default_factory=list)
     sidecars: collections.Counter = field(default_factory=collections.Counter)
 
 
@@ -139,6 +143,7 @@ def scan(root: Path) -> tuple[dict[str, Custodian], list[Msg]]:
             raw = path.read_bytes()
             c.eml += 1
             c.bytes += len(raw)
+            c.sizes.append(len(raw))
             if b"\r\n" in raw:
                 c.crlf += 1
             msg, repaired = parse(raw)
@@ -156,12 +161,29 @@ def scan(root: Path) -> tuple[dict[str, Custodian], list[Msg]]:
                 if "@" in " ".join(msg.get_all(header) or []):
                     c.headers[f"{header} with an address"] += 1
 
-            c.charsets[(msg.get_content_charset() or "(unset)").lower()] += 1
+            declared = (msg.get_content_charset() or "(unset)").lower()
+            c.charsets[declared] += 1
+            if declared != "(unset)":
+                try:
+                    codecs.lookup(declared)
+                except LookupError:
+                    c.anomalies["unknown charset"] += 1
+            for part in msg.walk():
+                if part.get_content_maintype() != "text":
+                    continue
+                payload = part.get_payload(decode=True) or b""
+                try:
+                    payload.decode("utf-8")
+                except UnicodeDecodeError:
+                    c.anomalies["body not valid UTF-8"] += 1
+                    break
 
             for part in msg.walk():
                 name = part.get_filename()
                 if name:
                     c.attachments[Path(name).suffix.lower() or "(none)"] += 1
+                if name or part.get_content_disposition() == "attachment":
+                    c.attachment_types[part.get_content_type()] += 1
 
             text = body_text(msg)
             if ZL_FOOTER.search(text):
@@ -307,6 +329,14 @@ def pct(n: int, total: int) -> str:
     return f"{100 * n / total:5.1f}%" if total else "    -"
 
 
+def kb(sorted_sizes: list, quantile: float) -> str:
+    """The size at ``quantile`` of an ascending list, in KB."""
+    if not sorted_sizes:
+        return "-"
+    index = min(len(sorted_sizes) - 1, int(quantile * len(sorted_sizes)))
+    return f"{sorted_sizes[index] / 1e3:,.1f} KB"
+
+
 def render(custodians: dict[str, Custodian], graph: dict) -> str:
     total_eml = sum(c.eml for c in custodians.values())
     every_date = [d for c in custodians.values() for d in c.dates]
@@ -325,15 +355,21 @@ def render(custodians: dict[str, Custodian], graph: dict) -> str:
     w(f"- Bytes of `.eml`: **{sum(c.bytes for c in custodians.values()) / 1e6:,.1f} MB**")
     if every_date:
         w(f"- Date range: **{min(every_date).date()} to {max(every_date).date()}**")
+    every_size = sorted(n for c in custodians.values() for n in c.sizes)
+    if every_size:
+        w(f"- Message size: min {every_size[0] / 1e3:,.1f} KB, median {kb(every_size, 0.5)}, "
+          f"p90 {kb(every_size, 0.9)}, max {every_size[-1] / 1e3:,.1f} KB")
     w("")
 
     w("## Per custodian")
     w("")
-    w("| custodian | .eml | MB | needs header repair | Thread-Index | Cc | quoted |")
-    w("|---|---:|---:|---:|---:|---:|---:|")
+    w("| custodian | .eml | MB | median KB | from | to | needs header repair | Thread-Index | Cc | quoted |")
+    w("|---|---:|---:|---:|---|---|---:|---:|---:|---:|")
     for name, c in sorted(custodians.items()):
         quoted = max(c.quotes.values()) if c.quotes else 0
-        w(f"| {name} | {c.eml:,} | {c.bytes / 1e6:,.1f} | {pct(c.needed_repair, c.eml)} "
+        span = f"{min(c.dates).date()} | {max(c.dates).date()}" if c.dates else "- | -"
+        w(f"| {name} | {c.eml:,} | {c.bytes / 1e6:,.1f} | {kb(sorted(c.sizes), 0.5)} | {span} "
+          f"| {pct(c.needed_repair, c.eml)} "
           f"| {pct(c.headers['Thread-Index'], c.eml)} | {pct(c.headers['Cc'], c.eml)} "
           f"| {pct(quoted, c.eml)} |")
     w("")
@@ -511,7 +547,10 @@ def render(custodians: dict[str, Custodian], graph: dict) -> str:
 
     w("### Charsets")
     w("")
-    w("| charset | messages |")
+    w("As declared in the Content-Type header. Bodies that fail a strict UTF-8 decode")
+    w("and charsets Python cannot look up are counted under Anomalies.")
+    w("")
+    w("| declared charset | messages |")
     w("|---|---:|")
     charsets: collections.Counter = collections.Counter()
     for c in custodians.values():
@@ -535,13 +574,23 @@ def render(custodians: dict[str, Custodian], graph: dict) -> str:
     for name, n in attachments.most_common(20):
         w(f"| {name} | {n:,} |")
     w("")
+    types: collections.Counter = collections.Counter()
+    for c in custodians.values():
+        types.update(c.attachment_types)
+    w("| MIME type | parts |")
+    w("|---|---:|")
+    for name, n in types.most_common(20):
+        w(f"| {name} | {n:,} |")
+    w("")
 
     w("## Sidecar files")
     w("")
-    w("Each custodian archive ships the same messages three ways - `.eml` under")
-    w("`native_*`, extracted plain text under `text_*`, and one XML load file - plus the")
-    w("attachments as loose native files. Only the `.eml` are raw units; the rest are")
-    w("the same evidence again and must not be numbered a second time.")
+    w("Each custodian archive ships `.eml` under `native_*`, plain text under `text_*`,")
+    w("one XML load file, and the attachments as loose native files. By the archive's")
+    w("layout the text and XML are the same messages again - assumed, not verified by")
+    w("`Message-ID`. Only the `.eml` are raw units, so `fetch-enron.py` unpacks nothing")
+    w("else; anything counted here arrived some other way and will be numbered a second")
+    w("time by `manifest.sync` (ADR-0006), which never gives an ID back.")
     w("")
     sidecars: collections.Counter = collections.Counter()
     for c in custodians.values():
