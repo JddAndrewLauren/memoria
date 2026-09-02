@@ -640,9 +640,10 @@ class RawSource:
 def read_raw_source(repository: Repository, record_id: str) -> RawSource:
     """Serve the un-normalized file ``record_id`` was normalized from.
 
-    Raises ``ReadError`` for an unknown record, a missing file, or a binary
-    original (docx, pdf) - text is the only payload this returns, so a file
-    that does not decode as UTF-8 is refused naming its type rather than
+    Raises ``ReadError`` for an unknown record, a missing file, or an
+    original that does not decode as UTF-8 - a binary one (docx, pdf), or a
+    text one in another encoding. UTF-8 text is the only payload this
+    returns, so such a file is refused naming what went wrong rather than
     handed back as bytes pretending to be text (#113). Raises
     ``NoEvidenceRoot`` (``memoria.repository``) when no evidence corpus is
     configured - the same refusal every evidence read gives, rather than a
@@ -657,8 +658,9 @@ def read_raw_source(repository: Repository, record_id: str) -> RawSource:
         text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
         raise ReadError(
-            f"{record.original_file} is a binary {path.suffix} file - "
-            "read_raw_source serves text only"
+            f"{record.original_file} does not decode as UTF-8 - it is "
+            f"either a binary {path.suffix} file or text in another "
+            "encoding, and read_raw_source serves UTF-8 text only"
         ) from exc
     return RawSource(text=text, original_locator=record.original_locator)
 
@@ -718,6 +720,12 @@ def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
         raise ReadError(str(exc)) from exc
     citation = references.format_citation(reference)
 
+    if isinstance(reference, references.UnknownReference):
+        # Before the ``raw`` guard below: a reference that resolves to no kind
+        # at all is the caller's real problem, and naming the raw refusal
+        # instead would send them after the wrong one.
+        raise ReadError(_unknown_kind_message(reference))
+
     if raw:
         if not isinstance(reference, references.SourceReference) or (
             reference.paragraph is not None
@@ -733,9 +741,6 @@ def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
             text=raw_source.text,
             record=load(repository, reference.record_id),
         )
-
-    if isinstance(reference, references.UnknownReference):
-        raise ReadError(_unknown_kind_message(reference))
 
     if isinstance(reference, references.PathReference):
         path = _confined(repository, reference.path)
