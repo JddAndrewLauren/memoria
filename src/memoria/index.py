@@ -97,6 +97,19 @@ INDEX_RELATIVE_PATH = ".memoria/index.db"
 # (`memoria.subjects.OverlayAct`), because "preserved by a rebuild" is not
 # the same guarantee as "survives `.memoria/` being deleted outright", which
 # is what part 04 §42 actually demands of an attributed author act.
+#
+# `memoria.audit` (#37) adds two more kinds to the same table: `engagement`
+# and `audit_verdict`, the manuscript's own memoized judgements - the *other*
+# half of §8.12's "one cache, two key compositions" (the extraction's
+# paragraph/cluster_summary split is the first). Unlike the extraction's
+# rows, `memoria.audit` *does* look a judgement up by `anchor` - not to
+# decide a cache hit (the composed `key` still does that alone), but to find
+# the most recent prior judgement at a manuscript position when a key misses,
+# which is how it tells "never audited" apart from "edited since" (there is
+# nothing durable to join against otherwise: §4.1 forbids a stable pointer
+# into a passage, so the anchor there is a paragraph's position within its
+# section's `draft.md`, recomputed fresh on every call rather than stored
+# anywhere else - an aid to diagnosis, not a citation).
 PRESERVED_TABLES = ("memoria_schema", "memo")
 
 # Everything else. Dropped and regenerated on every `memoria rebuild`, which
@@ -138,7 +151,9 @@ _PRESERVED_DDL = (
     # looks a row up by `anchor`.
     "CREATE TABLE IF NOT EXISTS memo("
     "key TEXT PRIMARY KEY, "
-    "kind TEXT NOT NULL CHECK (kind IN ('paragraph', 'cluster_summary')), "
+    "kind TEXT NOT NULL CHECK (kind IN ("
+    "'paragraph', 'cluster_summary', 'engagement', 'audit_verdict'"
+    ")), "
     "anchor TEXT NOT NULL DEFAULT '', "
     "value TEXT NOT NULL, "
     "written_at TEXT NOT NULL"
@@ -379,6 +394,13 @@ class RebuildReport:
     ``appearances`` is ``AppearancesReport`` (#19) - what the appearances
     pass produced, and what it skipped.
 
+    ``staleness`` is ``memoria.audit.StalenessMap`` (#37) - the whole
+    manuscript's not-current judgements, recomputed against whatever the rest
+    of this rebuild just regenerated. Typed loosely, like ``counts``, to keep
+    this module's imports one-way: ``memoria.audit`` imports this module for
+    ``connect``/``gather``, so the reverse import has to stay inside
+    ``rebuild`` rather than at module scope.
+
     ``elapsed_seconds`` is wall-clock time over the whole function (#21's
     "reports what it regenerated and how long it took"), timed with
     ``time.monotonic`` rather than ``time.time`` so a clock adjustment
@@ -388,6 +410,7 @@ class RebuildReport:
     records: list[NormalizedRecord]
     counts: object
     appearances: AppearancesReport
+    staleness: object
     elapsed_seconds: float
 
 
@@ -955,10 +978,20 @@ def rebuild(
             repository, recurrence_threshold=recurrence_threshold
         )
     appearances_report = compute_appearances(repository)
+    # Imported here for the same reason as `extraction` above: `memoria.audit`
+    # imports this module (`connect`, `gather`), so the reverse direction
+    # stays confined to this function rather than module scope. The map
+    # itself needs nothing this function produced above other than a fresh
+    # index to read `gather` from - it is a hash comparison over whatever is
+    # now on disk, not a consumer of `counts` or `appearances_report`.
+    from memoria import audit
+
+    staleness_map = audit.compute_staleness_map(repository)
     return RebuildReport(
         records=records,
         counts=counts,
         appearances=appearances_report,
+        staleness=staleness_map,
         elapsed_seconds=time.monotonic() - started,
     )
 
