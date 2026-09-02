@@ -11,12 +11,15 @@ from memoria.index import (
     SNIPPET_ELLIPSIS,
     SNIPPET_MATCH_END,
     SNIPPET_MATCH_START,
+    Appearance,
     GatheredSource,
     SearchFilters,
     build_index,
+    compute_appearances,
     exclude,
     filter_predicate,
     gather,
+    list_appearances,
     list_overlay,
     pin,
     rebuild,
@@ -825,3 +828,147 @@ def test_adding_an_entry_or_relation_match_term_extends_a_themes_gathered_set(
     assert [g.anchor for g in gather(repository, "SUB-themes/tension")] == [
         "src-000001-p1"
     ]
+
+
+# --- appearances, lexical engine only (#19, part 06 §8.11) ------------------
+
+
+def test_compute_appearances_matches_lexically_over_book_source_type_only(tmp_path):
+    """AC 1: appearances are computed over the audit targets - records with
+    ``source_type: book`` - and stored in the index. The same term appearing
+    in a journal (evidence, not an audit target) earns no appearance."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    repository = Repository(root=tmp_path)
+    _write_entry(tmp_path, entry)
+    records = [
+        _record("SRC-000001", ["Bob went to the market."], source_type="journal"),
+        _record(
+            "SRC-000002",
+            ["Bob argued with Carol.", "Nothing relevant here."],
+            source_type="book",
+        ),
+    ]
+    write_normalized_records(records, tmp_path / NORMALIZED_RELATIVE_PATH)
+    build_index(repository, records)
+
+    report = compute_appearances(repository)
+
+    assert [a.anchor for a in list_appearances(repository, "SUB-people/bob")] == [
+        "src-000002-p1"
+    ]
+    assert report.appearances == 1
+
+
+def test_each_appearance_carries_the_passage_and_a_note_on_how(tmp_path):
+    """AC 2: an appearance carries the entry (by construction of the query),
+    the passage, and a short note naming what matched."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Robert"], body="")
+    repository = Repository(root=tmp_path)
+    _write_entry(tmp_path, entry)
+    book = _record("SRC-000001", ["Robert argued with Carol."], source_type="book")
+    write_normalized_records([book], tmp_path / NORMALIZED_RELATIVE_PATH)
+    build_index(repository, [book])
+
+    compute_appearances(repository)
+    (appearance,) = list_appearances(repository, "SUB-people/bob")
+
+    assert appearance.src_id == "SRC-000001"
+    assert appearance.anchor == "src-000001-p1"
+    assert "Robert" in appearance.note
+
+
+def test_appearances_are_unaffected_by_the_gather_overlay_and_vice_versa(tmp_path):
+    """AC 3: the gathered set and appearances are separately queryable and
+    never cross - the overlay that exists only for the gathered set (§8.3)
+    has no reach into the ``appearances`` table, since appearances has no
+    overlay of its own (AC 5) and nothing here reads ``gather_overlay``."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    repository = Repository(root=tmp_path)
+    _write_entry(tmp_path, entry)
+    book = _record("SRC-000001", ["Bob argued with Carol."], source_type="book")
+    write_normalized_records([book], tmp_path / NORMALIZED_RELATIVE_PATH)
+    build_index(repository, [book])
+
+    compute_appearances(repository)
+    appeared_before = list_appearances(repository, "SUB-people/bob")
+    assert [a.anchor for a in appeared_before] == ["src-000001-p1"]
+
+    # An author act against the gathered set - there is no such act against
+    # an appearance at all - must not touch the appearances table.
+    exclude(repository, "SUB-people/bob", "src-000001-p1", _AUTHOR)
+
+    assert list_appearances(repository, "SUB-people/bob") == appeared_before
+    # And the reverse holds by construction: `compute_appearances` never
+    # writes to `gather_overlay`, so the only row there is the exclude just
+    # made.
+    assert [o.action for o in list_overlay(repository)] == ["exclude"]
+
+
+def test_computing_appearances_does_not_write_to_the_entry_file(tmp_path):
+    """AC 4: nothing writes an appearance back into an entry."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Some testimony.")
+    repository = Repository(root=tmp_path)
+    _write_entry(tmp_path, entry)
+    book = _record("SRC-000001", ["Bob argued with Carol."], source_type="book")
+    write_normalized_records([book], tmp_path / NORMALIZED_RELATIVE_PATH)
+    build_index(repository, [book])
+    entry_path = tmp_path / "subjects" / "people" / "bob.md"
+    before = entry_path.read_text(encoding="utf-8")
+
+    compute_appearances(repository)
+
+    assert entry_path.read_text(encoding="utf-8") == before
+
+
+def test_appearances_carry_no_pin_or_exclude_overlay():
+    """AC 5: there is no author act against an appearance (§8.11's third
+    property) - no pin/exclude functions for it, and no flag on the row."""
+    import memoria.index as index_module
+
+    assert not hasattr(index_module, "pin_appearance")
+    assert not hasattr(index_module, "exclude_appearance")
+    fields = {f.name for f in dataclasses.fields(Appearance)}
+    assert fields == {"src_id", "anchor", "note"}
+
+
+def test_appearances_are_regenerated_identically_by_rebuild(tmp_path):
+    """AC 6."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    _write_entry(tmp_path, entry)
+    book = _record("SRC-000001", ["Bob argued with Carol."], source_type="book")
+    write_normalized_records([book], tmp_path / NORMALIZED_RELATIVE_PATH)
+    repository = Repository(root=tmp_path)
+
+    report = rebuild(repository)
+    before = list_appearances(repository, "SUB-people/bob")
+    assert [a.anchor for a in before] == ["src-000001-p1"]
+    assert report.appearances.appearances == 1
+
+    report2 = rebuild(repository)
+
+    assert list_appearances(repository, "SUB-people/bob") == before
+    assert report2.appearances == report.appearances
+
+
+def test_appearances_report_names_the_themes_and_arcs_gap(tmp_path):
+    """AC 7: Themes and Arcs produce no appearances yet, and the gap is
+    reported rather than silently folded into zero."""
+    bob = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    tension = Entry(
+        id="SUB-themes/tension", match_terms=["SUB-people/bob"], body=""
+    )
+    repository = Repository(root=tmp_path)
+    _write_entry(tmp_path, bob)
+    _write_entry(tmp_path, tension)
+    book = _record("SRC-000001", ["Bob argued with Carol."], source_type="book")
+    write_normalized_records([book], tmp_path / NORMALIZED_RELATIVE_PATH)
+    build_index(repository, [book])
+
+    report = compute_appearances(repository)
+
+    assert list_appearances(repository, "SUB-themes/tension") == []
+    assert report.entries_skipped == 1
+    assert report.skipped_subjects == ("SUB-themes",)
+    # The lexically-matchable entry alongside it is unaffected by the skip.
+    assert report.entries_computed == 1
+    assert report.appearances == 1

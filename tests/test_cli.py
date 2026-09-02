@@ -158,6 +158,7 @@ def test_rebuild_needs_no_corpus_at_all(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "run `memoria normalize` to produce them" in result.stdout
     assert "wrote 0 change projection(s)" in result.stdout
+    assert "0 appearance(s) over 0 lexically-matchable" in result.stdout
 
 
 def test_seed_subjects_needs_no_corpus_at_all(tmp_path):

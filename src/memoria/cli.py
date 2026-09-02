@@ -57,6 +57,27 @@ def _report_derived(counts) -> None:
         )
 
 
+def _report_appearances(report) -> None:
+    """Print what the appearances pass produced (#19, part 06 §8.11).
+
+    The seventh acceptance criterion is that Themes and Arcs producing no
+    appearances is a reported gap, not a silent zero - so this always names
+    what was skipped and why, not only what was found.
+    """
+    print(
+        f"rebuild: {report.appearances} appearance(s) over "
+        f"{report.entries_computed} lexically-matchable entr"
+        f"{'y' if report.entries_computed == 1 else 'ies'}"
+    )
+    if report.skipped_subjects:
+        print(
+            f"rebuild: appearances not computed for {report.entries_skipped} "
+            f"entr{'y' if report.entries_skipped == 1 else 'ies'} under "
+            f"{', '.join(report.skipped_subjects)} - the model engine those "
+            "subjects need still waits for the audit at M5 (part 06 §8.11)"
+        )
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="memoria")
     subparsers = parser.add_subparsers(dest="command")
@@ -179,6 +200,7 @@ def main(argv=None):
                 "(see docs/open-problems.md 2.4)"
             )
         _report_derived(report.counts)
+        _report_appearances(report.appearances)
         change_ids = changes.rebuild(repository)
         print(
             f"rebuild: wrote {len(change_ids)} change projection(s) to "
