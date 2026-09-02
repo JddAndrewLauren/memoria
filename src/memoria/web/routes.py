@@ -9,7 +9,7 @@ SQLite database and reads no evidence file itself
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from memoria.index import SearchFilters
 from memoria.index import search as search_index
@@ -19,6 +19,7 @@ from memoria.records import load as load_source
 from memoria.records import read as read_ref
 from memoria.records import read_raw_source as read_raw_source_core
 from memoria.records import real_paragraphs
+from memoria.records import reveal_original_source as reveal_original_source_core
 from memoria.repository import NoEvidenceRoot, Repository
 from memoria.subjects import load_all_entries, load_all_subjects
 from memoria.web.dependencies import get_repository
@@ -26,9 +27,11 @@ from memoria.web.schemas import (
     CitationOut,
     EntryListResponse,
     EntrySummary,
+    LocalityOut,
     Paragraph,
     RawSourceResponse,
     ReadOverlayOut,
+    RevealSourceResponse,
     SearchResponse,
     SearchResultOut,
     SourceDetail,
@@ -39,6 +42,16 @@ from memoria.web.schemas import (
 )
 
 router = APIRouter()
+
+# A loopback peer address is the one fact an HTTP server can check for
+# "is the browser on this machine" without trusting anything the client
+# claims - a header is just text the client sent. #65's locality gate.
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1"}
+
+
+def _is_local(request: Request) -> bool:
+    client = request.client
+    return client is not None and client.host in _LOOPBACK_HOSTS
 
 
 def _to_summary(record: NormalizedRecord) -> SourceSummary:
@@ -116,6 +129,40 @@ def raw_source(
     except (ReadError, NoEvidenceRoot) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return RawSourceResponse(text=raw.text, original_locator=raw.original_locator)
+
+
+@router.get("/locality")
+def locality(request: Request) -> LocalityOut:
+    """Whether this connection is local - the one fact "Reveal in editor"
+    (#65) needs to decide whether to exist on this client at all. General
+    on purpose: any future locality-gated action reads this same fact
+    rather than each route re-deriving it (ADR-0002: no other surface may
+    acquire a client-locality condition of its own).
+    """
+    return LocalityOut(is_local=_is_local(request))
+
+
+@router.post("/sources/{record_id}/reveal")
+def reveal_source(
+    record_id: str, request: Request, repository: Repository = Depends(get_repository)
+) -> RevealSourceResponse:
+    """"Reveal in editor" (#65): launch the un-normalized file this record
+    was normalized from in the host's editor or file manager.
+
+    Refused for a non-local request even if the UI never should have shown
+    the button that reached this - the server never trusts the client's
+    own idea of whether it is local, only the same peer-address check
+    ``/locality`` reports. This is what keeps the action purely additive
+    (ADR-0002): a hosted client gets a plain 403, never a launch on a
+    machine it is not sitting at.
+    """
+    if not _is_local(request):
+        raise HTTPException(status_code=403, detail="reveal is local-only")
+    try:
+        reveal_original_source_core(repository, record_id)
+    except (ReadError, NoEvidenceRoot) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return RevealSourceResponse(opened=True)
 
 
 def _to_citation(ref: str, result: Read) -> CitationOut:

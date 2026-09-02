@@ -10,6 +10,8 @@ export type SourceSummary = components["schemas"]["SourceSummary"];
 export type SourceDetail = components["schemas"]["SourceDetail"];
 export type SourceListResponse = components["schemas"]["SourceListResponse"];
 export type RawSourceResponse = components["schemas"]["RawSourceResponse"];
+export type LocalityOut = components["schemas"]["LocalityOut"];
+export type RevealSourceResponse = components["schemas"]["RevealSourceResponse"];
 export type SubjectSummary = components["schemas"]["SubjectSummary"];
 export type EntrySummary = components["schemas"]["EntrySummary"];
 export type SearchResultOut = components["schemas"]["SearchResultOut"];
@@ -35,6 +37,15 @@ async function get<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function post<T>(path: string): Promise<T> {
+  const response = await fetch(path, { method: "POST" });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new ApiError(response.status, body?.detail ?? response.statusText);
+  }
+  return response.json() as Promise<T>;
+}
+
 // A large-enough page to render the whole corpus in the sidebar tree in one
 // call - #24's groups and counts are computed over every record, and the
 // PoC has no evidence corpus large enough yet to need real pagination here
@@ -51,6 +62,22 @@ export function readSource(id: string): Promise<SourceDetail> {
 
 export function readRawSource(id: string): Promise<RawSourceResponse> {
   return get(`/api/sources/${encodeURIComponent(id)}/raw`);
+}
+
+// Whether this browser and the API server are on the same machine - the
+// one fact "Reveal in editor" (#65) needs to decide whether to render its
+// button at all. General on purpose (docs/adr/0002-ui-is-a-react-client.md:
+// "no other surface may acquire a client-locality condition" of its own).
+export function checkLocality(): Promise<LocalityOut> {
+  return get(`/api/locality`);
+}
+
+// "Reveal in editor" (#65): ask the server to launch the raw evidence file
+// in the host's editor or file manager. Only ever called when
+// `checkLocality` has said `is_local` - the server refuses it either way,
+// but the button that reaches this is absent, not disabled, otherwise.
+export function revealSource(id: string): Promise<RevealSourceResponse> {
+  return post(`/api/sources/${encodeURIComponent(id)}/reveal`);
 }
 
 // The slide-over citation panel's one read, in both directions (#25,

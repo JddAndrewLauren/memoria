@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import SourceDetailPage from "./SourceDetailPage";
@@ -228,5 +228,83 @@ describe("the source viewer (§19.4)", () => {
     // The context stays recoverable from original_locator rather than an
     // invented date.
     expect(screen.getByText("Journal I, entry dated Jul. 17.")).toBeInTheDocument();
+  });
+});
+
+describe('"Reveal in editor" (#65)', () => {
+  function stubFetch(isLocal: boolean, onReveal?: (url: string) => void) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("/api/locality")) {
+          return new Response(JSON.stringify({ is_local: isLocal }), { status: 200 });
+        }
+        if (url.includes("/reveal") && init?.method === "POST") {
+          onReveal?.(url);
+          return new Response(JSON.stringify({ opened: true }), { status: 200 });
+        }
+        if (url.includes("/api/sources/SRC-000184")) {
+          return new Response(JSON.stringify(SOURCE_DETAIL), { status: 200 });
+        }
+        return new Response(JSON.stringify({ detail: "not found" }), { status: 404 });
+      }),
+    );
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("is absent - not disabled, not erroring - when the client is not local", async () => {
+    stubFetch(false);
+
+    renderAt("/sources/SRC-000184");
+
+    await screen.findByText("SRC-000184");
+    expect(screen.queryByText("Reveal in editor")).not.toBeInTheDocument();
+  });
+
+  it("appears beside Open original, and asks the server to reveal the file, when the client is local", async () => {
+    const onReveal = vi.fn();
+    stubFetch(true, onReveal);
+
+    renderAt("/sources/SRC-000184");
+
+    expect(await screen.findByText(/Open original/)).toBeInTheDocument();
+    const button = screen.getByText("Reveal in editor");
+
+    fireEvent.click(button);
+
+    await waitFor(() =>
+      expect(onReveal).toHaveBeenCalledWith(
+        expect.stringContaining("/api/sources/SRC-000184/reveal"),
+      ),
+    );
+  });
+
+  it("shows a distinct failure line, not silence, when the server refuses the reveal", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("/api/locality")) {
+          return new Response(JSON.stringify({ is_local: true }), { status: 200 });
+        }
+        if (url.includes("/reveal") && init?.method === "POST") {
+          return new Response(JSON.stringify({ detail: "local-only" }), { status: 403 });
+        }
+        if (url.includes("/api/sources/SRC-000184")) {
+          return new Response(JSON.stringify(SOURCE_DETAIL), { status: 200 });
+        }
+        return new Response(JSON.stringify({ detail: "not found" }), { status: 404 });
+      }),
+    );
+
+    renderAt("/sources/SRC-000184");
+
+    fireEvent.click(await screen.findByText("Reveal in editor"));
+
+    expect(await screen.findByText("Could not reveal the original file.")).toBeInTheDocument();
   });
 });

@@ -9,6 +9,7 @@ import ast
 import dataclasses
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from memoria.index import (
@@ -73,6 +74,16 @@ def _client(repository):
     # `with` is required for `TestClient` to run lifespan - otherwise
     # `app.state.repository` is never set and every route 500s.
     return TestClient(create_app(repository=repository)).__enter__()
+
+
+def _local_client(repository):
+    """A client whose peer address is a loopback address - what a real
+    browser on the same machine as the server looks like to it. The
+    default `TestClient` peer, `("testclient", 50000)`, is not a loopback
+    address, so an ordinary `_client` already exercises the "not local"
+    case #65's locality gate must refuse."""
+    app = create_app(repository=repository)
+    return TestClient(app, client=("127.0.0.1", 55001)).__enter__()
 
 
 # --- isolation ---------------------------------------------------------
@@ -248,6 +259,90 @@ def test_raw_source_with_a_missing_original_file_is_a_404(tmp_path):
     client = _client(repository)
 
     response = client.get("/api/sources/SRC-000184/raw")
+
+    assert response.status_code == 404
+
+
+# --- locality and reveal in editor (#65) ------------------------------------
+
+
+def test_locality_reports_not_local_for_an_ordinary_client(tmp_path):
+    """`TestClient`'s default peer is not a loopback address - the same
+    "not local" fact a real hosted deployment sees."""
+    repository = _repo(tmp_path)
+    client = _client(repository)
+
+    body = client.get("/api/locality").json()
+
+    assert body == {"is_local": False}
+
+
+def test_locality_reports_local_for_a_loopback_peer(tmp_path):
+    repository = _repo(tmp_path)
+    client = _local_client(repository)
+
+    body = client.get("/api/locality").json()
+
+    assert body == {"is_local": True}
+
+
+def test_reveal_is_refused_for_a_non_local_client_without_launching_anything(
+    tmp_path, monkeypatch
+):
+    """The server never trusts the client's own idea of whether it is
+    local - a request from a non-loopback peer is refused outright, even
+    if it names a source that exists (#65's acceptance criteria: absent
+    for the UI, refused for the API underneath it)."""
+    monkeypatch.setattr(
+        "memoria.records._launch", lambda path: pytest.fail("must not launch when refused")
+    )
+    repository = _repo(tmp_path, _record())
+    client = _client(repository)
+
+    response = client.post("/api/sources/SRC-000184/reveal")
+
+    assert response.status_code == 403
+
+
+def test_reveal_launches_the_original_file_for_a_local_client(tmp_path, monkeypatch):
+    evidence_root = tmp_path / "evidence"
+    (evidence_root / "raw" / "vol-01").mkdir(parents=True)
+    original = evidence_root / "raw" / "vol-01" / "text.txt"
+    original.write_text("The unnormalized text.\n", encoding="utf-8")
+    repository = _repo(tmp_path, _record())
+    repository = Repository(root=repository.root, evidence_root=evidence_root)
+    launched = []
+    monkeypatch.setattr("memoria.records._launch", lambda path: launched.append(path))
+    client = _local_client(repository)
+
+    response = client.post("/api/sources/SRC-000184/reveal")
+
+    assert response.status_code == 200
+    assert response.json() == {"opened": True}
+    assert launched == [original]
+
+
+def test_reveal_without_an_evidence_root_is_a_404_not_a_crash(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "memoria.records._launch", lambda path: pytest.fail("must not launch")
+    )
+    repository = _repo(tmp_path, _record())
+    client = _local_client(repository)
+
+    response = client.post("/api/sources/SRC-000184/reveal")
+
+    assert response.status_code == 404
+
+
+def test_reveal_of_an_unknown_record_is_a_404(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "memoria.records._launch", lambda path: pytest.fail("must not launch")
+    )
+    repository = _repo(tmp_path, _record())
+    repository = Repository(root=repository.root, evidence_root=tmp_path / "evidence")
+    client = _local_client(repository)
+
+    response = client.post("/api/sources/SRC-000999/reveal")
 
     assert response.status_code == 404
 

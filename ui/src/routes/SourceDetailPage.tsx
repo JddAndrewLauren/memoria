@@ -1,7 +1,14 @@
 import { useEffect, useRef } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { readSource, readRef, ApiError, type EditorialRecordOut } from "../api/client";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  readSource,
+  readRef,
+  checkLocality,
+  revealSource,
+  ApiError,
+  type EditorialRecordOut,
+} from "../api/client";
 import { Badge } from "../components/Badge";
 import { Backlinks } from "../components/CitationPanel";
 import { useCitationPanel } from "../lib/citationPanel";
@@ -29,6 +36,10 @@ const DATE_CONFIDENCE_TONE: Record<string, Tone> = {
  * via a citation - the URL fragment names the cited paragraph's stable
  * anchor - that paragraph is highlighted and scrolled to, and the right
  * rail's `CITED BY` list shows its backlinks (#20's read decoration).
+ *
+ * A secondary "Reveal in editor" action (#65) sits beside "Open original",
+ * present only when `/api/locality` reports this browser and the server
+ * share a machine - absent otherwise, never disabled or erroring.
  */
 export default function SourceDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -50,6 +61,16 @@ export default function SourceDetailPage() {
     queryFn: () => readRef(citedAnchor as string),
     enabled: Boolean(citedAnchor),
   });
+
+  // "Reveal in editor" (#65): a local convenience, absent - not disabled,
+  // not erroring - unless the browser and the API server are on the same
+  // machine. `is_local` defaults to falsy while this loads or fails, so
+  // the button never flashes in before the check settles.
+  const { data: locality } = useQuery({
+    queryKey: ["locality"],
+    queryFn: checkLocality,
+  });
+  const reveal = useMutation({ mutationFn: () => revealSource(id as string) });
 
   const citedRef = useRef<HTMLParagraphElement | null>(null);
   useEffect(() => {
@@ -123,6 +144,18 @@ export default function SourceDetailPage() {
         >
           Open original ↗
         </Link>
+        {locality?.is_local && (
+          <button
+            type="button"
+            onClick={() => reveal.mutate()}
+            className="mb-6 block w-full rounded border border-border px-3 py-2 text-center text-sm text-body hover:bg-panel"
+          >
+            Reveal in editor
+          </button>
+        )}
+        {reveal.isError && (
+          <p className="mb-6 text-xs text-muted">Could not reveal the original file.</p>
+        )}
         {citedAnchor && isCitationError && (
           <p className="mt-6 text-xs text-muted">This reference could not be read.</p>
         )}

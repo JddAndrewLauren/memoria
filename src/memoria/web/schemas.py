@@ -96,6 +96,29 @@ class RawSourceResponse(BaseModel):
     original_locator: str
 
 
+class LocalityOut(BaseModel):
+    """Whether this connection's client is on the same machine as the
+    server.
+
+    "Reveal in editor" (#65)'s one locality fact - general on purpose, per
+    ``docs/adr/0002-ui-is-a-react-client.md``'s "no other surface may
+    acquire a client-locality condition" of its own: any future
+    locality-gated action reads this same field rather than deriving one.
+    """
+
+    is_local: bool
+
+
+class RevealSourceResponse(BaseModel):
+    """Confirms "Reveal in editor" (#65) launched.
+
+    Carries no other state - the editor or file manager runs on the host,
+    outside this response.
+    """
+
+    opened: bool
+
+
 class ReadOverlayOut(BaseModel):
     """The curated overlay a decorated paragraph read carries (#20):
     mirrors ``memoria.index.ReadOverlay`` field for field. ``citing_settlements``
