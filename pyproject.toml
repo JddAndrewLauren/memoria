@@ -39,11 +39,26 @@ web = [
     "fastapi>=0.115,<1",
     "uvicorn>=0.30",
 ]
+# The extraction's clustering (#17). Unlike `mcp` and `web` this is not an
+# adapter - it is core index-maintainer logic - but it takes the same shape
+# for the same reason: the core's own runtime dependency stays PyYAML, and
+# `dev` pulls the extra so the clustering tests never skip.
+#
+# `graspologic-native` (ADR-0005 build shape 1's preferred Leiden backend) is
+# deliberately NOT here. If `dev` pulled it, the suite would only ever
+# exercise Leiden and never the networkx fallback that most installs actually
+# run - and the fallback is the path with the hand-written hierarchy in it.
+# `memoria.clustering` uses it when it is importable; install it by hand to
+# get Leiden.
+graph = [
+    "networkx>=3,<4",
+]
 dev = [
     "pytest>=8.0",
     "httpx>=0.27",
     "memoria[mcp]",
     "memoria[web]",
+    "memoria[graph]",
 ]
 
 [tool.setuptools.packages.find]

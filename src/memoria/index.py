@@ -6,6 +6,16 @@ deletes and regenerates the index from evidence + normalization -
 establishing the §42 contract that derived state carries no authority and
 can always be thrown away. Search-time chunking lives in the index only;
 the normalized record stays the unit of evidence (docs/adr, part 16 M0).
+
+**This module owns the database file's shape** (#17). Every ``CREATE TABLE``
+in ``.memoria/index.db`` is here, including the extraction's - placements,
+unplaced surface forms, relations, candidates, clusters and the memo cache -
+even though ``memoria.extraction`` is what reads and writes those rows. The
+DDL cannot live there: ``extraction`` imports ``INDEX_RELATIVE_PATH`` from
+this module, so the reverse direction would be a cycle. Keeping it here also
+puts the rebuild rule (``PRESERVED_TABLES`` / ``DERIVED_TABLES``) beside the
+function that enforces it, where one test can check that every table in the
+file is named by exactly one of the two.
 """
 
 from __future__ import annotations
@@ -25,6 +35,179 @@ INDEX_RELATIVE_PATH = ".memoria/index.db"
 # source_type survives it deliberately - the contemporaneous/retrospective
 # split is how §6's temporal discipline reaches retrieval (#12), and it is
 # part of the record schema rather than of any one corpus.
+
+
+# --- the database file's shape ----------------------------------------------
+#
+# Two lists, and between them they *are* the rebuild rule (#17, ADR-0005
+# build shape 1): a rebuild drops every derived table and recreates it, and
+# leaves the preserved ones alone. A table that appears in neither list is a
+# bug, and `tests/test_index.py` fails on one - which is what catches the
+# real failure mode here, someone adding a table and forgetting to say which
+# side of the line it falls on.
+
+# The memo cache and its schema marker. **The only rows in this file a
+# rebuild does not throw away**, and the reason is narrow: everything else
+# here can be recomputed from evidence plus the author's durable acts, and
+# these cannot be recomputed at all without a model. That is the whole
+# predicate - not "paragraph rows versus cluster rows" - which is why one
+# table with a `kind` column carries both (part 06 §8.12's "one cache, two
+# key compositions").
+PRESERVED_TABLES = ("memoria_schema", "memo")
+
+# Everything else. Dropped and regenerated on every `memoria rebuild`, which
+# is §42's contract made mechanical.
+DERIVED_TABLES = (
+    "records",
+    "paragraphs",
+    "placements",
+    "unplaced_forms",
+    "relations",
+    "candidates",
+    "candidate_forms",
+    "candidate_paragraphs",
+    "proposed_match_terms",
+    "clusters",
+    "cluster_members",
+    "cluster_relations",
+    "cluster_paragraphs",
+    "extraction_meta",
+)
+
+# Bumped when the *shape* of a memo row changes in a way that makes an
+# existing cache unreadable. It is not bumped when a prompt changes - a
+# prompt change moves every key instead (memoria.extraction), which is a
+# miss rather than a corruption, and the old rows sit inert.
+MEMO_SCHEMA_VERSION = "1"
+
+_PRESERVED_DDL = (
+    "CREATE TABLE IF NOT EXISTS memoria_schema("
+    "key TEXT PRIMARY KEY, value TEXT NOT NULL"
+    ")",
+    # `key` is the composed hash and nothing else: a memo row is addressed by
+    # what it depends on, never by where it happens to sit. That is what lets
+    # a cluster summary survive a re-clustering that lands on the same
+    # membership, and what makes an orphaned row (a paragraph that was
+    # renormalized out from under it) inert rather than wrong - nothing ever
+    # looks a row up by `anchor`.
+    "CREATE TABLE IF NOT EXISTS memo("
+    "key TEXT PRIMARY KEY, "
+    "kind TEXT NOT NULL CHECK (kind IN ('paragraph', 'cluster_summary')), "
+    "anchor TEXT NOT NULL DEFAULT '', "
+    "value TEXT NOT NULL, "
+    "written_at TEXT NOT NULL"
+    ")",
+    "CREATE INDEX IF NOT EXISTS memo_kind_anchor ON memo(kind, anchor)",
+)
+
+_DERIVED_DDL = (
+    "CREATE VIRTUAL TABLE IF NOT EXISTS records USING fts5("
+    "src_id UNINDEXED, anchor UNINDEXED, source_type UNINDEXED, text"
+    ")",
+    # A plain (non-FTS) table keyed by anchor, carrying the filterable
+    # metadata. #81 (a sqlite-vec table) and the extraction's placements put
+    # more paragraph-keyed rows in this same database file and must honour
+    # these same filters; if the metadata lived only inside the FTS5 virtual
+    # table, every one of those queries would either join into a virtual
+    # table or keep a second copy of it - the §40.1 duplication this table
+    # exists to avoid.
+    "CREATE TABLE IF NOT EXISTS paragraphs("
+    "anchor TEXT PRIMARY KEY, src_id TEXT, source_type TEXT, "
+    "event_date TEXT, recorded_date TEXT, contemporaneous INTEGER"
+    ")",
+    # A placement the entry's match terms license (part 06 §8.4). `licensed_by`
+    # names *which* term did it, so "adding a match term changed placements"
+    # is inspectable rather than merely countable.
+    "CREATE TABLE IF NOT EXISTS placements("
+    "anchor TEXT NOT NULL, entry_id TEXT NOT NULL, "
+    "surface_form TEXT NOT NULL, licensed_by TEXT NOT NULL, "
+    "PRIMARY KEY (anchor, entry_id, surface_form)"
+    ")",
+    "CREATE INDEX IF NOT EXISTS placements_entry ON placements(entry_id)",
+    # Every mention that did not become a placement, and why. This table is
+    # the placement-recall mitigation: unreported recall is survivable only
+    # because the misses stay countable (ADR-0005 consequences).
+    "CREATE TABLE IF NOT EXISTS unplaced_forms("
+    "anchor TEXT NOT NULL, surface_form TEXT NOT NULL, "
+    "subject_id TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL, "
+    "proposed_entry_id TEXT NOT NULL DEFAULT '', "
+    "PRIMARY KEY (anchor, surface_form, reason, proposed_entry_id)"
+    ")",
+    # `from_ref`/`to_ref` rather than subject/object: `subject` means People
+    # or Themes in this codebase, and CONTEXT.md's avoid list rules out
+    # "edge" and "triple". A ref is an entry id or `CAND:<candidate_id>`.
+    "CREATE TABLE IF NOT EXISTS relations("
+    "anchor TEXT NOT NULL, from_ref TEXT NOT NULL, verb TEXT NOT NULL, "
+    "to_ref TEXT NOT NULL, "
+    "PRIMARY KEY (anchor, from_ref, verb, to_ref)"
+    ")",
+    "CREATE INDEX IF NOT EXISTS relations_from ON relations(from_ref)",
+    "CREATE INDEX IF NOT EXISTS relations_to ON relations(to_ref)",
+    # `above_threshold` is a column rather than a filter applied on the way
+    # in, because a candidate the recurrence filter rejects has to stay
+    # enumerable (part 06 §8.4): the filter is a guaranteed miss generator
+    # and the misses are the mitigation.
+    "CREATE TABLE IF NOT EXISTS candidates("
+    "candidate_id TEXT PRIMARY KEY, subject_id TEXT NOT NULL, "
+    "label TEXT NOT NULL, gloss TEXT NOT NULL, "
+    "recurrence INTEGER NOT NULL, above_threshold INTEGER NOT NULL"
+    ")",
+    "CREATE INDEX IF NOT EXISTS candidates_subject ON candidates("
+    "subject_id, above_threshold, recurrence DESC)",
+    # Separate tables rather than a JSON blob on the candidate, so a rejected
+    # candidate's forms and paragraphs are queryable without decoding it.
+    "CREATE TABLE IF NOT EXISTS candidate_forms("
+    "candidate_id TEXT NOT NULL, surface_form TEXT NOT NULL, "
+    "occurrences INTEGER NOT NULL, "
+    "PRIMARY KEY (candidate_id, surface_form)"
+    ")",
+    "CREATE TABLE IF NOT EXISTS candidate_paragraphs("
+    "candidate_id TEXT NOT NULL, anchor TEXT NOT NULL, "
+    "PRIMARY KEY (candidate_id, anchor)"
+    ")",
+    "CREATE TABLE IF NOT EXISTS proposed_match_terms("
+    "entry_id TEXT NOT NULL, term TEXT NOT NULL, term_kind TEXT NOT NULL, "
+    "occurrences INTEGER NOT NULL, "
+    "PRIMARY KEY (entry_id, term)"
+    ")",
+    # `summary_key` points at a memo row - derived pointing at preserved,
+    # never the other way. That direction is what makes dropping this table
+    # safe: the summary it names outlives the cluster row entirely, and is
+    # found again by membership rather than by cluster id (which does not
+    # survive re-clustering, ADR-0005 decision 6).
+    "CREATE TABLE IF NOT EXISTS clusters("
+    "cluster_id TEXT PRIMARY KEY, level INTEGER NOT NULL, "
+    "parent_id TEXT NOT NULL DEFAULT '', label TEXT NOT NULL, "
+    "membership_hash TEXT NOT NULL, summary_key TEXT NOT NULL DEFAULT ''"
+    ")",
+    "CREATE INDEX IF NOT EXISTS clusters_level ON clusters(level)",
+    "CREATE INDEX IF NOT EXISTS clusters_parent ON clusters(parent_id)",
+    # `member_ref` is an entry reference or a `candidate:` ref - a cluster's
+    # members are placed entries and candidates together (see
+    # `extraction.build_clusters`), which is why the column is not `entry_id`.
+    "CREATE TABLE IF NOT EXISTS cluster_members("
+    "cluster_id TEXT NOT NULL, member_ref TEXT NOT NULL, "
+    "PRIMARY KEY (cluster_id, member_ref)"
+    ")",
+    "CREATE TABLE IF NOT EXISTS cluster_relations("
+    "cluster_id TEXT NOT NULL, from_ref TEXT NOT NULL, verb TEXT NOT NULL, "
+    "to_ref TEXT NOT NULL, weight INTEGER NOT NULL, "
+    "PRIMARY KEY (cluster_id, from_ref, verb, to_ref)"
+    ")",
+    "CREATE TABLE IF NOT EXISTS cluster_paragraphs("
+    "cluster_id TEXT NOT NULL, anchor TEXT NOT NULL, "
+    "PRIMARY KEY (cluster_id, anchor)"
+    ")",
+    # What the last derive ran with: the recurrence threshold, the prompt
+    # hashes, the clustering backend that happened to be installed, and the
+    # raw/filtered counts. A surface reporting a candidate list has to be
+    # able to say what produced it.
+    "CREATE TABLE IF NOT EXISTS extraction_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+)
+
+
+class IndexSchemaError(Exception):
+    """The index file on disk cannot be opened under this build's rules."""
 
 
 @dataclass
@@ -88,50 +271,72 @@ class SearchFilters:
     contemporaneous: bool | None = None
 
 
-def build_index(repository: Repository, records: list[NormalizedRecord]) -> None:
-    """(Re)build the FTS5 index in ``repository`` from ``records``.
+@dataclass(frozen=True)
+class RebuildReport:
+    """What one ``memoria rebuild`` regenerated.
+
+    ``rebuild`` used to return the bare record list, which was enough when
+    the only derived thing was an FTS5 table. It now also runs the
+    extraction's derive step, and #17 asks that the raw and filtered
+    candidate counts be *reported* - so there has to be something to report
+    them in. ``counts`` is ``extraction.DerivedCounts``, typed loosely here
+    only to keep this module's imports one-way.
+    """
+
+    records: list[NormalizedRecord]
+    counts: object
+
+
+def build_index(
+    repository: Repository,
+    records: list[NormalizedRecord],
+    *,
+    reset_cache: bool = False,
+) -> None:
+    """(Re)build the derived tables in ``repository``'s index from ``records``.
 
     Takes the frozen ``Repository`` value, like ``search`` and every other
     core function that names a location (ADR-0004): the index path is a fact
-    about a repository, not an argument a caller composes. This was the last
-    place in the module still taking a bare ``db_path``.
+    about a repository, not an argument a caller composes.
 
     Each record is indexed under its own ``source_type``, which is what
     ``SearchFilters.source_type`` filters on - an editorial record is a
-    record whose source_type says so, not a separate kind of argument. (It
-    used to be a second parameter to this function, taking the extractor's
-    own record type; that type was Thoreau-specific and went with the corpus,
-    and the schema's discriminator was always the better seam.)
+    record whose source_type says so, not a separate kind of argument.
 
-    Deletes any existing database file first, so the index is always a
-    clean regeneration rather than an incremental update - derived state
-    has no authority of its own (§42).
+    **This used to delete the database file**, which was three jobs at once:
+    it dropped the derived tables, it regenerated the FTS5 virtual table, and
+    it migrated away any older schema. It cannot any more, because the memo
+    cache (#17) lives in this file and is the one thing here a rebuild may
+    not throw away - it holds model output, and a rebuild has no model to
+    regenerate it with. So the three jobs are now done separately:
+
+    - the derived tables are dropped by name from ``DERIVED_TABLES``;
+    - ``DROP TABLE records`` takes the FTS5 shadow tables (``records_data``,
+      ``records_idx``, ...) with it, which is SQLite's own behaviour and is
+      what replaces the unlink for full-text search;
+    - a schema this build does not recognise raises rather than being
+      silently discarded.
+
+    ``reset_cache=True`` restores the old behaviour and deletes the file
+    outright. It is the only way to lose the cache, and it is spelled as an
+    argument rather than happening by default because that cache is the
+    single most expensive thing in the repository to reproduce.
+
+    Everything else is still a clean regeneration: derived state has no
+    authority of its own (§42).
     """
     db_path = repository.root / INDEX_RELATIVE_PATH
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    if db_path.exists():
+    if reset_cache and db_path.exists():
         db_path.unlink()
 
     con = sqlite3.connect(db_path)
     try:
-        con.execute(
-            "CREATE VIRTUAL TABLE records USING fts5("
-            "src_id UNINDEXED, anchor UNINDEXED, source_type UNINDEXED, text"
-            ")"
-        )
-        # A plain (non-FTS) table keyed by anchor, carrying the filterable
-        # metadata. #81 (a sqlite-vec table) and #74 (the extraction's
-        # placements) put more paragraph-keyed rows in this same database
-        # file and must honour these same filters; if the metadata lived
-        # only inside the FTS5 virtual table, every one of those queries
-        # would either join into a virtual table or keep a second copy of
-        # it - the §40.1 duplication this table exists to avoid.
-        con.execute(
-            "CREATE TABLE paragraphs("
-            "anchor TEXT PRIMARY KEY, src_id TEXT, source_type TEXT, "
-            "event_date TEXT, recorded_date TEXT, contemporaneous INTEGER"
-            ")"
-        )
+        _ensure_preserved(con)
+        for table in DERIVED_TABLES:
+            con.execute(f"DROP TABLE IF EXISTS {table}")
+        for statement in _DERIVED_DDL:
+            con.execute(statement)
         for record in records:
             for paragraph_number, paragraph in enumerate(record.paragraphs, start=1):
                 anchor = record.anchor_id(paragraph_number)
@@ -156,6 +361,68 @@ def build_index(repository: Repository, records: list[NormalizedRecord]) -> None
         con.commit()
     finally:
         con.close()
+
+
+def _ensure_preserved(con: sqlite3.Connection) -> None:
+    """Create the preserved tables if they are missing, and refuse a cache
+    this build cannot read.
+
+    An index file from before #17 simply has no ``memoria_schema`` row, and
+    gains an empty cache here - that is the whole migration. A file carrying
+    a version this build does not know is the case that must **not** be
+    guessed at: dropping a cache the author paid a model to fill is the one
+    unrecoverable mistake available in this module, so it raises and names
+    the flag that would do it deliberately.
+    """
+    for statement in _PRESERVED_DDL:
+        con.execute(statement)
+    row = con.execute(
+        "SELECT value FROM memoria_schema WHERE key = 'memo_version'"
+    ).fetchone()
+    if row is None:
+        con.execute(
+            "INSERT INTO memoria_schema (key, value) VALUES ('memo_version', ?)",
+            (MEMO_SCHEMA_VERSION,),
+        )
+        return
+    if row[0] != MEMO_SCHEMA_VERSION:
+        raise IndexSchemaError(
+            f"{INDEX_RELATIVE_PATH} holds a memo cache at schema version "
+            f"{row[0]!r}; this build writes {MEMO_SCHEMA_VERSION!r}. The cache "
+            "holds model output and is not regenerable, so it is not discarded "
+            "automatically - rebuild with --reset-cache to throw it away and "
+            "re-run the extraction, or use a build that reads this version."
+        )
+
+
+def connect(repository: Repository) -> sqlite3.Connection:
+    """Open the index, creating the file and every table it should have.
+
+    The one place outside ``build_index`` that opens this database, so
+    ``memoria.extraction`` does not carry a second copy of the create-or-open
+    rule.
+
+    It creates the **derived** tables as well as the preserved ones, which
+    matters more than it sounds: an extraction can legitimately run on a
+    repository where ``memoria rebuild`` has never been run - the pass reads
+    record files, not the index - and the first thing the skill does is ask
+    for a status. Without this, that call comes back as a bare "no such
+    table" that the session has no way to act on. Every derived statement is
+    ``IF NOT EXISTS`` for the same reason; ``build_index`` drops them first,
+    so it still gets a clean regeneration rather than an update in place.
+    """
+    db_path = repository.root / INDEX_RELATIVE_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(db_path)
+    try:
+        _ensure_preserved(con)
+        for statement in _DERIVED_DDL:
+            con.execute(statement)
+        con.commit()
+    except BaseException:
+        con.close()
+        raise
+    return con
 
 
 def filter_predicate(filters: SearchFilters | None) -> tuple[str, list]:
@@ -266,7 +533,12 @@ def search(
     ]
 
 
-def rebuild(repository: Repository) -> list[NormalizedRecord]:
+def rebuild(
+    repository: Repository,
+    *,
+    recurrence_threshold: int | None = None,
+    reset_cache: bool = False,
+) -> RebuildReport:
     """Delete and regenerate all derived state from evidence, losing nothing.
 
     §42's contract: derived state carries no authority and can always be
@@ -284,8 +556,31 @@ def rebuild(repository: Repository) -> list[NormalizedRecord]:
     retirement removed - the shape of that interface is a decision for
     whoever chooses the corpus, made against a real one.
 
-    Returns the records it indexed, which is an empty list when none exist.
+    It now also runs the extraction's **derive** step (#17), which recomputes
+    placements, candidates, relations and clusters from the memo cache plus
+    the entries' current match terms. That step calls no model: accepting a
+    proposed match term changes what is placed here without re-reading a
+    single paragraph, which is the whole point of leaving match terms out of
+    the memo key (part 06 §8.12).
+
+    **It does not promote anything.** Auto-promotion materializes durable
+    entry files and commits them, and it belongs to the author-launched pass
+    (``extraction.finish_pass``), never to a command whose contract is that
+    everything it touches is disposable. This function never names
+    ``auto_promote``, and a test holds that.
     """
     records = read_all(repository)
-    build_index(repository, records)
-    return records
+    build_index(repository, records, reset_cache=reset_cache)
+    # Imported here rather than at module scope: `memoria.extraction` imports
+    # this module for the schema and the connection, so the module-level
+    # direction has to stay one-way. Nothing else is fetched from it - an
+    # absent threshold is left to `derive`'s own default rather than copied.
+    from memoria import extraction
+
+    if recurrence_threshold is None:
+        counts = extraction.derive(repository)
+    else:
+        counts = extraction.derive(
+            repository, recurrence_threshold=recurrence_threshold
+        )
+    return RebuildReport(records=records, counts=counts)

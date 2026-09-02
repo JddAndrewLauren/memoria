@@ -43,6 +43,7 @@ ALLOWED_IMPORTS = {
     "memoria.repository",
     "memoria.index",      # #12: search_text calls memoria.index.search
     "memoria.ledger",      # #13: every served call is ledgered
+    "memoria.extraction",  # #17: the extraction pass's tools
 }
 
 FILE_OPENING_CALLS = {"open", "read_text", "read_bytes", "write_text", "write_bytes"}
@@ -264,14 +265,34 @@ def test_the_server_registers_a_read_tool(tmp_path):
     assert "verbatim" in (tool.description or "")
 
 
-def test_the_tool_surface_is_read_and_search_text():
+def test_the_tool_surface_is_the_read_tools_and_the_extraction_tools():
     """Part 11 §25 withdrew the per-type read tools; there is no read_source.
 
-    #12 adds exactly one more tool, search_text - not one per filter or one
-    per source type.
+    #12 adds exactly one more read tool, search_text - not one per filter or
+    one per source type. #17 adds the extraction pass's tools, which are a
+    second class on the same server: they write, and they are driven by the
+    `extraction` skill rather than reached for by a writing session.
+
+    Pinned as an exact set, so a tool added without a decision fails here.
     """
     names = {t.name for t in asyncio.run(server.mcp.list_tools())}
-    assert names == {"read", "search_text"}
+    assert names == {
+        "read",
+        "search_text",
+        "extraction_brief",
+        "extraction_next_paragraphs",
+        "extraction_record",
+        "extraction_derive",
+        "extraction_next_summary",
+        "extraction_record_summary",
+        "extraction_status",
+        "extraction_finish",
+        "extraction_candidates",
+        "extraction_unplaced_forms",
+        "extraction_cluster",
+        "extraction_promote_candidate",
+        "extraction_promote_cluster",
+    }
 
 
 # --- search_text --------------------------------------------------------
