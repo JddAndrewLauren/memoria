@@ -3,6 +3,7 @@
 import base64
 import io
 import mailbox
+import re
 import sqlite3
 from dataclasses import replace
 from email.message import EmailMessage
@@ -584,6 +585,58 @@ def test_thread_index_threads_a_chain_with_no_in_reply_to_at_all(tmp_path):
     )
 
 
+def test_a_thread_mixing_in_reply_to_and_thread_index_shares_one_thread_id(tmp_path):
+    """Review round 1 on PR #123: a thread *root* never carries an
+    `In-Reply-To` (there is nothing to reply to), so a root that also
+    carries a `Thread-Index` used to fall into the Thread-Index branch and
+    get a hex-fingerprint `thread_id` while its `In-Reply-To`-linked replies
+    got the root's `Message-ID` - one conversation, two `thread_id`
+    namespaces. Both existing threading tests exercise one mechanism only
+    (every message In-Reply-To-linked, or every message Thread-Index-only),
+    which is why that split went uncaught. Here the root and the middle
+    reply carry both headers (`In-Reply-To` takes precedence per the brief)
+    and the last reply carries `Thread-Index` alone, so both mechanisms
+    resolve into the same thread."""
+    root = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFg=="  # 22 bytes
+    child = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFgEAAAAA"  # root + 5 bytes
+    grandchild = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFgEAAAAAAgAAAAA="  # child + 5 bytes
+    evidence_root = tmp_path / "evidence"
+    _write_mbox(
+        evidence_root,
+        "thread.mbox",
+        [
+            _email_message(
+                from_="alice@example.com", to="bob@example.com",
+                date="Mon, 17 Oct 2011 09:00:00 -0500", message_id="<m1@x>",
+                thread_index=root, body="Kickoff message.",
+            ),
+            _email_message(
+                from_="bob@example.com", to="alice@example.com",
+                date="Mon, 17 Oct 2011 10:00:00 -0500", message_id="<m2@x>",
+                in_reply_to="<m1@x>", thread_index=child, body="First reply.",
+            ),
+            _email_message(
+                from_="alice@example.com", to="bob@example.com",
+                date="Mon, 17 Oct 2011 11:00:00 -0500", message_id="<m3@x>",
+                thread_index=grandchild, body="Second reply.",
+            ),
+        ],
+    )
+    repository = Repository(root=tmp_path / "repo")
+
+    normalize(repository, evidence_root)
+
+    records = read_all(repository)
+    assert len(records) == 3
+    assert len({r.thread_id for r in records}) == 1
+    by_body = {r.paragraphs[0]: r for r in records}
+    root_record = by_body["Kickoff message."]
+    assert root_record.thread_id == "m1@x"
+    assert root_record.in_reply_to == ""
+    assert by_body["First reply."].in_reply_to == root_record.id
+    assert by_body["Second reply."].in_reply_to == by_body["First reply."].id
+
+
 def test_a_reply_quoting_its_parent_drops_the_quote_and_search_hits_the_parent_only(tmp_path):
     evidence_root = tmp_path / "evidence"
     _write_mbox(
@@ -717,7 +770,16 @@ def test_bumping_the_email_converter_version_reconverts_existing_records(tmp_pat
     """#115: the pin bump from `email 2` to `email 3` reconverts every
     existing email record and reports it, the same mechanism
     ``test_a_changed_converter_version_reconverts_the_unit`` proves for
-    ``.txt`` - so the drift report shows the whole cost of the bump at once."""
+    ``.txt`` - so the drift report shows the whole cost of the bump at once.
+
+    The body runs the "-----Original Message-----" marker straight into the
+    sender's own paragraph, no blank line between - so under `email 2`
+    (simulated by standing `_ORIGINAL_MESSAGE_RE` in for a pattern that never
+    matches, since the marker's recognition is #115's own fix) the whole
+    thing is one unexcised paragraph, and under the real regex the marker
+    starts the quoted cut mid-paragraph, changing that paragraph's hash
+    rather than merely removing a separate one - which is what makes
+    ``paragraph_drift`` non-empty rather than a no-op reconversion."""
     from memoria import normalize as normalize_module
 
     evidence_root = tmp_path / "evidence"
@@ -728,22 +790,28 @@ def test_bumping_the_email_converter_version_reconverts_existing_records(tmp_pat
             _email_message(
                 from_="alice@example.com", to="bob@example.com",
                 date="Mon, 17 Oct 2011 09:00:00 -0500", message_id="<m1@x>",
-                body="Body text.",
+                body="Body text.\n-----Original Message-----\nFrom: bob\nOld text.",
             ),
         ],
     )
     repository = Repository(root=tmp_path / "repo")
+    real_original_message_re = normalize_module._ORIGINAL_MESSAGE_RE
     monkeypatch.setattr(normalize_module, "EMAIL_CONVERTER_VERSION", "email 2")
+    monkeypatch.setattr(normalize_module, "_ORIGINAL_MESSAGE_RE", re.compile(r"(?!)"))
     normalize(repository, evidence_root)
     (record,) = read_all(repository)
     assert record.converter == "email 2"
+    assert "Old text." in "\n".join(record.paragraphs)
 
     monkeypatch.setattr(normalize_module, "EMAIL_CONVERTER_VERSION", "email 3")
+    monkeypatch.setattr(normalize_module, "_ORIGINAL_MESSAGE_RE", real_original_message_re)
     report = normalize(repository, evidence_root)
 
     assert report.converted == [record.id]
     (reconverted,) = read_all(repository)
     assert reconverted.converter == "email 3"
+    assert reconverted.paragraphs == ["Body text."]
+    assert report.paragraph_drift == {record.id: 1}
 
 
 def test_converting_the_same_mbox_fixture_twice_is_byte_identical(tmp_path):

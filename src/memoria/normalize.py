@@ -598,30 +598,31 @@ def _process_email_containers(
                     best, best_len = j, len(other)
             return best
 
+        # In-Reply-To absent, Thread-Index present (#115): fold the sibling
+        # found by `_thread_index_parent` into `parent_index` itself as a
+        # fallback parent *edge*, rather than deriving thread_id separately
+        # from the raw Thread-Index bytes. A root message has no such
+        # sibling (its Thread-Index is the shortest in the thread), so it
+        # keeps `parent_index[i] = None` and resolves its own Message-ID as
+        # `thread_id` below - the same single mechanism a reply uses to
+        # reach it, so a root/reply pair can no longer split into two
+        # thread_id namespaces (one hex fingerprint, one Message-ID).
         for index, message in enumerate(messages):
-            in_reply_to_mid = _clean_message_id(message.get("In-Reply-To"))
+            if parent_index[index] is not None:
+                continue
+            if _clean_message_id(message.get("In-Reply-To")) is not None:
+                continue
             own_thread_index = thread_indexes[index]
-            if (
-                in_reply_to_mid is None
-                and own_thread_index is not None
-                and len(own_thread_index) >= _THREAD_INDEX_ROOT_LEN
-            ):
-                # In-Reply-To absent, Thread-Index present (#115): the
-                # deterministic substitute - thread_id from the 22-byte
-                # root, in_reply_to from the longest sibling prefix present
-                # in the export.
-                parent_idx = _thread_index_parent(index)
-                in_reply_to_value = (
-                    entry_id_by_index[parent_idx] if parent_idx is not None else ""
-                )
-                thread_id_value = own_thread_index[:_THREAD_INDEX_ROOT_LEN].hex()
-            else:
-                parent_idx = parent_index[index]
-                in_reply_to_value = (
-                    entry_id_by_index[parent_idx] if parent_idx is not None else ""
-                )
-                root = _root_index(index)
-                thread_id_value = message_ids[root] or entry_id_by_index[root]
+            if own_thread_index is not None and len(own_thread_index) >= _THREAD_INDEX_ROOT_LEN:
+                parent_index[index] = _thread_index_parent(index)
+
+        for index, message in enumerate(messages):
+            parent_idx = parent_index[index]
+            in_reply_to_value = (
+                entry_id_by_index[parent_idx] if parent_idx is not None else ""
+            )
+            root = _root_index(index)
+            thread_id_value = message_ids[root] or entry_id_by_index[root]
             draft = _convert_email_message(
                 message,
                 message_index=index,
