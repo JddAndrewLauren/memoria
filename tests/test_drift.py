@@ -107,6 +107,34 @@ def test_both_directions_are_reported_together_rather_than_a_single_boolean(tmp_
     assert report.declared_but_uncovered == ("SUB-events/acquisition",)
 
 
+def test_themes_and_arcs_are_reported_unmatchable_not_uncovered(tmp_path):
+    """`compute_appearances` never indexes entries under
+    `CO_OCCURRENCE_SUBJECTS` (#19 names them as skipped), so a brief naming a
+    theme can never be "covered" - reporting it as uncovered would be a
+    permanent false finding for a brief that describes the prose exactly."""
+    _write_entry(tmp_path, Entry(id="SUB-themes/solitude", match_terms=["solitude"]))
+    _write_entry(tmp_path, Entry(id="SUB-arcs/retreat", match_terms=["retreat"]))
+    _write_entry(tmp_path, Entry(id="SUB-people/bob"))
+    repository = _repo_with_prose(tmp_path, ["Bob's retreat into solitude."])
+
+    report = compute_drift(repository, _brief("Covers Bob's retreat into solitude."))
+
+    assert report.unmatchable == ("SUB-arcs/retreat", "SUB-themes/solitude")
+    assert report.declared_but_uncovered == ()
+    assert report.covered_but_undeclared == ()
+
+
+def test_unmatchable_is_empty_when_the_brief_names_no_theme_or_arc(tmp_path):
+    _write_entry(tmp_path, Entry(id="SUB-themes/solitude", match_terms=["solitude"]))
+    _write_entry(tmp_path, Entry(id="SUB-people/bob"))
+    repository = _repo_with_prose(tmp_path, ["Bob argued with Carol."])
+
+    report = compute_drift(repository, _brief("Covers Bob."))
+
+    assert report.unmatchable == ()
+    assert report.declared_but_uncovered == ()
+
+
 # --- never against an unconfirmed brief (#41's second acceptance criterion) -
 
 
@@ -122,6 +150,7 @@ def test_drift_is_skipped_against_an_unconfirmed_brief_with_a_stated_reason(tmp_
     assert report.reason and "unconfirmed" in report.reason
     assert report.covered_but_undeclared == ()
     assert report.declared_but_uncovered == ()
+    assert report.unmatchable == ()
 
 
 def test_an_unconfirmed_brief_would_otherwise_report_zero_drift_by_construction(tmp_path):

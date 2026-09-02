@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from memoria.extraction import CO_OCCURRENCE_SUBJECTS
 from memoria.index import appeared_entry_ids
 from memoria.manuscript import Brief
 from memoria.repository import Repository
@@ -55,12 +56,24 @@ class DriftReport:
     resolved to that the prose never turns out to touch. Reporting both
     directions, rather than a single boolean, is what keeps a stale brief and
     a deliberately loose one diagnosable as the different problems they are.
+
+    ``unmatchable`` is the declared entries the covered side is structurally
+    incapable of ever containing: ``compute_appearances`` never indexes
+    entries under ``extraction.CO_OCCURRENCE_SUBJECTS`` (Themes and Arcs are
+    shown by co-occurrence, not lexical match), while ``resolve_scope``
+    resolves them like any other. Left in the subtraction they would read as
+    "the prose never touches this" permanently, for any brief that names a
+    theme - a false finding, not the intended pressure. So, as #19's
+    ``AppearancesReport`` names its skipped subjects rather than absorbing
+    them into zero appearances, drift names them here rather than absorbing
+    them into ``declared_but_uncovered``.
     """
 
     skipped: bool
     reason: str | None
     covered_but_undeclared: tuple[str, ...]
     declared_but_uncovered: tuple[str, ...]
+    unmatchable: tuple[str, ...]
 
 
 def compute_drift(repository: Repository, brief: Brief) -> DriftReport:
@@ -85,13 +98,21 @@ def compute_drift(repository: Repository, brief: Brief) -> DriftReport:
             reason=_UNCONFIRMED_REASON,
             covered_but_undeclared=(),
             declared_but_uncovered=(),
+            unmatchable=(),
         )
 
-    declared = set(resolve_scope(repository, brief).entry_ids)
+    resolved = set(resolve_scope(repository, brief).entry_ids)
+    unmatchable = {
+        entry_id
+        for entry_id in resolved
+        if entry_id.split("/", 1)[0] in CO_OCCURRENCE_SUBJECTS
+    }
+    declared = resolved - unmatchable
     covered = set(appeared_entry_ids(repository))
     return DriftReport(
         skipped=False,
         reason=None,
         covered_but_undeclared=tuple(sorted(covered - declared)),
         declared_but_uncovered=tuple(sorted(declared - covered)),
+        unmatchable=tuple(sorted(unmatchable)),
     )
