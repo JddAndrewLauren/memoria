@@ -45,13 +45,6 @@ def test_every_labelled_query_has_the_documented_shape():
         assert isinstance(entry["expected_anchors"], list) and entry["expected_anchors"]
 
 
-def test_the_file_ships_empty_pending_a_real_archive():
-    """#81's acceptance criteria: this slice ships the shape and the check,
-    not the entries (docs/open-problems.md §2.2) - an empty file is the
-    expected state, not a placeholder for a forgotten TODO."""
-    assert _load_labelled_queries() == []
-
-
 def test_labelled_queries_are_recalled_by_search_semantic():
     """The check itself. Runs over `repository.from_env()` - the same
     repository every other retrieval call resolves against - so it exercises

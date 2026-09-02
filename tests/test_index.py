@@ -909,6 +909,41 @@ def test_rebuild_regenerates_the_fts5_table_without_orphan_shadow_tables(tmp_pat
     assert len(search(repository, "fox")) == 1
 
 
+def test_rebuild_regenerates_the_vector_table_without_orphan_shadow_tables(tmp_path):
+    """The vec0 counterpart of the FTS5 check above: `paragraph_vectors` is
+    dropped and recreated by name on every rebuild (#81; §42's "delete and
+    regenerate all derived state"), and its shadow tables must go with it -
+    a second and third rebuild leave exactly one set, and the rows are the
+    latest build's, not an accumulation."""
+    records = [_record("SRC-000001", ["The fox ran through the woods."])]
+    embed_fn = _fake_embed_fn(
+        {"The fox ran through the woods.": _basis_vector(0), "fox": _basis_vector(0)}
+    )
+    repository = Repository(root=tmp_path)
+    build_index(repository, records, embed_fn=embed_fn)
+    build_index(repository, records, embed_fn=embed_fn)
+    build_index(repository, records, embed_fn=embed_fn)
+
+    shadows = {
+        name for name in _tables(repository) if name.startswith("paragraph_vectors_")
+    }
+    assert shadows == {
+        "paragraph_vectors_chunks",
+        "paragraph_vectors_info",
+        "paragraph_vectors_rowids",
+        "paragraph_vectors_vector_chunks00",
+    }
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.enable_load_extension(True)
+    sqlite_vec.load(con)
+    con.enable_load_extension(False)
+    try:
+        assert con.execute("SELECT COUNT(*) FROM paragraph_vectors").fetchone()[0] == 1
+    finally:
+        con.close()
+    assert len(search_semantic(repository, "fox", embed_fn=embed_fn).results) == 1
+
+
 def test_build_index_no_longer_deletes_the_database_file(tmp_path):
     """The file is long-lived now, because the memo cache is in it."""
     from memoria.index import INDEX_RELATIVE_PATH
