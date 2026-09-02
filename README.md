@@ -142,6 +142,7 @@ compile error in `ui/`, not a runtime surprise nobody sees.
 .venv/bin/memoria rebuild --recurrence-threshold 3
 .venv/bin/memoria rebuild --reset-cache
 .venv/bin/memoria checkpoint
+.venv/bin/memoria seed-subjects
 ```
 
 `memoria validate` verifies that every raw file in the evidence corpus matches
@@ -218,6 +219,13 @@ untracked files or Derived state — as one commit under one `CHG-` id
 an AI write) writes to durable files, since that is the moment the dirty-tree
 rule stops shielding a file the author left uncommitted. On a clean tree it
 makes no commit and says so.
+
+`memoria seed-subjects` writes the five built-in subjects (People, Timeline,
+Events, Themes, Arcs) into the repository's `subjects/` tree and prints what
+it wrote. It never overwrites a subject prompt that already exists — an
+author's edits to a built-in subject are theirs to keep — so it is safe to
+run again against a repository that already has some or all of them; on a
+repository that has all five it writes nothing and says so.
 
 Use `memoria.index.search(repository, query, filters)` to query the index —
 it takes the frozen `Repository` value, like every other core read (ADR-0004).
