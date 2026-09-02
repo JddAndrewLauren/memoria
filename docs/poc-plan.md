@@ -180,7 +180,13 @@ nothing for it. The hook now also denies Read/Grep/Glob under this repo's own
 `sources/normalized/` and `.memoria/`, whether or not an evidence corpus is
 configured, and is registered for Bash too: a command whose text names
 `sources/normalized`, `.memoria/`, or the evidence root is denied by exact-string
-containment, no attempt at shell parsing. A determined rewrite of the command text
+containment. Three things are dropped from that text before the match (#118), each
+a false positive: the project's own `memoria` CLI, whose sanctioned invocation
+carries the evidence root in an inline `VAR=value` prefix; the message and body
+arguments of `git`/`gh`, because writing *about* a path is not reading it; and a
+`grep` pattern, which is what is searched for rather than where. That is the only
+shell parsing the router does, it can only narrow a match, and a command carrying
+shell operators is matched raw. A determined rewrite of the command text
 can still get past that; accepted — the goal remains that the logged path is the
 path of least resistance, not that evasion is impossible.
 

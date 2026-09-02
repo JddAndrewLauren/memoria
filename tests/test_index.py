@@ -359,6 +359,46 @@ def test_a_non_email_record_does_not_match_a_from_or_to_filter(tmp_path):
     assert search(repository, "fox", SearchFilters(to="scholtes")) == []
 
 
+def test_an_empty_from_or_to_filter_is_no_filter_rather_than_a_match_all(tmp_path):
+    """`INSTR(x, "") > 0` is true of every non-null `x`, so an empty header
+    filter used to sweep in every record that merely *has* that header - a
+    silently wrong answer to "who wrote to Scholtes?". An empty string is
+    treated like `None`: no clause at all, so the result is the unfiltered
+    one, non-email record included."""
+    records = [
+        _record(
+            "SRC-000023",
+            ["A message about a heron."],
+            email_from="Dave Perrino <dperrino@example.com>",
+            email_to="Diana Scholtes <dscholtes@example.com>",
+        ),
+        _record("SRC-000024", ["A heron by the pond, no email header."]),
+    ]
+    repository = _index(tmp_path, records)
+
+    unfiltered = sorted(r.src_id for r in search(repository, "heron"))
+    assert unfiltered == ["SRC-000023", "SRC-000024"]
+
+    for filters in (
+        SearchFilters(from_=""),
+        SearchFilters(to=""),
+        SearchFilters(from_="", to=""),
+    ):
+        hits = search(repository, "heron", filters)
+        assert sorted(r.src_id for r in hits) == unfiltered
+
+
+def test_an_empty_header_filter_adds_no_clause_to_the_predicate():
+    """The predicate builder is the one place the rule lives (#74/#81 join
+    the same table through it), so an empty header filter must produce no
+    SQL at all rather than a clause that happens to match everything."""
+    assert filter_predicate(SearchFilters(from_="", to="")) == ("", [])
+
+    sql, params = filter_predicate(SearchFilters(from_="", to="scholtes"))
+    assert sql == "INSTR(LOWER(paragraphs.email_to), LOWER(?)) > 0"
+    assert params == ["scholtes"]
+
+
 def test_filter_predicate_is_reusable_by_a_query_that_is_not_fts5(tmp_path):
     """#74 joins cluster membership, #81 joins a vector search - neither is
     an FTS5 query. The same predicate builder must serve a plain SELECT

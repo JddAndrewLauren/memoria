@@ -1363,6 +1363,25 @@ def _materialize(
 ) -> Promotion:
     """Write one entry file through the durable write path, and commit it."""
     entry_id = f"{subject_id}/{slug}"
+    # An ``entry_slug`` reaches promotion straight from the author's tool
+    # call, so it bypasses ``entry_slug_for`` - and a subject_id does the
+    # same on a cluster promotion. Neither may write an id ``parse_entry``
+    # will refuse to read back (#119): the archive must not accept a write it
+    # cannot serve. ``classify_match_term`` applies the one
+    # ``SUB-<subject>/<entry>`` rule the read side enforces, rather than a
+    # second copy of it here; it strips before matching, so a slug that is
+    # only padded is caught alongside it.
+    try:
+        kind = classify_match_term(entry_id)
+    except SubjectError:
+        kind = None
+    if kind != "entry" or entry_id.strip() != entry_id:
+        raise ExtractionError(
+            f"cannot promote to {entry_id!r}: an entry id must be of the "
+            "form SUB-<subject>/<entry-slug>, with lowercase slugs. Promote "
+            "under a slug of that shape, or leave the slug unset and let the "
+            "label decide it."
+        )
     relative_path = f"subjects/{subject_id[len('SUB-'):]}/{slug}.md"
     content = entry_to_markdown(
         Entry(id=entry_id, match_terms=list(match_terms), body="")

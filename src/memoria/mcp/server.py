@@ -158,8 +158,8 @@ def read(ref: str, raw: bool = False) -> str:
 
     `raw=True`, for a bare record ID only, serves the pre-normalization
     original behind that record instead - the file the normalizer read, not
-    what it produced. Refused for anything else, and for a binary original
-    (docx, pdf) rather than handed back as bytes.
+    what it produced. Refused for anything else, and for an original that
+    does not decode as UTF-8, rather than handed back as bytes.
 
     Reference kinds the archive defines but this build does not resolve yet -
     SES-, CHG-, CLM-, RES-, DEC- - return an error naming the kind.

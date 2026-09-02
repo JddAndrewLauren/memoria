@@ -700,3 +700,42 @@ def test_raw_refuses_a_binary_original_naming_its_type(tmp_path):
 
     with pytest.raises(ReadError, match=r"\.docx"):
         read(repository, "SRC-000184", raw=True)
+
+
+def test_raw_over_an_unresolvable_reference_names_the_reference(tmp_path):
+    """The reference is judged before the raw capability is (#113 review).
+
+    `SES-` resolves to no kind here, so that - not the raw refusal - is what
+    the caller has to fix first.
+    """
+    with pytest.raises(ReadError) as caught:
+        read(_repo(tmp_path), "SES-20260912-1432", raw=True)
+
+    assert "not resolvable in this build yet" in str(caught.value)
+    assert "raw only serves" not in str(caught.value)
+
+
+def test_raw_over_an_unknown_kind_names_the_kind(tmp_path):
+    with pytest.raises(ReadError, match="unknown reference kind FOO-"):
+        read(_repo(tmp_path), "FOO-0001", raw=True)
+
+
+def test_raw_refuses_a_non_utf8_text_original_without_calling_it_binary(tmp_path):
+    """A latin-1 .txt is text, just not UTF-8 - say that (#113 review)."""
+    write_normalized_records(
+        [_record(original_file="raw/vol-01/letter.txt")],
+        tmp_path / NORMALIZED_RELATIVE_PATH,
+    )
+    evidence_root = tmp_path / "evidence"
+    (evidence_root / "raw" / "vol-01").mkdir(parents=True)
+    (evidence_root / "raw" / "vol-01" / "letter.txt").write_bytes(
+        "A caf\N{LATIN SMALL LETTER E WITH ACUTE} in Concord.\n".encode("latin-1")
+    )
+    repository = Repository(root=tmp_path, evidence_root=evidence_root)
+
+    with pytest.raises(ReadError) as caught:
+        read(repository, "SRC-000184", raw=True)
+
+    message = str(caught.value)
+    assert "does not decode as UTF-8" in message
+    assert "text in another encoding" in message

@@ -280,9 +280,12 @@ The original is what grep could have found before a normalizer ever ran, so
 serving it is part of the superset-of-grep constraint, not an exception to
 it (#113).
 
-A binary original (docx, pdf) is refused too, naming its type, rather than
+An original that does not decode as UTF-8 is refused too, rather than
 handed back as bytes: the payload here is text, and a `.docx`'s raw bytes
 returned as if they were text would be worse than `cat`, not equal to it.
+The refusal names the file and its suffix and says what it could not do —
+it does not claim the file is binary, since a `.txt` in another encoding
+lands in the same branch.
 Without `MEMORIA_EVIDENCE_ROOT` configured, a raw read fails with the same
 `NoEvidenceRoot` message every other evidence read gives.
 
@@ -358,7 +361,11 @@ something to filter on at M1:
 - `to` — case-insensitive substring match against the record's verbatim
   `to` header string, same reason
 
-All six are optional and compose (ANDed together). `record class` is not a
+All six are optional and compose (ANDed together). An **empty string is not a
+filter** — `from_=""` and `to=""` are treated exactly like `None`, because
+`INSTR(x, "")` is true of every non-null value, so an empty header filter
+would otherwise return every record that merely *has* that header (218 of 375
+on the real index) and present it as the answer to a narrower question. `record class` is not a
 filter: §26 lists it only as a *potential* one, and nothing defines it in
 `docs/normalized-record-schema.md` or on `NormalizedRecord`. Dates have no
 sortable value in the schema (`date_confidence` runs `exact` … `unresolved`
@@ -376,6 +383,12 @@ string filter: half the correspondents in a real export are bare display
 names in mixed order, sometimes both ways in the same header, so resolving
 "Dave Perrino" to a person is entry match-term work, and these filters never
 attempt it — they match the verbatim string.
+
+They are reachable through the core (`memoria.index.search`) and the MCP tool
+(`search_text`) only. #64's web route still enumerates the original four query
+params — `event_date`, `recorded_date`, `source_type`, `contemporaneous` — and
+passes no `from_`/`to`; carrying them across that boundary belongs to #64, not
+#111.
 
 The filter values live in a plain (non-FTS) table keyed by paragraph anchor —
 `paragraphs(anchor, src_id, source_type, event_date, recorded_date,

@@ -343,3 +343,29 @@ def test_read_raw_source_refuses_a_binary_original_naming_its_type(tmp_path):
 
     with pytest.raises(ReadError, match=r"\.docx"):
         read_raw_source(repository, "SRC-000184")
+
+
+def test_read_raw_source_refuses_a_non_utf8_text_original_honestly(tmp_path):
+    """Not every decode failure is a binary file (#113 review).
+
+    A latin-1 encoded `.txt` is refused - the payload here is UTF-8 text -
+    but the refusal must not call it binary, which would send the caller
+    after a file type problem it does not have.
+    """
+    evidence_root = tmp_path / "evidence"
+    (evidence_root / "raw" / "vol-01").mkdir(parents=True)
+    original = evidence_root / "raw" / "vol-01" / "letter.txt"
+    original.write_bytes(
+        "A caf\N{LATIN SMALL LETTER E WITH ACUTE} in Concord.\n".encode("latin-1")
+    )
+
+    repository = _write(tmp_path, _record(original_file="raw/vol-01/letter.txt"))
+    repository = Repository(root=repository.root, evidence_root=evidence_root)
+
+    with pytest.raises(ReadError) as caught:
+        read_raw_source(repository, "SRC-000184")
+
+    message = str(caught.value)
+    assert "raw/vol-01/letter.txt" in message
+    assert "does not decode as UTF-8" in message
+    assert "text in another encoding" in message
