@@ -45,6 +45,11 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
     enabled: open && trimmed.length > 0,
   });
   const { evidence, editorial } = splitSearchResultsByLayer(searchData?.results ?? []);
+  // #157: no hits over an index that was never built is a different fact
+  // from no hits over one that was, and the empty list is the same either
+  // way. Guarded on the response having landed, so an in-flight query does
+  // not flash "not built" before the answer arrives.
+  const indexUnbuilt = searchData && !searchData.is_built ? INDEX_UNBUILT : undefined;
 
   const { data: subjectsData, isError: subjectsIsError } = useQuery({
     queryKey: ["subjects"],
@@ -52,6 +57,10 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
     enabled: open,
   });
   const subjects = subjectsData?.items ?? [];
+  // The subjects group reads the *subjects* facet, not the index: entry hits
+  // are computed here from listSubjects/listEntries and never touch
+  // /api/search, so an unbuilt index says nothing about them (#157).
+  const subjectsUnseeded = subjectsData && !subjectsData.is_built ? SUBJECTS_UNSEEDED : undefined;
   const entryQueries = useQueries({
     queries: subjects.map((subject) => ({
       queryKey: ["entries", subject.id],
@@ -101,6 +110,7 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
               tone="sources"
               count={evidence.length}
               empty="No matching evidence."
+              unbuilt={indexUnbuilt}
               isError={searchIsError}
               error="Search could not be completed."
             >
@@ -133,6 +143,7 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
                 tone="amber"
                 count={editorial.length}
                 empty="No matching editorial commentary."
+                unbuilt={indexUnbuilt}
                 isError={searchIsError}
                 error="Search could not be completed."
               >
@@ -154,6 +165,7 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
               tone="subjects"
               count={entryHits.length}
               empty="No matching entries."
+              unbuilt={subjectsUnseeded}
               isError={entriesIsError}
               error="Subjects could not be searched."
             >
@@ -174,11 +186,18 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
   );
 }
 
+// The two things a group says when it has nothing to show and the reason is
+// not "nothing matched" - module-level so the sources and editorial groups
+// cannot drift apart, since one index backs both layers.
+const INDEX_UNBUILT = "The index is not built. Run `memoria rebuild`.";
+const SUBJECTS_UNSEEDED = "No subjects yet. Run `memoria seed-subjects`.";
+
 function ResultGroup({
   label,
   tone,
   count,
   empty,
+  unbuilt,
   isError,
   error,
   children,
@@ -187,6 +206,9 @@ function ResultGroup({
   tone: "sources" | "subjects" | "amber";
   count: number;
   empty: string;
+  /** Shown instead of `empty` when the facet behind this group was never
+   * built (#157) - undefined when it was, so the normal copy is untouched. */
+  unbuilt?: string;
   isError: boolean;
   error: string;
   children: React.ReactNode;
@@ -200,6 +222,8 @@ function ResultGroup({
       </div>
       {isError ? (
         <p className="px-2 pb-2 text-xs text-muted">{error}</p>
+      ) : unbuilt ? (
+        <p className="px-2 pb-2 text-xs text-muted">{unbuilt}</p>
       ) : count === 0 ? (
         <p className="px-2 pb-2 text-xs text-muted">{empty}</p>
       ) : (

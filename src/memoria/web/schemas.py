@@ -77,12 +77,23 @@ class SourceDetail(SourceSummary):
 
 
 class SourceListResponse(BaseModel):
-    """A page of ``list sources`` - paginated, per the acceptance criterion."""
+    """A page of ``list sources`` - paginated, per the acceptance criterion.
+
+    ``is_built`` is whether ``memoria normalize`` has produced anything here
+    (``memoria.records.is_normalized``). It is what makes an empty ``items``
+    readable: empty and ``false`` is an un-normalized checkout and the client
+    should name the command to run; empty and ``true`` is a corpus that
+    genuinely holds no sources. ADR-0004's "the empty corpus becomes a
+    value" - this is the part of the value that says which state it is in
+    (#157). The same field name appears on ``SubjectListResponse`` and
+    ``SearchResponse``, each reporting its own build step.
+    """
 
     items: list[SourceSummary]
     total: int
     limit: int
     offset: int
+    is_built: bool
 
 
 class RawSourceResponse(BaseModel):
@@ -167,7 +178,18 @@ class SubjectSummary(BaseModel):
 
 
 class SubjectListResponse(BaseModel):
+    """The `SUBJECTS` tree's top level.
+
+    ``is_built`` is whether ``memoria seed-subjects`` has run
+    (``memoria.subjects.is_seeded``) - the same field, and the same
+    distinction, as ``SourceListResponse.is_built``, reporting a different
+    build step (#157). It reports the ``subjects/`` directory's existence
+    rather than its contents, so a directory holding no subject prompts
+    reads as built-and-empty; ``is_seeded`` records why.
+    """
+
     items: list[SubjectSummary]
+    is_built: bool
 
 
 class EntrySummary(BaseModel):
@@ -179,6 +201,13 @@ class EntrySummary(BaseModel):
 
 
 class EntryListResponse(BaseModel):
+    """One subject's entries, for the `SUBJECTS` tree's second level.
+
+    Carries no ``is_built``, and the omission is a decision rather than an
+    oversight (#157): a subject that exists with no entries is genuinely
+    empty. There is no third state to report, so there is no flag.
+    """
+
     items: list[EntrySummary]
 
 
@@ -210,4 +239,15 @@ class SearchResultOut(BaseModel):
 
 
 class SearchResponse(BaseModel):
+    """A page of hits.
+
+    ``is_built`` is whether ``memoria rebuild`` has produced an index
+    (``memoria.index.is_built``) - the same field as on
+    ``SourceListResponse`` and ``SubjectListResponse``, reporting the third
+    build step (#157). No results with ``is_built`` false means the corpus
+    was never indexed, which is a different fact from nothing matching, and
+    the two are the same empty list without it.
+    """
+
     results: list[SearchResultOut]
+    is_built: bool

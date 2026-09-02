@@ -176,15 +176,40 @@ def test_list_sources_is_paginated(tmp_path):
     assert body["offset"] == 1
 
 
-def test_list_sources_over_an_un_normalized_checkout_is_an_empty_list(tmp_path):
-    """An honest empty state, not an error (#64's acceptance criteria)."""
+def test_list_sources_over_an_un_normalized_checkout_says_it_is_not_built(tmp_path):
+    """An honest empty state, not an error (#64's acceptance criteria) - and
+    since #157 one that says which empty it is, so the client can name the
+    command to run rather than guess."""
     repository = _repo(tmp_path)
     client = _client(repository)
 
     response = client.get("/api/sources")
 
     assert response.status_code == 200
-    assert response.json() == {"items": [], "total": 0, "limit": 50, "offset": 0}
+    assert response.json() == {
+        "items": [],
+        "total": 0,
+        "limit": 50,
+        "offset": 0,
+        "is_built": False,
+    }
+
+
+def test_list_sources_over_a_normalized_corpus_that_holds_no_records_says_it_is_built(
+    tmp_path,
+):
+    """The other half of #157: `memoria normalize` ran and produced nothing.
+
+    Indistinguishable from the test above without the flag - both are an
+    empty `items` - and a different thing to tell the author.
+    """
+    (tmp_path / NORMALIZED_RELATIVE_PATH).mkdir(parents=True)
+    client = _client(Repository(root=tmp_path))
+
+    body = client.get("/api/sources").json()
+
+    assert body["items"] == []
+    assert body["is_built"] is True
 
 
 # --- read one source -----------------------------------------------------
@@ -421,14 +446,28 @@ def test_search_filters_compose(tmp_path):
     assert ids == {"SRC-000001"}
 
 
-def test_search_over_an_unbuilt_index_returns_no_results_not_an_error(tmp_path):
+def test_search_over_an_unbuilt_index_says_the_index_is_not_built(tmp_path):
     repository = _repo(tmp_path)
     client = _client(repository)
 
     response = client.get("/api/search", params={"q": "anything"})
 
     assert response.status_code == 200
-    assert response.json() == {"results": []}
+    assert response.json() == {"results": [], "is_built": False}
+
+
+def test_search_over_a_built_index_with_no_matches_says_the_index_is_built(tmp_path):
+    """"Never indexed" and "nothing matched" are the same empty list and
+    different facts (#157)."""
+    repository = _indexed(tmp_path, [_record()])
+    client = _client(repository)
+
+    body = client.get(
+        "/api/search", params={"q": "wordthatappearsnowhere"}
+    ).json()
+
+    assert body["results"] == []
+    assert body["is_built"] is True
 
 
 # --- subjects and entries ---------------------------------------------------
@@ -461,16 +500,39 @@ def test_list_subjects_returns_the_five_builtins_with_computed_entry_counts(tmp_
     assert other["entry_count"] == 0
 
 
-def test_list_subjects_over_an_unseeded_repository_is_an_empty_list(tmp_path):
+def test_list_subjects_over_an_unseeded_repository_says_it_is_not_seeded(tmp_path):
     """No `memoria seed-subjects` run yet - honest empty state, not an
-    error (#24's acceptance criteria)."""
+    error (#24's acceptance criteria), and one that says so (#157)."""
     repository = Repository(root=tmp_path)
     client = _client(repository)
 
     response = client.get("/api/subjects")
 
     assert response.status_code == 200
-    assert response.json() == {"items": []}
+    assert response.json() == {"items": [], "is_built": False}
+
+
+def test_list_subjects_over_a_seeded_repository_says_it_is_built(tmp_path):
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    client = _client(repository)
+
+    body = client.get("/api/subjects").json()
+
+    assert body["is_built"] is True
+
+
+def test_list_entries_carries_no_build_signal(tmp_path):
+    """A subject that exists with no entries is genuinely empty - there is
+    no third state, so `EntryListResponse` carries no flag (#157). Pinned so
+    the omission reads as a decision rather than an oversight."""
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    client = _client(repository)
+
+    body = client.get("/api/subjects/SUB-timeline/entries").json()
+
+    assert body == {"items": []}
 
 
 def test_list_entries_returns_one_subjects_entries_with_match_terms(tmp_path):

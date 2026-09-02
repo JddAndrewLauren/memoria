@@ -161,7 +161,8 @@ export interface paths {
          *     entry count computed from the entries actually there (#24) - an
          *     un-seeded repository (`memoria seed-subjects` never run) is an empty
          *     list, not an error, the same honesty ``list_sources`` keeps for an
-         *     un-normalized one.
+         *     un-normalized one - and since #157 an empty list that says which of the
+         *     two it is, in ``is_built``.
          */
         get: operations["list_subjects_api_subjects_get"];
         put?: never;
@@ -212,6 +213,10 @@ export interface paths {
          *     does not: the search dialog draws a fragment per hit (part 19 §19.8) and
          *     the core computes it, so the adapter still opens no database and reads no
          *     evidence. It is a locator, not evidence - #95.
+         *
+         *     ``is_built`` reports whether the index exists at all (#157), so a client
+         *     can tell "never indexed" from "nothing matched" - the same empty list
+         *     otherwise.
          */
         get: operations["search_api_search_get"];
         put?: never;
@@ -277,7 +282,14 @@ export interface components {
             /** Text */
             text: string;
         };
-        /** EntryListResponse */
+        /**
+         * EntryListResponse
+         * @description One subject's entries, for the `SUBJECTS` tree's second level.
+         *
+         *     Carries no ``is_built``, and the omission is a decision rather than an
+         *     oversight (#157): a subject that exists with no entries is genuinely
+         *     empty. There is no third state to report, so there is no flag.
+         */
         EntryListResponse: {
             /** Items */
             items: components["schemas"]["EntrySummary"][];
@@ -365,10 +377,22 @@ export interface components {
             /** Opened */
             opened: boolean;
         };
-        /** SearchResponse */
+        /**
+         * SearchResponse
+         * @description A page of hits.
+         *
+         *     ``is_built`` is whether ``memoria rebuild`` has produced an index
+         *     (``memoria.index.is_built``) - the same field as on
+         *     ``SourceListResponse`` and ``SubjectListResponse``, reporting the third
+         *     build step (#157). No results with ``is_built`` false means the corpus
+         *     was never indexed, which is a different fact from nothing matching, and
+         *     the two are the same empty list without it.
+         */
         SearchResponse: {
             /** Results */
             results: components["schemas"]["SearchResultOut"][];
+            /** Is Built */
+            is_built: boolean;
         };
         /**
          * SearchResultOut
@@ -441,6 +465,15 @@ export interface components {
         /**
          * SourceListResponse
          * @description A page of ``list sources`` - paginated, per the acceptance criterion.
+         *
+         *     ``is_built`` is whether ``memoria normalize`` has produced anything here
+         *     (``memoria.records.is_normalized``). It is what makes an empty ``items``
+         *     readable: empty and ``false`` is an un-normalized checkout and the client
+         *     should name the command to run; empty and ``true`` is a corpus that
+         *     genuinely holds no sources. ADR-0004's "the empty corpus becomes a
+         *     value" - this is the part of the value that says which state it is in
+         *     (#157). The same field name appears on ``SubjectListResponse`` and
+         *     ``SearchResponse``, each reporting its own build step.
          */
         SourceListResponse: {
             /** Items */
@@ -451,6 +484,8 @@ export interface components {
             limit: number;
             /** Offset */
             offset: number;
+            /** Is Built */
+            is_built: boolean;
         };
         /**
          * SourceSummary
@@ -478,10 +513,22 @@ export interface components {
             /** Original Locator */
             original_locator: string;
         };
-        /** SubjectListResponse */
+        /**
+         * SubjectListResponse
+         * @description The `SUBJECTS` tree's top level.
+         *
+         *     ``is_built`` is whether ``memoria seed-subjects`` has run
+         *     (``memoria.subjects.is_seeded``) - the same field, and the same
+         *     distinction, as ``SourceListResponse.is_built``, reporting a different
+         *     build step (#157). It reports the ``subjects/`` directory's existence
+         *     rather than its contents, so a directory holding no subject prompts
+         *     reads as built-and-empty; ``is_seeded`` records why.
+         */
         SubjectListResponse: {
             /** Items */
             items: components["schemas"]["SubjectSummary"][];
+            /** Is Built */
+            is_built: boolean;
         };
         /**
          * SubjectSummary

@@ -13,8 +13,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from memoria.index import SearchFilters
+from memoria.index import is_built as index_is_built
 from memoria.index import search as search_index
 from memoria.records import NormalizedRecord, Read, ReadError
+from memoria.records import is_normalized
 from memoria.records import list_sources as list_sources_core
 from memoria.records import load as load_source
 from memoria.records import read as read_ref
@@ -22,7 +24,7 @@ from memoria.records import read_raw_source as read_raw_source_core
 from memoria.records import real_paragraphs
 from memoria.records import reveal_original_source as reveal_original_source_core
 from memoria.repository import NoEvidenceRoot, Repository
-from memoria.subjects import load_all_entries, load_all_subjects
+from memoria.subjects import is_seeded, load_all_entries, load_all_subjects
 from memoria.web.dependencies import get_repository
 from memoria.web.schemas import (
     CitationOut,
@@ -103,6 +105,7 @@ def list_sources(
         total=len(records),
         limit=limit,
         offset=offset,
+        is_built=is_normalized(repository),
     )
 
 
@@ -211,7 +214,8 @@ def list_subjects(repository: Repository = Depends(get_repository)) -> SubjectLi
     entry count computed from the entries actually there (#24) - an
     un-seeded repository (`memoria seed-subjects` never run) is an empty
     list, not an error, the same honesty ``list_sources`` keeps for an
-    un-normalized one.
+    un-normalized one - and since #157 an empty list that says which of the
+    two it is, in ``is_built``.
     """
     subjects = load_all_subjects(repository)
     counts: dict[str, int] = {}
@@ -222,7 +226,8 @@ def list_subjects(repository: Repository = Depends(get_repository)) -> SubjectLi
         items=[
             SubjectSummary(id=subject.id, entry_count=counts.get(subject.id, 0))
             for subject in subjects
-        ]
+        ],
+        is_built=is_seeded(repository),
     )
 
 
@@ -263,6 +268,10 @@ def search(
     does not: the search dialog draws a fragment per hit (part 19 §19.8) and
     the core computes it, so the adapter still opens no database and reads no
     evidence. It is a locator, not evidence - #95.
+
+    ``is_built`` reports whether the index exists at all (#157), so a client
+    can tell "never indexed" from "nothing matched" - the same empty list
+    otherwise.
     """
     filters = SearchFilters(
         event_date=event_date,
@@ -280,5 +289,6 @@ def search(
                 snippet=result.snippet,
             )
             for result in results
-        ]
+        ],
+        is_built=index_is_built(repository),
     )
