@@ -250,6 +250,14 @@ def test_classify_match_term_rejects_a_relation_not_between_two_entries():
         classify_match_term("Bob -> pressures -> SUB-people/author")
 
 
+def test_classify_match_term_rejects_an_unspaced_relation_as_a_relation():
+    # Missing the required spaces around "->" - diagnosed as a malformed
+    # relation, not a malformed entry reference, even though the left side
+    # alone would otherwise look like one (issue #91).
+    with pytest.raises(SubjectError, match="relation"):
+        classify_match_term("SUB-people/bob->pressures->SUB-people/author")
+
+
 def test_parse_entry_rejects_a_malformed_match_term():
     text = entry_to_markdown(_entry(match_terms=["SUB-People/Bob"]))
     with pytest.raises(SubjectError, match="entry"):
