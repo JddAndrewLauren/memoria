@@ -193,6 +193,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/subjects/{subject_id}/entries/{entry_slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Entry
+         * @description One entry read whole - #64's third subject read, built here (#157).
+         *
+         *     Resolves an entry whose file has been renamed: ``load_entry`` reads
+         *     through ``find_entry_path``, which falls back to matching the
+         *     frontmatter ``id``, so #16's stable ``SUB-x/y`` IDs survive a rename on
+         *     disk and this route inherits that without repeating it.
+         *
+         *     One ``except`` covers every 404 the read has, because the core raises
+         *     for all three: an unknown subject, an unknown entry, and a
+         *     ``subject_id`` that is not a subject ID at all.
+         *
+         *     ``extra`` is not served - it exists so a rewrite does not drop an
+         *     unmodelled frontmatter key, not to be published (``EntryDetail``).
+         */
+        get: operations["read_entry_api_subjects__subject_id__entries__entry_slug__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/search": {
         parameters: {
             query?: never;
@@ -244,6 +276,13 @@ export interface components {
          *     ``memoria.records.read`` exactly - the same core function the MCP tool
          *     surface calls - so this is the one generic reference read the viewer has,
          *     never a second one duplicating ``/sources/{id}``.
+         *
+         *     ``EntryDetail`` is **not** a second copy of this for entries, and the two
+         *     are not collapsible (#157). Reading ``SUB-x/y`` here serves the entry's
+         *     raw text for the panel and nothing else - no ``match_terms``, no badges,
+         *     no curated overlay. The entry read serves the entry's own shape. Both
+         *     exist because they answer different questions, and #25's one generic
+         *     reference read stays exactly as it is.
          */
         CitationOut: {
             /** Ref */
@@ -281,6 +320,34 @@ export interface components {
             linked_anchor: string;
             /** Text */
             text: string;
+        };
+        /**
+         * EntryDetail
+         * @description One entry read whole - #64's third subject read, built here (#157).
+         *
+         *     ``statements`` is the body split by ``memoria.subjects.parse_statements``:
+         *     Memoria's badged statements and the author's unbadged testimony are
+         *     shared territory in the same body (part 06 §8.2), and splitting them is
+         *     what keeps them distinguishable rather than merely visually different.
+         *
+         *     Neither ``extra`` nor the raw ``body`` is here. ``extra`` exists so a
+         *     rewrite does not drop an unmodelled frontmatter key (``Entry.extra``),
+         *     not to be published; the parsed statements are the served form of the
+         *     body, and a client that wants the markdown is asking for the file rather
+         *     than for the entry.
+         */
+        EntryDetail: {
+            /** Id */
+            id: string;
+            /** Match Terms */
+            match_terms: string[];
+            /** Statements */
+            statements: components["schemas"]["StatementOut"][];
+            /**
+             * Overlay
+             * @default []
+             */
+            overlay: components["schemas"]["OverlayActOut"][];
         };
         /**
          * EntryListResponse
@@ -323,6 +390,33 @@ export interface components {
         LocalityOut: {
             /** Is Local */
             is_local: boolean;
+        };
+        /**
+         * OverlayActOut
+         * @description One pin or exclusion recorded on an entry (#157's entry read).
+         *
+         *     **Not ``ReadOverlayOut``**, which sits a few models above under a
+         *     confusingly similar name and is a different concept: that one mirrors
+         *     ``memoria.index.ReadOverlay`` and carries the
+         *     ``entry_links``/``exclusions``/``citing_settlements`` a *paragraph* read
+         *     is decorated with (#20). This one is an attributable author act stored
+         *     on the entry file itself - part 04 §42's "never regenerated", which
+         *     survives the index being deleted outright.
+         *
+         *     ``memoria.subjects.OverlayAct`` also carries ``actor_name`` and
+         *     ``actor_email``, and they are deliberately not served. The act stays
+         *     fully attributable on disk, which is what §42 requires; nothing in the
+         *     client attributes a pin to a person, and ADR-0002 forbids assuming the
+         *     browser and the repository share a machine, so an address crossing this
+         *     boundary would be a liability with no consumer.
+         */
+        OverlayActOut: {
+            /** Anchor */
+            anchor: string;
+            /** Action */
+            action: string;
+            /** At */
+            at: string;
         };
         /**
          * Paragraph
@@ -512,6 +606,25 @@ export interface components {
             original_file: string;
             /** Original Locator */
             original_locator: string;
+        };
+        /**
+         * StatementOut
+         * @description One paragraph of an entry body, with its badge if it has one -
+         *     mirrors ``memoria.subjects.Statement`` field for field.
+         *
+         *     ``badge`` is ``None`` for author testimony, and that is not a missing
+         *     value: **the absence of a badge is the attribution** (part 06 §9.5),
+         *     which is why it is a nullable field on the shape rather than an omitted
+         *     key. A response that dropped it would not be serving the entry.
+         *     Non-null values are ``author``, ``source``, ``inferred`` and ``open``; a
+         *     client renders whatever value is present rather than assuming that list
+         *     is closed, the same posture ``SourceSummary.source_type`` takes.
+         */
+        StatementOut: {
+            /** Badge */
+            badge?: string | null;
+            /** Text */
+            text: string;
         };
         /**
          * SubjectListResponse
@@ -783,6 +896,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EntryListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_entry_api_subjects__subject_id__entries__entry_slug__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subject_id: string;
+                entry_slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntryDetail"];
                 };
             };
             /** @description Validation Error */

@@ -155,6 +155,13 @@ class CitationOut(BaseModel):
     ``memoria.records.read`` exactly - the same core function the MCP tool
     surface calls - so this is the one generic reference read the viewer has,
     never a second one duplicating ``/sources/{id}``.
+
+    ``EntryDetail`` is **not** a second copy of this for entries, and the two
+    are not collapsible (#157). Reading ``SUB-x/y`` here serves the entry's
+    raw text for the panel and nothing else - no ``match_terms``, no badges,
+    no curated overlay. The entry read serves the entry's own shape. Both
+    exist because they answer different questions, and #25's one generic
+    reference read stays exactly as it is.
     """
 
     ref: str
@@ -209,6 +216,66 @@ class EntryListResponse(BaseModel):
     """
 
     items: list[EntrySummary]
+
+
+class StatementOut(BaseModel):
+    """One paragraph of an entry body, with its badge if it has one -
+    mirrors ``memoria.subjects.Statement`` field for field.
+
+    ``badge`` is ``None`` for author testimony, and that is not a missing
+    value: **the absence of a badge is the attribution** (part 06 §9.5),
+    which is why it is a nullable field on the shape rather than an omitted
+    key. A response that dropped it would not be serving the entry.
+    Non-null values are ``author``, ``source``, ``inferred`` and ``open``; a
+    client renders whatever value is present rather than assuming that list
+    is closed, the same posture ``SourceSummary.source_type`` takes.
+    """
+
+    badge: str | None = None
+    text: str
+
+
+class OverlayActOut(BaseModel):
+    """One pin or exclusion recorded on an entry (#157's entry read).
+
+    **Not ``ReadOverlayOut``**, which sits a few models above under a
+    confusingly similar name and is a different concept: that one mirrors
+    ``memoria.index.ReadOverlay`` and carries the
+    ``entry_links``/``exclusions``/``citing_settlements`` a *paragraph* read
+    is decorated with (#20). This one is an attributable author act stored
+    on the entry file itself - part 04 §42's "never regenerated", which
+    survives the index being deleted outright.
+
+    ``memoria.subjects.OverlayAct`` also carries ``actor_name`` and
+    ``actor_email``, and they are deliberately not served. The act stays
+    fully attributable on disk, which is what §42 requires; nothing in the
+    client attributes a pin to a person, and ADR-0002 forbids assuming the
+    browser and the repository share a machine, so an address crossing this
+    boundary would be a liability with no consumer.
+    """
+
+    anchor: str
+    action: str
+    at: str
+
+
+class EntryDetail(EntrySummary):
+    """One entry read whole - #64's third subject read, built here (#157).
+
+    ``statements`` is the body split by ``memoria.subjects.parse_statements``:
+    Memoria's badged statements and the author's unbadged testimony are
+    shared territory in the same body (part 06 §8.2), and splitting them is
+    what keeps them distinguishable rather than merely visually different.
+
+    Neither ``extra`` nor the raw ``body`` is here. ``extra`` exists so a
+    rewrite does not drop an unmodelled frontmatter key (``Entry.extra``),
+    not to be published; the parsed statements are the served form of the
+    body, and a client that wants the markdown is asking for the file rather
+    than for the entry.
+    """
+
+    statements: list[StatementOut]
+    overlay: list[OverlayActOut] = []
 
 
 class SearchResultOut(BaseModel):

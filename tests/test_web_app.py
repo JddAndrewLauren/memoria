@@ -24,7 +24,13 @@ from memoria.records import (
     write_normalized_records,
 )
 from memoria.repository import Repository
-from memoria.subjects import BUILTIN_SUBJECTS, Entry, entry_to_markdown, write_builtin_subjects
+from memoria.subjects import (
+    BUILTIN_SUBJECTS,
+    Entry,
+    OverlayAct,
+    entry_to_markdown,
+    write_builtin_subjects,
+)
 from memoria.web.app import create_app
 from memoria.web.schemas import SearchResultOut
 
@@ -558,6 +564,182 @@ def test_list_entries_for_an_unknown_subject_is_a_404(tmp_path):
 
     assert response.status_code == 404
     assert "SUB-nonexistent" in response.json()["detail"]
+
+
+# --- read one entry (#64's third subject read, built in #157) ---------------
+
+
+def test_read_one_entry_serves_its_id_match_terms_statements_and_overlay(tmp_path):
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    _write_entry(
+        tmp_path,
+        "people",
+        "bob",
+        match_terms=["Bob", "Robert"],
+        body="Bob kept the ledger.",
+        overlay=[
+            OverlayAct(
+                anchor="src-000184-p17",
+                action="pin",
+                actor_name="A Person",
+                actor_email="person@example.com",
+                at="2026-09-02T00:00:00Z",
+            )
+        ],
+    )
+    client = _client(repository)
+
+    body = client.get("/api/subjects/SUB-people/entries/bob").json()
+
+    assert body["id"] == "SUB-people/bob"
+    assert body["match_terms"] == ["Bob", "Robert"]
+    assert body["statements"] == [{"badge": None, "text": "Bob kept the ledger."}]
+    assert body["overlay"] == [
+        {"anchor": "src-000184-p17", "action": "pin", "at": "2026-09-02T00:00:00Z"}
+    ]
+
+
+def test_read_one_entry_serves_no_actor_identity(tmp_path):
+    """The act stays attributable on disk (part 04 §42); the author's name
+    and address do not cross the API - nothing renders them, and ADR-0002
+    forbids assuming the browser and the repository share a machine."""
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    _write_entry(
+        tmp_path,
+        "people",
+        "bob",
+        overlay=[
+            OverlayAct(
+                anchor="src-000184-p17",
+                action="exclude",
+                actor_name="A Person",
+                actor_email="person@example.com",
+                at="2026-09-02T00:00:00Z",
+            )
+        ],
+    )
+    client = _client(repository)
+
+    body = client.get("/api/subjects/SUB-people/entries/bob").json()
+
+    assert "actor_name" not in body["overlay"][0]
+    assert "actor_email" not in body["overlay"][0]
+    assert "person@example.com" not in client.get(
+        "/api/subjects/SUB-people/entries/bob"
+    ).text
+
+
+def test_read_one_entry_marks_author_testimony_with_a_null_badge(tmp_path):
+    """The absence of a badge *is* the attribution (part 06 §9.5), so it is
+    a null field rather than an omitted one - and a badged statement arrives
+    with its prefix stripped and the badge named."""
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    _write_entry(
+        tmp_path,
+        "people",
+        "bob",
+        body="Bob kept the ledger.\n\n[inferred] He may have kept two.",
+    )
+    client = _client(repository)
+
+    body = client.get("/api/subjects/SUB-people/entries/bob").json()
+
+    assert body["statements"] == [
+        {"badge": None, "text": "Bob kept the ledger."},
+        {"badge": "inferred", "text": "He may have kept two."},
+    ]
+
+
+def test_read_one_entry_serves_neither_extra_nor_the_raw_body(tmp_path):
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    _write_entry(
+        tmp_path,
+        "people",
+        "bob",
+        body="Bob kept the ledger.",
+        extra={"a_key_this_module_does_not_model": "kept on disk, not published"},
+    )
+    client = _client(repository)
+
+    body = client.get("/api/subjects/SUB-people/entries/bob").json()
+
+    assert "extra" not in body
+    assert "body" not in body
+
+
+def test_read_one_entry_resolves_a_file_that_has_been_renamed(tmp_path):
+    """#16's stable `SUB-x/y` IDs survive a rename on disk, and this route
+    inherits that from `load_entry` rather than repeating it."""
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    _write_entry(tmp_path, "people", "bob", body="Bob kept the ledger.")
+    (tmp_path / "subjects" / "people" / "bob.md").rename(
+        tmp_path / "subjects" / "people" / "robert.md"
+    )
+    client = _client(repository)
+
+    response = client.get("/api/subjects/SUB-people/entries/bob")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "SUB-people/bob"
+
+
+def test_read_one_entry_for_an_unknown_subject_is_a_404(tmp_path):
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    client = _client(repository)
+
+    response = client.get("/api/subjects/SUB-nonexistent/entries/bob")
+
+    assert response.status_code == 404
+    assert "SUB-nonexistent" in response.json()["detail"]
+
+
+def test_read_one_entry_for_an_unknown_entry_is_a_404(tmp_path):
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    _write_entry(tmp_path, "people", "bob")
+    client = _client(repository)
+
+    response = client.get("/api/subjects/SUB-people/entries/nobody")
+
+    assert response.status_code == 404
+    assert "nobody" in response.json()["detail"]
+
+
+def test_read_one_entry_serves_more_than_the_generic_reference_read(tmp_path):
+    """The two reads are not collapsible (#157).
+
+    `/api/read?ref=SUB-x/y` is the slide-over panel's read: the entry's raw
+    text, with `record`/`paragraph`/`overlay` all null and no match terms and
+    no badges. This test is what stops a later reader deleting one of them.
+    """
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    _write_entry(
+        tmp_path,
+        "people",
+        "bob",
+        match_terms=["Bob"],
+        body="[source] Bob kept the ledger.",
+    )
+    client = _client(repository)
+
+    citation = client.get("/api/read", params={"ref": "SUB-people/bob"}).json()
+    entry = client.get("/api/subjects/SUB-people/entries/bob").json()
+
+    assert citation["record"] is None
+    assert citation["paragraph"] is None
+    assert citation["overlay"] is None
+    assert "match_terms" not in citation
+    assert "statements" not in citation
+
+    assert entry["match_terms"] == ["Bob"]
+    assert entry["statements"] == [{"badge": "source", "text": "Bob kept the ledger."}]
 
 
 # --- serving the built ui/ client -------------------------------------------

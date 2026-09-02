@@ -1,6 +1,7 @@
-"""The HTTP surface #64, #24, #25 and #65 build: list sources, read one source,
-raw source, resolve a reference to a citation, search, list subjects, list one
-subject's entries - plus one connection fact (locality) and one action (reveal).
+"""The HTTP surface #64, #24, #25, #65 and #157 build: list sources, read one
+source, raw source, resolve a reference to a citation, search, list subjects,
+list one subject's entries, read one entry - plus one connection fact
+(locality) and one action (reveal).
 
 Each route calls ``memoria.*`` and shapes the result into a typed response
 model - it holds no rule the CLI or the MCP server does not, opens no
@@ -24,13 +25,22 @@ from memoria.records import read_raw_source as read_raw_source_core
 from memoria.records import real_paragraphs
 from memoria.records import reveal_original_source as reveal_original_source_core
 from memoria.repository import NoEvidenceRoot, Repository
-from memoria.subjects import is_seeded, load_all_entries, load_all_subjects
+from memoria.subjects import (
+    SubjectError,
+    is_seeded,
+    load_all_entries,
+    load_all_subjects,
+    load_entry,
+    parse_statements,
+)
 from memoria.web.dependencies import get_repository
 from memoria.web.schemas import (
     CitationOut,
+    EntryDetail,
     EntryListResponse,
     EntrySummary,
     LocalityOut,
+    OverlayActOut,
     Paragraph,
     RawSourceResponse,
     ReadOverlayOut,
@@ -40,6 +50,7 @@ from memoria.web.schemas import (
     SourceDetail,
     SourceListResponse,
     SourceSummary,
+    StatementOut,
     SubjectListResponse,
     SubjectSummary,
 )
@@ -246,6 +257,44 @@ def list_entries(
         if entry_id.split("/", 1)[0] == subject_id
     ]
     return EntryListResponse(items=items)
+
+
+@router.get("/subjects/{subject_id}/entries/{entry_slug}")
+def read_entry(
+    subject_id: str,
+    entry_slug: str,
+    repository: Repository = Depends(get_repository),
+) -> EntryDetail:
+    """One entry read whole - #64's third subject read, built here (#157).
+
+    Resolves an entry whose file has been renamed: ``load_entry`` reads
+    through ``find_entry_path``, which falls back to matching the
+    frontmatter ``id``, so #16's stable ``SUB-x/y`` IDs survive a rename on
+    disk and this route inherits that without repeating it.
+
+    One ``except`` covers every 404 the read has, because the core raises
+    for all three: an unknown subject, an unknown entry, and a
+    ``subject_id`` that is not a subject ID at all.
+
+    ``extra`` is not served - it exists so a rewrite does not drop an
+    unmodelled frontmatter key, not to be published (``EntryDetail``).
+    """
+    try:
+        entry = load_entry(repository, subject_id, entry_slug)
+    except SubjectError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return EntryDetail(
+        id=entry.id,
+        match_terms=entry.match_terms,
+        statements=[
+            StatementOut(badge=statement.badge, text=statement.text)
+            for statement in parse_statements(entry.body)
+        ],
+        overlay=[
+            OverlayActOut(anchor=act.anchor, action=act.action, at=act.at)
+            for act in entry.overlay
+        ],
+    )
 
 
 @router.get("/search")
