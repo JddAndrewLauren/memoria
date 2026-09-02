@@ -13,6 +13,9 @@ export type RawSourceResponse = components["schemas"]["RawSourceResponse"];
 export type SubjectSummary = components["schemas"]["SubjectSummary"];
 export type EntrySummary = components["schemas"]["EntrySummary"];
 export type SearchResultOut = components["schemas"]["SearchResultOut"];
+export type EditorialRecordOut = components["schemas"]["EditorialRecordOut"];
+export type ReadOverlayOut = components["schemas"]["ReadOverlayOut"];
+export type CitationOut = components["schemas"]["CitationOut"];
 
 class ApiError extends Error {
   constructor(
@@ -48,6 +51,13 @@ export function readSource(id: string): Promise<SourceDetail> {
 
 export function readRawSource(id: string): Promise<RawSourceResponse> {
   return get(`/api/sources/${encodeURIComponent(id)}/raw`);
+}
+
+// The slide-over citation panel's one read, in both directions (#25,
+// §19.9): a SRC- paragraph anchor or a SUB-x/y entry reference, either way
+// through the same generic `/api/read`.
+export function readRef(ref: string): Promise<CitationOut> {
+  return get(`/api/read?ref=${encodeURIComponent(ref)}`);
 }
 
 export function listSubjects(): Promise<{ items: SubjectSummary[] }> {

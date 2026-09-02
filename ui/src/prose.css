@@ -37,3 +37,21 @@
   text-align: right;
   user-select: none;
 }
+
+/* The cited paragraph (§19.4/§25): highlighted amber with an inset rule,
+   never a border - a border at the paragraph's own left edge would sit on
+   top of the anchor gutter above. Surrounding paragraphs dim, but stay
+   present - the citation is honest about which one it names, not about
+   hiding the rest of the record. */
+.prose.has-cited p:not(.cited) {
+  opacity: 0.65;
+}
+
+.prose p.cited {
+  border-radius: 4px;
+  background: var(--color-amber-tint-soft);
+  box-shadow: inset 3px 0 0 var(--color-amber);
+  padding-top: 0.4em;
+  padding-bottom: 0.4em;
+  opacity: 1;
+}

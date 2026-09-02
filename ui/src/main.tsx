@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import Home from "./routes/Home";
 import SourceDetailPage from "./routes/SourceDetailPage";
+import RawSourcePage from "./routes/RawSourcePage";
 import "./index.css";
 import "./prose.css";
 
@@ -23,6 +24,7 @@ ReactDOM.createRoot(rootElement).render(
           <Route path="/" element={<App />}>
             <Route index element={<Home />} />
             <Route path="sources/:id" element={<SourceDetailPage />} />
+            <Route path="sources/:id/raw" element={<RawSourcePage />} />
           </Route>
         </Routes>
       </BrowserRouter>

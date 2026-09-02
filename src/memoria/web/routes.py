@@ -13,19 +13,22 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from memoria.index import SearchFilters
 from memoria.index import search as search_index
-from memoria.records import NormalizedRecord, ReadError
+from memoria.records import NormalizedRecord, Read, ReadError
 from memoria.records import list_sources as list_sources_core
 from memoria.records import load as load_source
+from memoria.records import read as read_ref
 from memoria.records import read_raw_source as read_raw_source_core
 from memoria.records import real_paragraphs
 from memoria.repository import NoEvidenceRoot, Repository
 from memoria.subjects import load_all_entries, load_all_subjects
 from memoria.web.dependencies import get_repository
 from memoria.web.schemas import (
+    CitationOut,
     EntryListResponse,
     EntrySummary,
     Paragraph,
     RawSourceResponse,
+    ReadOverlayOut,
     SearchResponse,
     SearchResultOut,
     SourceDetail,
@@ -113,6 +116,45 @@ def raw_source(
     except (ReadError, NoEvidenceRoot) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return RawSourceResponse(text=raw.text, original_locator=raw.original_locator)
+
+
+def _to_citation(ref: str, result: Read) -> CitationOut:
+    return CitationOut(
+        ref=ref,
+        citation=result.citation,
+        text=result.text,
+        record=_to_summary(result.record) if result.record is not None else None,
+        paragraph=result.paragraph,
+        overlay=ReadOverlayOut(
+            entry_links=result.overlay.entry_links,
+            exclusions=result.overlay.exclusions,
+            citing_settlements=result.overlay.citing_settlements,
+        )
+        if result.overlay is not None
+        else None,
+    )
+
+
+@router.get("/read")
+def read(ref: str, repository: Repository = Depends(get_repository)) -> CitationOut:
+    """Resolve one reference - the slide-over citation panel's read (§19.9).
+
+    Wraps ``memoria.records.read`` exactly, the same composed core the MCP
+    tool surface's ``read(ref)`` calls: a ``SRC-`` paragraph anchor (a search
+    hit's or a paragraph's own ``anchor``) serves the cited text, its record
+    and its curated-overlay backlinks (#20); a ``SUB-x/y`` entry reference -
+    an overlay's own ``entry_links``/``exclusions`` - serves the entry's raw
+    text, so a backlink is clickable into the same panel in both directions
+    (#25's acceptance criteria) without a second read shape. Ledgering the
+    served read is the caller's job (``memoria.records.read``'s own
+    docstring) - this route never imports ``memoria.ledger``, so an author's
+    own read here writes nothing to ``events.jsonl``.
+    """
+    try:
+        result = read_ref(repository, ref)
+    except ReadError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _to_citation(ref, result)
 
 
 @router.get("/subjects")

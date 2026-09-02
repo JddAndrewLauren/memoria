@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
 import { listSubjects, listEntries, search } from "../api/client";
 import { splitSearchResultsByLayer } from "../lib/searchLayers";
 import { searchEntries } from "../lib/entrySearch";
 import { splitSnippet } from "../lib/snippet";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
+import { useCitationPanel } from "../lib/citationPanel";
 
 interface SearchDialogProps {
   open: boolean;
@@ -23,7 +23,7 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
   const [query, setQuery] = useState("");
   const [includeEditorial, setIncludeEditorial] = useState(false);
   const debouncedQuery = useDebouncedValue(query, 200);
-  const navigate = useNavigate();
+  const { open: openCitation } = useCitationPanel();
 
   useEffect(() => {
     if (!open) setQuery("");
@@ -109,7 +109,10 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
                   key={`${hit.src_id}-${hit.anchor}`}
                   hit={hit}
                   onSelect={() => {
-                    navigate(`/sources/${hit.src_id}`);
+                    // A citation chip's click, per §19.9: opens the
+                    // slide-over rather than navigating away, so checking a
+                    // hit never costs the reader their place.
+                    openCitation(hit.anchor);
                     onClose();
                   }}
                 />
@@ -138,7 +141,7 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
                     key={`${hit.src_id}-${hit.anchor}`}
                     hit={hit}
                     onSelect={() => {
-                      navigate(`/sources/${hit.src_id}`);
+                      openCitation(hit.anchor);
                       onClose();
                     }}
                   />
