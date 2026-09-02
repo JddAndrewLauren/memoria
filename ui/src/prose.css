@@ -1,0 +1,39 @@
+/* Hand-written, not utility classes: docs/adr/0002-ui-is-a-react-client.md
+   is explicit that the manuscript and source reading surfaces are
+   typographic work, not chrome - "Newsreader at 17.5px/1.75 on a 640px
+   measure, mono paragraph anchors in the margin" (§19.10, §19.4). Tailwind
+   styles everything around this text; nothing inside .prose is a utility
+   class. */
+
+.prose {
+  max-width: 640px;
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 1.75;
+  color: var(--color-body);
+}
+
+.prose p {
+  position: relative;
+  margin: 0 0 1.25em;
+  padding-left: 2.75em;
+}
+
+.prose p:last-child {
+  margin-bottom: 0;
+}
+
+/* The paragraph anchor, in the margin, mono - the stable locator a search
+   hit or a citation resolves to (`src-000184-p17`), never rendered as part
+   of the prose itself. */
+.prose .anchor {
+  position: absolute;
+  left: 0;
+  top: 0.1em;
+  width: 2.25em;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-faint);
+  text-align: right;
+  user-select: none;
+}
