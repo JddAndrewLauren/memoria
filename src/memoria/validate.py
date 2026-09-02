@@ -16,12 +16,25 @@ from memoria.manifest import (
     load_converter_pins,
     load_manifest,
 )
-from memoria.records import NORMALIZED_RELATIVE_PATH
+from memoria.records import NORMALIZED_RELATIVE_PATH, ReadError
+from memoria.records import read as read_ref
 from memoria.repository import Repository
 from memoria.subjects import SUBJECTS_RELATIVE_PATH, SubjectError, parse_entry, parse_subject
 
 _SRC_ID_RE = re.compile(r"SRC-\d{6}", re.IGNORECASE)
 _RAW_SHA256_RE = re.compile(r"^raw_sha256:\s*(\S+)\s*$", re.MULTILINE)
+# A `SES-...#T017` citation (#28, part 04 §4) - the two required parts, a
+# session id and a turn, matched loosely enough to catch a suffixed id
+# (memoria.ledger's own generated form) as well as the plain one part 04 §4
+# shows.
+_SESSION_TURN_CITATION_RE = re.compile(
+    r"SES-\d{8}-\d{4}(?:-[0-9a-fA-F]+)?#T\d+", re.IGNORECASE
+)
+# Where a `#T` citation can plausibly appear. Not a repo-wide scan: the
+# archive's own plan docs (docs/plan/04-repository-and-identity.md) quote
+# this exact form as an illustration, and flagging that as an unresolved
+# citation would be a false positive doing the opposite of this check's job.
+_SESSION_CITATION_LOCATIONS = ("decisions.md", "questions.md", "research", SUBJECTS_RELATIVE_PATH)
 
 # The `convert` extra's own array in pyproject.toml (#79, part 05 §5.4), and
 # an exact `name[extras]==version` pin within it. Read with a small regex
@@ -44,8 +57,10 @@ def validate(
     """Verify every raw unit listed in the manifest matches its recorded
     hash, that the ledger itself is dense, monotonic and free of duplicate
     IDs (ADR-0006), that every SRC- ID referenced in a normalized record
-    resolves to an actual record, and that every record's ``raw_sha256``
-    still matches what the manifest records for its raw unit.
+    resolves to an actual record, that every record's ``raw_sha256``
+    still matches what the manifest records for its raw unit, and that
+    every ``SES-...#T017`` citation names a turn an actual session
+    transcript carries (#28).
 
     Returns a list of human-readable error messages; an empty list means the
     corpus matches the manifest exactly and no SRC- ID is left unresolved.
@@ -100,6 +115,7 @@ def validate(
     errors.extend(_validate_subjects(repo_root))
     errors.extend(_validate_converter_pins(repo_root, manifest_path))
     errors.extend(_validate_gather_overlay(repo_root))
+    errors.extend(_validate_session_turns(repo_root))
 
     return errors
 
@@ -217,6 +233,39 @@ def _validate_gather_overlay(repo_root: Path) -> list[str]:
                 f"{overlay.action} of {overlay.anchor} on {overlay.entry_id} "
                 f"has an unparseable timestamp: {overlay.at!r}"
             )
+    return errors
+
+
+def _validate_session_turns(repo_root: Path) -> list[str]:
+    """Every ``SES-...#T017`` citation names a turn that actually exists in
+    that session's transcript (#28).
+
+    A citation naming a session with no transcript, or a turn number the
+    transcript does not have, is the same failure `_validate_normalized_src_ids`
+    catches for a dangling ``SRC-`` ID: a durable record pointing at
+    evidence that is not (or no longer) there.
+    """
+    repository = Repository(root=repo_root)
+    errors = []
+    for relative in _SESSION_CITATION_LOCATIONS:
+        target = repo_root / relative
+        if target.is_file():
+            paths = [target]
+        elif target.is_dir():
+            paths = sorted(target.rglob("*.md"))
+        else:
+            continue
+        for path in paths:
+            content = path.read_text(encoding="utf-8")
+            citations = sorted(set(_SESSION_TURN_CITATION_RE.findall(content)))
+            for citation in citations:
+                try:
+                    read_ref(repository, citation)
+                except ReadError as exc:
+                    errors.append(
+                        f"missing transcript turn: {citation} referenced in "
+                        f"{path.relative_to(repo_root)} ({exc})"
+                    )
     return errors
 
 

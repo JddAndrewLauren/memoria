@@ -458,12 +458,16 @@ def test_a_traversing_path_that_leaves_a_durable_class_is_refused(tmp_path):
 # `.memoria/index.db`. `changes` is ADR-0008's - the gitignored `changes/`
 # projection. All three are Derived state (§42), not a durable class.
 #
-# `ledger`, `manifest` and `normalize` are three more of that same kind, all
-# arriving from main after this guard was written: #13's ledger appends
-# `sessions/<...>/events.jsonl` (Interaction record), #82's manifest writes
-# under `sources/` (Evidence), and `normalize` writes `sources/normalized/`
-# (Derived). All three are absent from DURABLE_PATHS by the same deliberate
-# choice, so none of them has a durable write to route.
+# `ledger`, `manifest`, `normalize` and `sessions` are four more of that same
+# kind, all arriving from main after this guard was written: #13's ledger
+# appends `sessions/<...>/events.jsonl` (Interaction record), #82's manifest
+# writes under `sources/` (Evidence), `normalize` writes
+# `sources/normalized/` (Derived), and #28's `sessions` writes
+# `sessions/<...>/transcript.md` and `metadata.yaml` beside the ledger's own
+# file - the same Interaction record class, immutable once derived rather
+# than staleness-token-gated, so it has no token to route through
+# `memoria.write` either. All four are absent from DURABLE_PATHS by the same
+# deliberate choice, so none of them has a durable write to route.
 #
 # `subjects` is not of that kind, and is listed here under protest: #84 has
 # `write_builtin_subjects` seed `subjects/<slug>/_subject.md` with a direct
@@ -490,6 +494,7 @@ ALLOWED_WRITERS = {
     "manifest.py",
     "normalize.py",
     "subjects.py",
+    "sessions.py",
 }
 FILE_WRITING_CALLS = {
     "write_text", "write_bytes",

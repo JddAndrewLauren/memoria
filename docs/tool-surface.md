@@ -192,6 +192,8 @@ enumeration of kinds, and had already drifted.
 | `CHP-0001` | that chapter's brief, verbatim | part 04 §2.1 / #35 |
 | `SEC-0001` | that section's brief, verbatim | part 04 §2.1 / #35 |
 | `CHG-20261014-003` | the §11 projection of that human-authored commit | part 04 §4 / ADR-0008 |
+| `SES-20260912-1432` | that session's whole transcript, verbatim | part 04 §4 / #28 |
+| `SES-20260912-1432#T017` | that transcript turn's text alone | part 04 §4 / #28 |
 
 The bare anchor is accepted deliberately. `SearchResult` carries
 `(src_id, anchor, source_type)`, so a search hit feeds straight back into
@@ -300,6 +302,12 @@ reason a full-source `SRC-` read is (issue #16). An entry read resolves by
 its frontmatter `id` rather than by filename, so a renamed entry file still
 answers to the `SUB-x/y` it was created with.
 
+**A bare `SES-` read is bare too** — the whole `transcript.md`, verbatim
+(#28). **A `SES-...#T017` read returns just that turn's text** — the same
+"a paragraph read gives back the paragraph, not the record" split a `SRC-`
+paragraph reference makes, without the curated overlay a `SRC-` paragraph
+carries: a transcript turn has none to append.
+
 **`raw=True` serves the least-processed version of what it is given** — one
 parameter, two shapes, dispatched on whether the `SRC-` reference names a
 paragraph:
@@ -339,11 +347,11 @@ gives.
 ### What it refuses, and how
 
 Reference kinds part 04 §4 defines but this build does not resolve —
-`SES-` (with or without a `#T` turn), `CLM-`, `RES-`, `DEC-` — return an
-error **naming the kind**, never a silent empty result. A kind that is not
-part of the scheme at all is named too, and distinguished from one that is
-merely unbuilt. `SUB-x` and `SUB-x/y` were on this list until issue #16, and
-`CHG-` until ADR-0008.
+`CLM-`, `RES-`, `DEC-` — return an error **naming the kind**, never a silent
+empty result. A kind that is not part of the scheme at all is named too, and
+distinguished from one that is merely unbuilt. `SUB-x` and `SUB-x/y` were on
+this list until issue #16, `CHG-` until ADR-0008, and `SES-` (with or
+without a `#T` turn) until #28.
 
 Errors reach the model as `ToolError`, which is the SDK's anticipated-failure
 type: the call comes back `is_error` with the message intact. Any other
