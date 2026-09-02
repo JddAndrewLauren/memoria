@@ -73,6 +73,16 @@ def main(argv=None):
             f"{len(report.skipped)} (unchanged) to "
             f"{repository.root / NORMALIZED_RELATIVE_PATH}"
         )
+        # The drift report (#79, part 05 §5.4): printed before the caller
+        # decides whether to launch the extraction, so a converter bump's
+        # cost is a number, not a surprise. Always printed, zero included -
+        # "reports zero changed paragraph hashes" is itself the gate output
+        # on an unchanged pin.
+        print(
+            f"normalize: {len(report.paragraph_drift)} record(s), "
+            f"{sum(report.paragraph_drift.values())} paragraph hash(es) "
+            "changed since their last conversion"
+        )
         if report.unconvertible:
             print(
                 f"normalize: {len(report.unconvertible)} unit(s) have no "

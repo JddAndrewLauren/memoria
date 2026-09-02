@@ -3,6 +3,7 @@
 from memoria.manifest import (
     ManifestEntry,
     check_ledger,
+    load_converter_pins,
     load_manifest,
     save_manifest,
     sync,
@@ -156,3 +157,28 @@ def test_save_and_load_manifest_round_trips(tmp_path):
     save_manifest(manifest_path, entries)
 
     assert load_manifest(manifest_path) == entries
+
+
+def test_load_converter_pins_is_empty_when_no_file_exists(tmp_path):
+    assert load_converter_pins(tmp_path / "raw" / "manifest.yaml") == {}
+
+
+def test_save_and_load_converter_pins_round_trip(tmp_path):
+    manifest_path = tmp_path / "raw" / "manifest.yaml"
+    entries = [ManifestEntry(id="SRC-000001", path="raw/a.docx", sha256="x")]
+
+    save_manifest(manifest_path, entries, converters={".docx": "markitdown 0.1.7"})
+
+    assert load_converter_pins(manifest_path) == {".docx": "markitdown 0.1.7"}
+    assert load_manifest(manifest_path) == entries
+
+
+def test_save_manifest_omits_converters_when_none_given(tmp_path):
+    """A caller that never passes ``converters`` (every one but
+    ``memoria.normalize``) writes exactly the file this always wrote."""
+    manifest_path = tmp_path / "raw" / "manifest.yaml"
+    entries = [ManifestEntry(id="SRC-000001", path="raw/a.txt", sha256="x")]
+
+    save_manifest(manifest_path, entries)
+
+    assert "converters" not in manifest_path.read_text(encoding="utf-8")

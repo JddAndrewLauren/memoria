@@ -34,7 +34,7 @@ import io
 import mailbox
 import re
 import zipfile
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from email.message import Message
 from email.utils import parsedate_to_datetime
 from importlib.metadata import version as _pkg_version
@@ -46,6 +46,7 @@ from memoria.manifest import (
     ManifestEntry,
     format_id,
     id_number,
+    load_converter_pins,
     save_manifest,
     sync,
 )
@@ -53,6 +54,7 @@ from memoria.records import (
     NORMALIZED_RELATIVE_PATH,
     NormalizedRecord,
     ReadError,
+    is_page_marker,
     parse_record,
     record_to_markdown,
 )
@@ -247,12 +249,41 @@ EMAIL_CONVERTER_VERSION = "email 1"
 _EMAIL_CONTAINER_SUFFIXES = (".mbox", ".eml")
 
 
+def _paragraph_hash(paragraph: str) -> str:
+    """The extraction's memo key for one paragraph (part 06 §8.12): a sha256
+    of its exact text. Converter output that shifts by a space changes this,
+    which is the drift #79's report exists to surface (part 05 §5.4)."""
+    return hashlib.sha256(paragraph.encode("utf-8")).hexdigest()
+
+
+def _real_paragraph_hashes(paragraphs: list[str]) -> set[str]:
+    """Paragraph hashes for a draft's or a record's real paragraphs - page
+    markers excluded, since they earn no anchor and no extraction read
+    (``docs/normalized-record-schema.md``, "pdf page markers are not
+    paragraphs").
+
+    A set, not a list: the drift count this feeds is "how many distinct
+    memo keys need re-extraction", not a positional diff. The accepted gap
+    is two genuinely identical paragraphs in one record - they collapse to
+    one hash, same as they would in the extraction's own cache.
+    """
+    return {_paragraph_hash(p) for p in paragraphs if not is_page_marker(p)}
+
+
 @dataclass
 class NormalizeReport:
     added_units: list[str]
     converted: list[str]
     skipped: list[str]
     unconvertible: list[str]
+    # Record id -> count of paragraph hashes that changed against the
+    # record this run replaced (#79). Only entries that had a prior,
+    # parseable record are counted - a brand new record's paragraphs are
+    # new content, not drift. Absent (never zero) for a record with no
+    # drift, so ``len(...)`` is "how many records changed" and
+    # ``sum(...values())`` is "how many paragraph hashes changed" - the
+    # two numbers the drift report gates a converter bump on.
+    paragraph_drift: dict[str, int] = field(default_factory=dict)
 
 
 def normalize(
@@ -271,13 +302,30 @@ def normalize(
     manifest_path = evidence_root / manifest_relative_path
     entries, added = sync(evidence_root, manifest_relative_path)
     entries, email_added, email_drafts = _process_email_containers(evidence_root, entries)
-    save_manifest(manifest_path, entries)
+
+    # The pinned converter version for every suffix actually present on disk
+    # (#79, part 05 §5.4), merged onto whatever a prior run recorded so a
+    # suffix with no unit in the current corpus keeps its last known pin
+    # rather than losing it. `validate` compares this against pyproject.toml.
+    suffixes_present = {
+        Path(entry.path).suffix for entry in entries if not entry.deleted
+    }
+    converters = load_converter_pins(manifest_path)
+    converters.update(
+        {
+            suffix: pin()
+            for suffix, (_converter, pin) in CONVERTERS.items()
+            if suffix in suffixes_present
+        }
+    )
+    save_manifest(manifest_path, entries, converters=converters)
 
     output_root = repository.root / NORMALIZED_RELATIVE_PATH
 
     converted = []
     skipped = []
     unconvertible = []
+    paragraph_drift: dict[str, int] = {}
     for entry in entries:
         if entry.deleted:
             continue
@@ -296,15 +344,18 @@ def normalize(
             get_draft = lambda c=converter, e=entry: c((evidence_root / e.path).read_bytes())
 
         record_path = output_root / f"{entry.id}.md"
-        if not force_all and record_path.is_file():
-            existing = _try_parse(record_path)
-            if (
-                existing is not None
-                and existing.raw_sha256 == entry.sha256
-                and existing.converter == pinned_version
-            ):
-                skipped.append(entry.id)
-                continue
+        # Read whatever record is already there, force_all or not: the
+        # drift report below needs the prior paragraphs to compare against
+        # regardless of why this unit is reconverting.
+        existing = _try_parse(record_path) if record_path.is_file() else None
+        if (
+            not force_all
+            and existing is not None
+            and existing.raw_sha256 == entry.sha256
+            and existing.converter == pinned_version
+        ):
+            skipped.append(entry.id)
+            continue
 
         draft = get_draft()
         record = NormalizedRecord(
@@ -328,6 +379,14 @@ def normalize(
             attachments=draft.attachments,
             images=draft.images,
         )
+        if existing is not None:
+            changed = len(
+                _real_paragraph_hashes(draft.paragraphs)
+                - _real_paragraph_hashes(existing.paragraphs)
+            )
+            if changed:
+                paragraph_drift[entry.id] = changed
+
         output_root.mkdir(parents=True, exist_ok=True)
         record_path.write_text(record_to_markdown(record), encoding="utf-8")
         converted.append(entry.id)
@@ -337,6 +396,7 @@ def normalize(
         converted=converted,
         skipped=skipped,
         unconvertible=unconvertible,
+        paragraph_drift=paragraph_drift,
     )
 
 
