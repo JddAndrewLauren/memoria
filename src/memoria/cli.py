@@ -139,7 +139,11 @@ def main(argv=None):
         except NoEvidenceRoot as exc:
             print(f"validate: {exc}", file=sys.stderr)
             return 1
-        errors = validate(evidence_root, repository.root)
+        try:
+            errors = validate(evidence_root, repository.root)
+        except IndexSchemaError as exc:
+            print(f"validate: {exc}", file=sys.stderr)
+            return 1
         for error in errors:
             print(error)
         if errors:
