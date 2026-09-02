@@ -198,10 +198,10 @@ def _validate_normalized_src_ids(repo_root: Path) -> list[str]:
 def _validate_gather_overlay(repo_root: Path) -> list[str]:
     """Every pin and exclusion carries actor and timestamp attribution
     (issue #18, part 06 §8.3's overlay; stored on the entry file itself
-    since #21). ``pin``/``exclude`` cannot themselves write an empty
-    ``actor_name``/``actor_email`` - the write path's commit refuses an
-    empty git author identity - but a hand-edited entry file still can, so
-    this is the check that actually holds the requirement."""
+    since #21). ``pin``/``exclude`` themselves now refuse to write an empty
+    ``actor_name``/``actor_email`` (``index._record_overlay``), but a
+    hand-edited entry file still can, so this is the check that actually
+    holds the requirement against that case."""
     errors = []
     for overlay in list_overlay(Repository(root=repo_root)):
         if not overlay.actor_name.strip() or not overlay.actor_email.strip():

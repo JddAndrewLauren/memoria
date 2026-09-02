@@ -764,7 +764,21 @@ def _record_overlay(
     through the write path (ADR-0003) - not in this index at all (#21). A
     later act against the same ``anchor`` replaces the earlier one; the row
     order is by ``anchor`` so the file is stable to diff.
+
+    Refuses an unattributed ``actor`` outright, before the file is touched
+    at all. Relying on ``write_file``'s commit to catch this (it refuses an
+    empty git author identity) is not enough: ``_replace_atomically`` runs
+    *before* the commit, so the unattributed act would land on disk and be
+    staged even though the commit that was supposed to attribute it never
+    happens - a partially-applied durable write, exactly what part 04 §3's
+    write path exists to rule out.
     """
+    if not actor.name.strip() or not actor.email.strip():
+        raise WriteError(
+            f"cannot record {action} of {anchor} on {entry_id}: an author "
+            "act must be attributed - actor name and email may not be "
+            "empty"
+        )
     subject_id, entry_slug = entry_id.split("/", 1)
     path = find_entry_path(repository, subject_id, entry_slug)
     if path is None:

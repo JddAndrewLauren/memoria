@@ -86,12 +86,21 @@ class Entry:
     ``overlay`` is the entry's pins and exclusions (``OverlayAct``); the
     gathered set itself is derived and carries no state of its own
     (``memoria.index.gather``).
+
+    ``extra`` carries any frontmatter key this module does not itself model,
+    untouched through ``parse_entry``/``entry_to_markdown`` - the same
+    contract ``memoria.manifest.ManifestEntry.extra`` keeps. ``pin``/
+    ``exclude`` (#21) are the first callers that rewrite an *existing*
+    entry file rather than only ever creating one, so this is what stops
+    that rewrite from silently dropping a field the author or a future
+    writer put there.
     """
 
     id: str
     match_terms: list[str] = field(default_factory=list)
     body: str = ""
     overlay: list[OverlayAct] = field(default_factory=list)
+    extra: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -185,10 +194,14 @@ def _split_sections(body: str) -> dict[str, str]:
 
 
 def entry_to_markdown(entry: Entry) -> str:
-    """Serialize an entry: frontmatter (id, match terms, overlay), then its
-    body. ``overlay`` is omitted from the frontmatter entirely when empty,
-    the common case, rather than writing a bare ``overlay: []`` to every
-    entry that has never been pinned or excluded."""
+    """Serialize an entry: frontmatter (id, match terms, overlay, then any
+    ``extra`` keys), then its body. ``overlay`` is omitted from the
+    frontmatter entirely when empty, the common case, rather than writing a
+    bare ``overlay: []`` to every entry that has never been pinned or
+    excluded. ``extra`` is appended last - the same order
+    ``memoria.manifest.save_manifest`` uses - so a rewrite (``pin``/
+    ``exclude``, #21) round-trips whatever this module does not itself
+    model instead of dropping it."""
     frontmatter = {"id": entry.id, "match_terms": list(entry.match_terms)}
     if entry.overlay:
         frontmatter["overlay"] = [
@@ -201,6 +214,7 @@ def entry_to_markdown(entry: Entry) -> str:
             }
             for act in entry.overlay
         ]
+    frontmatter.update(entry.extra)
     return (
         "---\n" + yaml.safe_dump(frontmatter, sort_keys=False) + "---\n\n" + entry.body + "\n"
     )
@@ -244,6 +258,11 @@ def parse_entry(text: str, *, source: str = "<string>") -> Entry:
     overlay = [
         _parse_overlay_act(row, source) for row in frontmatter.get("overlay", [])
     ]
+    extra = {
+        key: value
+        for key, value in frontmatter.items()
+        if key not in ("id", "match_terms", "overlay")
+    }
 
     # Exactly the separators entry_to_markdown inserted around the body -
     # the blank line after the frontmatter's closing "---" and the trailing
@@ -253,7 +272,9 @@ def parse_entry(text: str, *, source: str = "<string>") -> Entry:
     if body.endswith("\n"):
         body = body[:-1]
 
-    return Entry(id=entry_id, match_terms=match_terms, body=body, overlay=overlay)
+    return Entry(
+        id=entry_id, match_terms=match_terms, body=body, overlay=overlay, extra=extra
+    )
 
 
 def _parse_overlay_act(row: object, source: str) -> OverlayAct:

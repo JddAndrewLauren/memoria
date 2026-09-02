@@ -29,8 +29,8 @@ from memoria.index import (
 )
 from memoria.records import NORMALIZED_RELATIVE_PATH, NormalizedRecord, write_normalized_records
 from memoria.repository import Repository
-from memoria.subjects import Entry, OverlayAct, entry_to_markdown
-from memoria.write import Actor
+from memoria.subjects import Entry, OverlayAct, entry_to_markdown, load_entry
+from memoria.write import Actor, WriteError
 
 
 def _record(
@@ -905,12 +905,61 @@ def test_the_gathered_set_carries_no_id():
     assert fields == {"src_id", "anchor", "pinned"}
 
 
+def test_pin_refuses_an_unattributed_actor(tmp_path):
+    """AC 7 (round 1 review, finding 2): a pin/exclusion with an empty actor
+    name or email is rejected *before* the entry file is touched at all -
+    not left as an unattributed row that only fails to commit. Relying on
+    the underlying git commit to refuse an empty author identity was not
+    enough: ``write.write`` replaces the file on disk before it commits, so
+    that alone would have left a partially-applied write behind."""
+    entry = Entry(id="SUB-people/bob", match_terms=[], body="")
+    repository = _gather_repo(tmp_path, ["Bob went to town."], [entry])
+    entry_path = tmp_path / "subjects" / "people" / "bob.md"
+    before = entry_path.read_text(encoding="utf-8")
+
+    with pytest.raises(WriteError, match="attributed"):
+        pin(repository, "SUB-people/bob", "src-000001-p1", Actor(name="", email=""))
+    assert entry_path.read_text(encoding="utf-8") == before
+
+    with pytest.raises(WriteError, match="attributed"):
+        exclude(
+            repository,
+            "SUB-people/bob",
+            "src-000001-p1",
+            Actor(name="Author", email="   "),
+        )
+    assert entry_path.read_text(encoding="utf-8") == before
+    assert list_overlay(repository) == []
+
+
+def test_a_pin_does_not_drop_unknown_frontmatter_keys(tmp_path):
+    """Non-blocking finding, round 1 review: ``_record_overlay`` is the
+    first code path that rewrites an *existing* entry file - promotion only
+    ever creates one - so a frontmatter key this module does not itself
+    model (``Entry.extra``) must round-trip through a pin rather than being
+    silently dropped by the parse/serialize cycle."""
+    entry = Entry(
+        id="SUB-people/bob",
+        match_terms=["Bob"],
+        body="Some testimony.",
+        extra={"custom_key": "keep-me"},
+    )
+    repository = _gather_repo(tmp_path, ["Bob went to town."], [entry])
+
+    pin(repository, "SUB-people/bob", "src-000001-p1", _AUTHOR)
+
+    reloaded = load_entry(repository, "SUB-people", "bob")
+    assert reloaded.extra == {"custom_key": "keep-me"}
+    assert reloaded.body == "Some testimony."
+    assert [act.anchor for act in reloaded.overlay] == ["src-000001-p1"]
+
+
 def test_validate_fails_a_pin_lacking_attribution(tmp_path):
-    """AC 7. ``pin``/``exclude`` cannot themselves write an unattributed row
-    any more - the write path's commit refuses an empty git author identity
-    - but a hand-edited entry file still can, and `validate` is what catches
-    that: the schema's ``NOT NULL`` only rules out ``NULL``, and an actor
-    with an empty name/email is a value, not an absence."""
+    """AC 7. ``pin``/``exclude`` themselves now refuse an unattributed
+    ``Actor`` before touching the file at all (`test_pin_refuses_an_
+    unattributed_actor`), but a hand-edited entry file still can carry an
+    empty ``actor_name``/``actor_email``, and `validate` is what catches
+    that."""
     from memoria.validate import validate
 
     entry = Entry(
@@ -1088,11 +1137,10 @@ def test_deleting_memoria_entirely_loses_no_pin_exclusion_or_promotion(tmp_path)
 
 
 def _dump_derived(repository):
-    """Every derived extraction/appearances row, sorted - the whole content
-    a full rebuild is supposed to reproduce byte-for-byte against the
-    incremental path (#21 AC 2). ``records`` is FTS5-virtual and not
-    queryable by a plain ``SELECT *``, and is left out for that reason
-    alone; ``paragraphs`` is included."""
+    """Every derived table's rows, sorted - the whole content a full
+    rebuild is supposed to reproduce byte-for-byte against the incremental
+    path (#21 AC 2), ``records`` (the FTS5 full-text index) included:
+    ``SELECT *`` works on an fts5 table the same as on any other."""
     from memoria.index import DERIVED_TABLES
 
     con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
@@ -1100,7 +1148,6 @@ def _dump_derived(repository):
         return {
             table: sorted(con.execute(f"SELECT * FROM {table}").fetchall())
             for table in DERIVED_TABLES
-            if table != "records"
         }
     finally:
         con.close()
