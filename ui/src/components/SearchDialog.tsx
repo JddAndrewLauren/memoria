@@ -39,14 +39,14 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
 
   const trimmed = debouncedQuery.trim();
 
-  const { data: searchData } = useQuery({
+  const { data: searchData, isError: searchIsError } = useQuery({
     queryKey: ["search", trimmed],
     queryFn: () => search(trimmed),
     enabled: open && trimmed.length > 0,
   });
   const { evidence, editorial } = splitSearchResultsByLayer(searchData?.results ?? []);
 
-  const { data: subjectsData } = useQuery({
+  const { data: subjectsData, isError: subjectsIsError } = useQuery({
     queryKey: ["subjects"],
     queryFn: listSubjects,
     enabled: open,
@@ -59,6 +59,7 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
       enabled: open,
     })),
   });
+  const entriesIsError = subjectsIsError || entryQueries.some((query) => query.isError);
   const entryHits =
     trimmed.length === 0
       ? []
@@ -100,6 +101,8 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
               tone="sources"
               count={evidence.length}
               empty="No matching evidence."
+              isError={searchIsError}
+              error="Search could not be completed."
             >
               {evidence.map((hit) => (
                 <SourceHitRow
@@ -127,6 +130,8 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
                 tone="amber"
                 count={editorial.length}
                 empty="No matching editorial commentary."
+                isError={searchIsError}
+                error="Search could not be completed."
               >
                 {editorial.map((hit) => (
                   <SourceHitRow
@@ -146,6 +151,8 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
               tone="subjects"
               count={entryHits.length}
               empty="No matching entries."
+              isError={entriesIsError}
+              error="Subjects could not be searched."
             >
               {entryHits.map(({ subjectId, entry, matchedOn }) => (
                 <div key={entry.id} className="rounded px-2 py-1.5 text-sm">
@@ -169,12 +176,16 @@ function ResultGroup({
   tone,
   count,
   empty,
+  isError,
+  error,
   children,
 }: {
   label: string;
   tone: "sources" | "subjects" | "amber";
   count: number;
   empty: string;
+  isError: boolean;
+  error: string;
   children: React.ReactNode;
 }) {
   const border = { sources: "border-sources", subjects: "border-subjects", amber: "border-amber" }[tone];
@@ -184,7 +195,9 @@ function ResultGroup({
         <span>{label}</span>
         <span>{count}</span>
       </div>
-      {count === 0 ? (
+      {isError ? (
+        <p className="px-2 pb-2 text-xs text-muted">{error}</p>
+      ) : count === 0 ? (
         <p className="px-2 pb-2 text-xs text-muted">{empty}</p>
       ) : (
         <div className="pb-1">{children}</div>

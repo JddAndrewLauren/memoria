@@ -9,24 +9,26 @@ export function SourcesTree() {
     queryKey: ["sources"],
     queryFn: listAllSources,
   });
+  const groups = data ? groupSourcesByType(data.items) : [];
 
   return (
     <TreeSection label="Sources">
       {isLoading && <p className="px-2 py-2 text-xs text-muted">Loading…</p>}
       {isError && <p className="px-2 py-2 text-xs text-muted">Sources could not be loaded.</p>}
-      {data && data.items.length === 0 && (
-        // The honest empty state (#24): an un-normalized checkout has no
-        // records at all, and this says so rather than showing a bare zero
-        // or nothing - see ADR-0004 "the empty corpus becomes a value".
+      {data && groups.length === 0 && (
+        // The honest empty state (#24): gated on the grouped result, not
+        // data.items, so a corpus that is all editorial (which
+        // groupSourcesByType drops) still gets this message rather than a
+        // bare header with nothing under it - see ADR-0004 "the empty
+        // corpus becomes a value".
         <p className="px-2 py-2 text-xs text-muted">
           No sources yet. Run <code className="font-mono">memoria normalize</code> against an
           evidence root, then <code className="font-mono">memoria rebuild</code>.
         </p>
       )}
-      {data &&
-        groupSourcesByType(data.items).map((group) => (
-          <SourceGroup key={group.sourceType} sourceType={group.sourceType} sources={group.sources} />
-        ))}
+      {groups.map((group) => (
+        <SourceGroup key={group.sourceType} sourceType={group.sourceType} sources={group.sources} />
+      ))}
     </TreeSection>
   );
 }

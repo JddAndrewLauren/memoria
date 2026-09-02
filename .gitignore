@@ -22,3 +22,7 @@ sources/editorial/
 # directly, so these files are a browsing convenience and are never read back.
 # Regenerate with `memoria rebuild` -- it needs no evidence root (ADR-0008).
 changes/
+
+# `ui/`'s production build, gitignored into the package (docs/adr/0002-ui-is-a-react-client.md's
+# "Layout" consequence). Regenerate with `npm run build` (see README).
+src/memoria/web/static/

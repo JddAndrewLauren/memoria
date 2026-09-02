@@ -150,7 +150,7 @@ each filter means and `src/memoria/web/schemas.py` for the response shapes.
 No auth, HTTPS or remote-access code exists — localhost, one machine
 (`docs/poc-plan.md` §5).
 
-When `ui/dist/` exists (`npm run build` has run - see *The web client*
+When `src/memoria/web/static/` exists (`npm run build` has run - see *The web client*
 below), `create_app` also mounts it: `/assets/*` serves the built JS/CSS,
 and every other path that is not `/api/*` falls back to `index.html` so
 React Router's client-side routes resolve. Nothing under `/api` is affected
@@ -191,7 +191,7 @@ instead: Tailwind is for chrome, trees, cards and badges.
 ```
 cd ui
 npm run dev        # a Vite dev server, proxying /api to a uvicorn instance on :8000
-npm run build       # production build to ui/dist/, gitignored
+npm run build       # production build to src/memoria/web/static/, gitignored into the package
 npm run typecheck   # tsc --noEmit
 npm test            # vitest run
 ```

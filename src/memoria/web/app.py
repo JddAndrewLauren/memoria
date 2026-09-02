@@ -21,12 +21,15 @@ from fastapi.staticfiles import StaticFiles
 from memoria.repository import Repository, from_env
 from memoria.web.routes import router
 
-# `ui/`'s build output, gitignored (docs/adr/0002-ui-is-a-react-client.md's
-# "Layout" consequence). Mounted only when it exists, so `create_app` still
-# works with no `npm run build` having ever run - the API-only tests never
-# need it - and README.md's one-command run gets a single process serving
-# both the API and the client from one origin.
-_UI_DIST = Path(__file__).resolve().parents[3] / "ui" / "dist"
+# `ui/`'s build output, built to `static/` inside this package and
+# gitignored there (docs/adr/0002-ui-is-a-react-client.md's "Layout"
+# consequence: "build output gitignored into the package") - resolved
+# relative to this file with no walk back out of the package, so it holds
+# under a non-editable install too. Mounted only when it exists, so
+# `create_app` still works with no `npm run build` having ever run - the
+# API-only tests never need it - and README.md's one-command run gets a
+# single process serving both the API and the client from one origin.
+_UI_DIST = Path(__file__).resolve().parent / "static"
 
 
 def create_app(repository: Repository | None = None) -> FastAPI:

@@ -28,7 +28,7 @@ export function SubjectsTree() {
 
 function SubjectRow({ id, entryCount }: { id: string; entryCount: number }) {
   const [open, setOpen] = useState(false);
-  const { data } = useQuery({
+  const { data, isError } = useQuery({
     queryKey: ["entries", id],
     queryFn: () => listEntries(id),
     enabled: open,
@@ -48,8 +48,11 @@ function SubjectRow({ id, entryCount }: { id: string; entryCount: number }) {
       </button>
       {open && (
         <ul className="ml-3 border-l border-border-faint pl-2">
-          {data?.items.length === 0 && <li className="py-1 text-xs text-muted">No entries yet.</li>}
-          {data?.items.map((entry) => <EntryRow key={entry.id} entry={entry} />)}
+          {isError && <li className="py-1 text-xs text-muted">Entries could not be loaded.</li>}
+          {!isError && data?.items.length === 0 && (
+            <li className="py-1 text-xs text-muted">No entries yet.</li>
+          )}
+          {!isError && data?.items.map((entry) => <EntryRow key={entry.id} entry={entry} />)}
         </ul>
       )}
     </div>
