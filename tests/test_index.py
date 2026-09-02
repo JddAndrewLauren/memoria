@@ -622,6 +622,40 @@ def test_a_cache_this_build_cannot_read_is_refused_rather_than_dropped(tmp_path)
         build_index(repository, records)
 
 
+def test_a_stale_paragraphs_table_is_refused_rather_than_a_bare_sqlite_error(
+    tmp_path,
+):
+    """A `paragraphs` table built before #111's `email_from`/`email_to`
+    columns is not a new table `CREATE TABLE IF NOT EXISTS` will create -
+    it is left exactly as it is, so both `connect` and `search` must catch
+    the stale shape themselves rather than let a query against those
+    columns fail as a bare, unactionable `sqlite3.OperationalError`."""
+    from memoria.index import INDEX_RELATIVE_PATH, IndexSchemaError, connect
+
+    records = [_record("SRC-000001", ["A message about a heron."])]
+    repository = _index(tmp_path, records)
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.execute("DROP TABLE paragraphs")
+    con.execute(
+        "CREATE TABLE paragraphs("
+        "anchor TEXT PRIMARY KEY, src_id TEXT, source_type TEXT, "
+        "event_date TEXT, recorded_date TEXT, contemporaneous INTEGER"
+        ")"
+    )
+    con.execute(
+        "INSERT INTO paragraphs "
+        "(anchor, src_id, source_type, event_date, recorded_date, contemporaneous) "
+        "VALUES ('src-000001-p1', 'SRC-000001', 'journal', 'Oct. 22.', 'Oct. 22.', 1)"
+    )
+    con.commit()
+    con.close()
+
+    with pytest.raises(IndexSchemaError, match="memoria rebuild"):
+        search(repository, "heron")
+    with pytest.raises(IndexSchemaError, match="memoria rebuild"):
+        connect(repository)
+
+
 def test_reset_cache_discards_it_deliberately(tmp_path):
     from memoria.index import INDEX_RELATIVE_PATH
 

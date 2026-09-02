@@ -470,6 +470,29 @@ def _ensure_preserved(con: sqlite3.Connection) -> None:
         )
 
 
+def _check_paragraphs_shape(con: sqlite3.Connection) -> None:
+    """Refuse a ``paragraphs`` table built before #111 rather than let a
+    header filter surface a bare ``sqlite3.OperationalError``.
+
+    Every earlier derived-schema change added a whole new table, which the
+    ``IF NOT EXISTS`` statements below create outright. This one added
+    columns to an existing table, which ``IF NOT EXISTS`` leaves exactly as
+    it is - so an index built by an older version of this module still has a
+    six-column ``paragraphs`` table, and the ``email_from``/``email_to``
+    clauses ``filter_predicate`` emits fail with no hint of what to do about
+    it. Only ``build_index`` can safely regenerate the table (it rebuilds
+    every derived table together); this just names the fix.
+    """
+    columns = {row[1] for row in con.execute("PRAGMA table_info(paragraphs)")}
+    if columns and not {"email_from", "email_to"} <= columns:
+        raise IndexSchemaError(
+            f"{INDEX_RELATIVE_PATH} holds a 'paragraphs' table built before "
+            "the from/to header filters (#111) and is missing the "
+            "'email_from'/'email_to' columns. Run `memoria rebuild` to "
+            "regenerate the derived tables."
+        )
+
+
 def connect(repository: Repository) -> sqlite3.Connection:
     """Open the index, creating the file and every table it should have.
 
@@ -493,6 +516,7 @@ def connect(repository: Repository) -> sqlite3.Connection:
         _ensure_preserved(con)
         for statement in _DERIVED_DDL:
             con.execute(statement)
+        _check_paragraphs_shape(con)
         con.commit()
     except BaseException:
         con.close()
@@ -574,6 +598,7 @@ def search(
         return []
     con = sqlite3.connect(db_path)
     try:
+        _check_paragraphs_shape(con)
         predicate, predicate_params = filter_predicate(filters)
         # The snippet is computed by FTS5 over the row it already matched,
         # in the query that already runs - it costs a column, not a second
