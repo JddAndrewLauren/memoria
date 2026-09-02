@@ -261,8 +261,11 @@ def read(ref: str, raw: bool = False) -> str:
     UTF-8 rather than handed back as bytes; for one paragraph, that
     paragraph with no curated overlay appended.
 
+    A decision (`DEC-0088`) serves that decision's block from `decisions.md`;
+    a research memo (`RES-20261018-003`) serves the memo file, verbatim.
+
     Reference kinds the archive defines but this build does not resolve yet -
-    CLM-, RES-, DEC- - return an error naming the kind.
+    CLM- - return an error naming the kind.
     """
     try:
         result = read_ref(repository(), ref, raw=raw)

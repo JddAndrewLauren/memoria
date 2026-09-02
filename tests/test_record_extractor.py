@@ -115,11 +115,12 @@ def test_record_decision_refuses_a_turn_that_is_not_the_authors(tmp_path):
 
 
 def test_the_musing_lands_open_while_the_assertion_lands_author(tmp_path):
-    """The acceptance test: one session carries a musing and an assertion.
-    The musing is recorded through the queue and lands `[open]`; the
-    assertion is recorded as a decision and lands `[author]`."""
+    """The acceptance test: one session carries a musing and an assertion,
+    both spoken by the author (part 08 §13.1's own example is the author
+    musing). The musing is recorded through the queue and lands `[open]`;
+    the assertion is recorded as a decision and lands `[author]`."""
     repository = _repo(tmp_path)
-    session_id = _session(repository, SESSION_ID, [("assistant", MUSING), ("user", DECISION)])
+    session_id = _session(repository, SESSION_ID, [("user", MUSING), ("user", DECISION)])
 
     question = record_question(repository, session_id, 1, MUSING)
     decision = record_decision(repository, session_id, 2, DECISION)

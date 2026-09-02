@@ -33,6 +33,15 @@ interpretation, or an actual question - none of them assertions, all of
 them ``[open]`` - which is why ``questions.md`` is described as a queue
 (part 12 §34.4) rather than a ledger of settled fact.
 
+**The limit of the mechanical check**: ``turn_role`` establishes *who
+spoke* the citing turn, not *what it says*. An author-spoken musing ("Maybe
+we could keep it ambiguous") routed to ``record_decision`` cannot be refused
+here - the turn is identifiably the author's, and whether its words decide
+something or only wonder is the model judgement above. Choosing
+``record_question`` for it is the driving session's call, made before
+either function is reached; this module guarantees only that nothing the
+assistant said is ever badged ``[author]``.
+
 **The dirty-tree guard is pass-level, not per-write** (part 08 §14.2):
 "the Curator never writes into a file with uncommitted human modifications
 ... the pass waits." ``memoria.write``'s general write path absorbs a dirty

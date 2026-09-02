@@ -194,6 +194,8 @@ enumeration of kinds, and had already drifted.
 | `CHG-20261014-003` | the §11 projection of that human-authored commit | part 04 §4 / ADR-0008 |
 | `SES-20260912-1432` | that session's whole transcript, verbatim, plus its context manifest | part 04 §4 / #28, #29 |
 | `SES-20260912-1432#T017` | that transcript turn's text alone | part 04 §4 / #28 |
+| `DEC-0088` | that decision's `decisions.md` block, verbatim | part 04 §4 / #30 |
+| `RES-20261018-003` | that research memo, verbatim | part 04 §4 / #30 |
 
 The bare anchor is accepted deliberately. `SearchResult` carries
 `(src_id, anchor, source_type)`, so a search hit feeds straight back into
