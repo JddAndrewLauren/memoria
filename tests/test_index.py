@@ -1,5 +1,7 @@
 import dataclasses
+import shutil
 import sqlite3
+import subprocess
 import time
 from datetime import datetime
 
@@ -27,7 +29,7 @@ from memoria.index import (
 )
 from memoria.records import NORMALIZED_RELATIVE_PATH, NormalizedRecord, write_normalized_records
 from memoria.repository import Repository
-from memoria.subjects import Entry, entry_to_markdown
+from memoria.subjects import Entry, OverlayAct, entry_to_markdown
 from memoria.write import Actor
 
 
@@ -717,7 +719,11 @@ def test_reset_cache_discards_it_deliberately(tmp_path):
         con.close()
 
 
-# --- the gathered set and its pin/exclude overlay (#18) ----------------------
+# --- the gathered set and its pin/exclude overlay (#18, #21) -----------------
+
+
+def _git(cwd, *args):
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
 def _write_entry(tmp_path, entry):
@@ -730,7 +736,10 @@ def _write_entry(tmp_path, entry):
 
 def _gather_repo(tmp_path, paragraphs, entries, record_id="SRC-000001"):
     """A repository with an index and some entries, normalized-record-backed
-    so `memoria rebuild` (not just `build_index`) works against it."""
+    so `memoria rebuild` (not just `build_index`) works against it. A real
+    (uncommitted) git repository: `pin`/`exclude` now write the entry file
+    through the durable write path (#21), which commits."""
+    _git(tmp_path, "init", "-q")
     repository = Repository(root=tmp_path)
     for entry in entries:
         _write_entry(tmp_path, entry)
@@ -818,8 +827,8 @@ def test_pin_and_exclude_are_recorded_with_actor_and_timestamp(tmp_path):
 
 def test_excluding_a_source_survives_rebuild(tmp_path):
     """AC 4: an exclusion is still in force after `memoria rebuild` -
-    survives because `gather_overlay` is a preserved table, not a derived
-    one."""
+    survives because it lives on the entry file (#21), which `rebuild`
+    never touches at all."""
     entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
     repository = _gather_repo(tmp_path, ["Bob went to town."], [entry])
     _memo(repository, "src-000001-p1", placements=[_place("SUB-people/bob", "Bob")])
@@ -834,6 +843,38 @@ def test_excluding_a_source_survives_rebuild(tmp_path):
     rebuild(repository)
 
     assert gather(repository, "SUB-people/bob") == []
+
+
+def test_a_pin_survives_rebuild_too(tmp_path):
+    """AC 3/4's other half: a pin is as durable as an exclusion. Not
+    derivable from `test_excluding_a_source_survives_rebuild` alone - pin
+    and exclude write to opposite ends of an entry's overlay list
+    (`_record_overlay` drops any existing row for the anchor before
+    appending the new one), so only a pin actually exercises that half of
+    the write."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    repository = _gather_repo(
+        tmp_path, ["Bob went to town.", "An unrelated paragraph."], [entry]
+    )
+    _memo(repository, "src-000001-p1", placements=[_place("SUB-people/bob", "Bob")])
+    _memo(repository, "src-000001-p2")
+    ex.derive(repository)
+    assert [g.anchor for g in gather(repository, "SUB-people/bob")] == [
+        "src-000001-p1"
+    ]
+
+    pin(repository, "SUB-people/bob", "src-000001-p2", _AUTHOR)
+    assert [g.anchor for g in gather(repository, "SUB-people/bob")] == [
+        "src-000001-p1",
+        "src-000001-p2",
+    ]
+
+    rebuild(repository)
+
+    assert [g.anchor for g in gather(repository, "SUB-people/bob")] == [
+        "src-000001-p1",
+        "src-000001-p2",
+    ]
 
 
 def test_a_pinned_source_stays_in_the_set_even_when_matching_would_not_find_it(
@@ -865,53 +906,33 @@ def test_the_gathered_set_carries_no_id():
 
 
 def test_validate_fails_a_pin_lacking_attribution(tmp_path):
-    """AC 7. The schema's ``NOT NULL`` only rules out ``NULL`` - an actor
-    with an empty name/email still writes a row, and `validate` is what
-    actually holds the requirement."""
+    """AC 7. ``pin``/``exclude`` cannot themselves write an unattributed row
+    any more - the write path's commit refuses an empty git author identity
+    - but a hand-edited entry file still can, and `validate` is what catches
+    that: the schema's ``NOT NULL`` only rules out ``NULL``, and an actor
+    with an empty name/email is a value, not an absence."""
     from memoria.validate import validate
 
-    entry = Entry(id="SUB-people/bob", match_terms=[], body="")
-    repository = _gather_repo(tmp_path, ["Bob went to town."], [entry])
+    entry = Entry(
+        id="SUB-people/bob",
+        match_terms=[],
+        body="",
+        overlay=[
+            OverlayAct(
+                anchor="src-000001-p1",
+                action="pin",
+                actor_name="",
+                actor_email="",
+                at="2026-09-01T00:00:00+00:00",
+            )
+        ],
+    )
+    _write_entry(tmp_path, entry)
     (tmp_path / "raw").mkdir(parents=True, exist_ok=True)
     (tmp_path / "raw" / "manifest.yaml").write_text("units: []\n")
-    pin(
-        repository,
-        "SUB-people/bob",
-        "src-000001-p1",
-        Actor(name="", email=""),
-    )
 
     errors = validate(evidence_root=tmp_path, repo_root=tmp_path)
     assert any("attribution" in error for error in errors)
-
-
-def test_gather_and_validate_do_not_crash_on_an_index_predating_the_overlay_table(
-    tmp_path,
-):
-    """`gather_overlay` did not exist before this issue's index. An index
-    built by an older version of `memoria rebuild` still has every other
-    table, and `list_overlay`/`gather` must create the missing table on the
-    fly (through `connect`, not a bare `sqlite3.connect`) rather than raise
-    `sqlite3.OperationalError: no such table`."""
-    from memoria.validate import validate
-
-    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
-    repository = _gather_repo(tmp_path, ["Bob went to town."], [entry])
-    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
-    con.execute("DROP TABLE gather_overlay")
-    con.commit()
-    con.close()
-    (tmp_path / "raw").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "raw" / "manifest.yaml").write_text("units: []\n")
-
-    assert list_overlay(repository) == []
-    assert [g.anchor for g in gather(repository, "SUB-people/bob")] == [
-        "src-000001-p1"
-    ]
-    # `validate` returns rather than raising - it may still report unrelated
-    # findings (e.g. from other validators), but never "no such table".
-    errors = validate(evidence_root=tmp_path, repo_root=tmp_path)
-    assert not any("gather_overlay" in error or "no such table" in error for error in errors)
 
 
 def test_a_theme_gathers_exactly_where_its_match_terms_co_occur(tmp_path):
@@ -1023,6 +1044,124 @@ def test_adding_an_entry_or_relation_match_term_extends_a_themes_gathered_set(
     ]
 
 
+# --- rebuild grows to the derived state (#21) --------------------------------
+
+
+def test_deleting_memoria_entirely_loses_no_pin_exclusion_or_promotion(tmp_path):
+    """AC 4: "Nothing durable is stored only in the index." Part 04 §42 is
+    explicit that deleting ``.memoria/index.db`` must never destroy
+    intellectual work - so this deletes the whole ``.memoria/`` directory,
+    not merely the derived tables a plain ``memoria rebuild`` already
+    preserves, and checks that a rebuild afterward still finds every author
+    act.
+
+    The promoted entry itself (``subjects/people/bob.md``) was never inside
+    ``.memoria/`` to begin with - the real risk this test guards is the
+    pin and the exclusion, which used to live only in the index (#18) and
+    now live on the entry file (#21).
+    """
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    repository = _gather_repo(
+        tmp_path, ["Bob went to town.", "An unrelated paragraph."], [entry]
+    )
+    # The exclusion drops the one paragraph the entry's own word-shaped
+    # match term would otherwise find lexically; the pin adds one it would
+    # not. Neither depends on the memo cache, which is not expected to
+    # survive `.memoria/` being deleted (§42's "cost, accepted knowingly" -
+    # a memo miss costs a model call, not lost author intent).
+    exclude(repository, "SUB-people/bob", "src-000001-p1", _AUTHOR)
+    pin(repository, "SUB-people/bob", "src-000001-p2", _AUTHOR)
+    before = [g.anchor for g in gather(repository, "SUB-people/bob")]
+    assert before == ["src-000001-p2"]
+
+    memoria_dir = tmp_path / ".memoria"
+    assert memoria_dir.is_dir()
+    shutil.rmtree(memoria_dir)
+    assert not memoria_dir.exists()
+
+    rebuild(repository)
+
+    assert [g.anchor for g in gather(repository, "SUB-people/bob")] == before
+    rows = {(o.action, o.anchor) for o in list_overlay(repository)}
+    assert rows == {("exclude", "src-000001-p1"), ("pin", "src-000001-p2")}
+    assert (tmp_path / "subjects" / "people" / "bob.md").is_file()
+
+
+def _dump_derived(repository):
+    """Every derived extraction/appearances row, sorted - the whole content
+    a full rebuild is supposed to reproduce byte-for-byte against the
+    incremental path (#21 AC 2). ``records`` is FTS5-virtual and not
+    queryable by a plain ``SELECT *``, and is left out for that reason
+    alone; ``paragraphs`` is included."""
+    from memoria.index import DERIVED_TABLES
+
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    try:
+        return {
+            table: sorted(con.execute(f"SELECT * FROM {table}").fetchall())
+            for table in DERIVED_TABLES
+            if table != "records"
+        }
+    finally:
+        con.close()
+
+
+def test_a_full_rebuild_is_byte_identical_to_the_incremental_path(tmp_path):
+    """AC 2: whether the corpus arrives all at once - a fresh ``memoria
+    rebuild`` over the whole evidence root, done once - or paragraph by
+    paragraph, the way normal operation does it (normalize, extract, then
+    ``memoria rebuild`` again after every new record), the final derived
+    state must be the same.
+
+    This is a real property, not a tautology: ``extraction.derive`` and
+    ``compute_appearances`` both recompute wholesale from the memo cache and
+    the current entries on every call rather than appending, so nothing
+    about *when* a paragraph was memoized should be visible in what a later
+    rebuild produces. A rebuild that quietly depended on call history would
+    fail this test without failing any other in this suite.
+    """
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    records = [
+        _record("SRC-000001", ["Bob went to town.", "Nothing about him here."]),
+        _record("SRC-000002", ["Bob wrote a letter."]),
+    ]
+    readings = {
+        "src-000001-p1": {"placements": [_place("SUB-people/bob", "Bob")]},
+        "src-000001-p2": {},
+        "src-000002-p1": {"placements": [_place("SUB-people/bob", "Bob")]},
+    }
+
+    incremental = tmp_path / "incremental"
+    incremental.mkdir()
+    _write_entry(incremental, entry)
+    repo_incremental = Repository(root=incremental)
+    for count in range(1, len(records) + 1):
+        write_normalized_records(
+            records[:count], incremental / NORMALIZED_RELATIVE_PATH
+        )
+        build_index(repo_incremental, records[:count])
+        prefix = records[count - 1].id.lower()
+        for anchor, kwargs in readings.items():
+            if anchor.startswith(prefix):
+                _memo(repo_incremental, anchor, **kwargs)
+        ex.derive(repo_incremental)
+        compute_appearances(repo_incremental)
+
+    full = tmp_path / "full"
+    full.mkdir()
+    _write_entry(full, entry)
+    repo_full = Repository(root=full)
+    write_normalized_records(records, full / NORMALIZED_RELATIVE_PATH)
+    for anchor, kwargs in readings.items():
+        _memo(repo_full, anchor, **kwargs)
+    rebuild(repo_full)
+
+    assert _dump_derived(repo_incremental) == _dump_derived(repo_full)
+    assert gather(repo_incremental, "SUB-people/bob") == gather(
+        repo_full, "SUB-people/bob"
+    )
+
+
 # --- appearances, lexical engine only (#19, part 06 §8.11) ------------------
 
 
@@ -1074,7 +1213,9 @@ def test_appearances_are_unaffected_by_the_gather_overlay_and_vice_versa(tmp_pat
     """AC 3: the gathered set and appearances are separately queryable and
     never cross - the overlay that exists only for the gathered set (§8.3)
     has no reach into the ``appearances`` table, since appearances has no
-    overlay of its own (AC 5) and nothing here reads ``gather_overlay``."""
+    overlay of its own (AC 5) and ``compute_appearances`` never touches an
+    entry file."""
+    _git(tmp_path, "init", "-q")
     entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
     repository = Repository(root=tmp_path)
     _write_entry(tmp_path, entry)
@@ -1092,8 +1233,8 @@ def test_appearances_are_unaffected_by_the_gather_overlay_and_vice_versa(tmp_pat
 
     assert list_appearances(repository, "SUB-people/bob") == appeared_before
     # And the reverse holds by construction: `compute_appearances` never
-    # writes to `gather_overlay`, so the only row there is the exclude just
-    # made.
+    # writes to the entry file, so the only overlay row anywhere is the
+    # exclude just made.
     assert [o.action for o in list_overlay(repository)] == ["exclude"]
 
 

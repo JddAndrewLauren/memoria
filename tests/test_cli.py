@@ -1,5 +1,6 @@
 import hashlib
 import os
+import re
 import subprocess
 import sys
 
@@ -118,40 +119,6 @@ def test_validate_refuses_clearly_when_no_corpus_is_configured(tmp_path):
     assert "no default" in result.stderr
 
 
-def test_validate_exits_nonzero_and_reports_when_index_schema_version_is_unknown(
-    tmp_path,
-):
-    """`validate` reaches the index through `list_overlay` -> `connect` ->
-    `_ensure_preserved` (#18), which refuses to read a cache carrying a
-    schema version this build does not know (#117). That must land as a
-    clean `validate: <message>` and exit 1, like `rebuild` already does for
-    the same exception - not an uncaught traceback (#118)."""
-    import sqlite3
-
-    from memoria.index import INDEX_RELATIVE_PATH
-
-    evidence_root, _ = _make_valid_corpus(tmp_path)
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=str(evidence_root))
-
-    rebuilt = run_cli("rebuild", env=env, cwd=repo_root)
-    assert rebuilt.returncode == 0, rebuilt.stderr
-
-    db_path = repo_root / INDEX_RELATIVE_PATH
-    con = sqlite3.connect(db_path)
-    con.execute("UPDATE memoria_schema SET value = '99' WHERE key = 'memo_version'")
-    con.commit()
-    con.close()
-
-    result = run_cli("validate", env=env, cwd=repo_root)
-
-    assert result.returncode == 1
-    assert "Traceback" not in result.stderr
-    assert "validate: " in result.stderr
-    assert "schema version '99'" in result.stderr
-
-
 def test_normalize_converts_a_plain_text_unit(tmp_path):
     evidence_root = tmp_path / "evidence"
     raw_file = evidence_root / "raw" / "a.txt"
@@ -216,6 +183,20 @@ def test_rebuild_needs_no_corpus_at_all(tmp_path):
     assert "run `memoria normalize` to produce them" in result.stdout
     assert "wrote 0 change projection(s)" in result.stdout
     assert "0 appearance(s) over 0 lexically-matchable" in result.stdout
+
+
+def test_rebuild_reports_how_long_it_took(tmp_path):
+    """#21's sixth acceptance criterion: what `rebuild` regenerated is
+    already reported line by line; this is the "how long it took" half."""
+    (tmp_path / "pyproject.toml").write_text("")
+    env = {k: v for k, v in os.environ.items() if k != "MEMORIA_EVIDENCE_ROOT"}
+
+    result = run_cli("rebuild", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    match = re.search(r"rebuild: completed in (\d+\.\d\d)s", result.stdout)
+    assert match, result.stdout
+    assert float(match.group(1)) >= 0
 
 
 def test_seed_subjects_needs_no_corpus_at_all(tmp_path):

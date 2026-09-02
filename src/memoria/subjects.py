@@ -58,6 +58,24 @@ class Subject:
 
 
 @dataclass(frozen=True)
+class OverlayAct:
+    """One pin or exclusion recorded on an entry (part 06 §8.3's curated
+    overlay). An attributable author act, not machine output - part 04 §42
+    is explicit that it "is never regenerated" and survives even
+    ``.memoria/index.db`` being deleted outright, which is why it is stored
+    here rather than in the index. A later act against the same ``anchor``
+    replaces this one rather than stacking a history of it, the same
+    click-authorized shape as a settlement (§8.7).
+    """
+
+    anchor: str
+    action: str
+    actor_name: str
+    actor_email: str
+    at: str
+
+
+@dataclass(frozen=True)
 class Entry:
     """One entry under a subject.
 
@@ -65,11 +83,15 @@ class Entry:
     or a relation between two entry references - part 06 §8.2/§8.4's
     extension. ``body`` is raw markdown: unbadged testimony and Memoria's
     badged statements, shared territory read by ``parse_statements``.
+    ``overlay`` is the entry's pins and exclusions (``OverlayAct``); the
+    gathered set itself is derived and carries no state of its own
+    (``memoria.index.gather``).
     """
 
     id: str
     match_terms: list[str] = field(default_factory=list)
     body: str = ""
+    overlay: list[OverlayAct] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -163,8 +185,22 @@ def _split_sections(body: str) -> dict[str, str]:
 
 
 def entry_to_markdown(entry: Entry) -> str:
-    """Serialize an entry: frontmatter (id, match terms), then its body."""
+    """Serialize an entry: frontmatter (id, match terms, overlay), then its
+    body. ``overlay`` is omitted from the frontmatter entirely when empty,
+    the common case, rather than writing a bare ``overlay: []`` to every
+    entry that has never been pinned or excluded."""
     frontmatter = {"id": entry.id, "match_terms": list(entry.match_terms)}
+    if entry.overlay:
+        frontmatter["overlay"] = [
+            {
+                "anchor": act.anchor,
+                "action": act.action,
+                "actor_name": act.actor_name,
+                "actor_email": act.actor_email,
+                "at": act.at,
+            }
+            for act in entry.overlay
+        ]
     return (
         "---\n" + yaml.safe_dump(frontmatter, sort_keys=False) + "---\n\n" + entry.body + "\n"
     )
@@ -205,6 +241,10 @@ def parse_entry(text: str, *, source: str = "<string>") -> Entry:
         except SubjectError as exc:
             raise SubjectError(f"{source}: {exc}") from exc
 
+    overlay = [
+        _parse_overlay_act(row, source) for row in frontmatter.get("overlay", [])
+    ]
+
     # Exactly the separators entry_to_markdown inserted around the body -
     # the blank line after the frontmatter's closing "---" and the trailing
     # newline the file ends with - and no more.
@@ -213,7 +253,30 @@ def parse_entry(text: str, *, source: str = "<string>") -> Entry:
     if body.endswith("\n"):
         body = body[:-1]
 
-    return Entry(id=entry_id, match_terms=match_terms, body=body)
+    return Entry(id=entry_id, match_terms=match_terms, body=body, overlay=overlay)
+
+
+def _parse_overlay_act(row: object, source: str) -> OverlayAct:
+    if not isinstance(row, dict):
+        raise SubjectError(f"{source}: 'overlay' row is not a mapping: {row!r}")
+    missing = {"anchor", "action", "actor_name", "actor_email", "at"} - row.keys()
+    if missing:
+        raise SubjectError(
+            f"{source}: 'overlay' row is missing {sorted(missing)!r}: {row!r}"
+        )
+    action = str(row["action"])
+    if action not in ("pin", "exclude"):
+        raise SubjectError(
+            f"{source}: 'overlay' row has action {action!r}, expected 'pin' "
+            "or 'exclude'"
+        )
+    return OverlayAct(
+        anchor=str(row["anchor"]),
+        action=action,
+        actor_name=str(row["actor_name"]),
+        actor_email=str(row["actor_email"]),
+        at=str(row["at"]),
+    )
 
 
 def classify_match_term(term: str) -> str:
