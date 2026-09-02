@@ -60,6 +60,25 @@ def _report_derived(counts) -> None:
         )
 
 
+def _report_staleness(staleness_map) -> None:
+    """Print the staleness map's top-line count and its causes (#37).
+
+    Model-free and derived fresh every rebuild (part 06 §8.12); a zero count
+    is not printed specially - there is nothing to warn about and the line
+    just does not appear, matching ``_report_derived``'s "only print what is
+    actionable" shape.
+    """
+    if not staleness_map.not_current:
+        return
+    causes = ", ".join(
+        f"{count} {cause}" for cause, count in sorted(staleness_map.count_by_cause().items())
+    )
+    print(
+        f"rebuild: {staleness_map.paragraphs_not_current} paragraph(s) not "
+        f"current ({causes})"
+    )
+
+
 def _report_appearances(report) -> None:
     """Print what the appearances pass produced (#19, part 06 §8.11).
 
@@ -233,6 +252,7 @@ def main(argv=None):
             )
         _report_derived(report.counts)
         _report_appearances(report.appearances)
+        _report_staleness(report.staleness)
         change_ids = changes.rebuild(repository)
         print(
             f"rebuild: wrote {len(change_ids)} change projection(s) to "

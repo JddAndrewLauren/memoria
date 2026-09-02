@@ -97,6 +97,19 @@ INDEX_RELATIVE_PATH = ".memoria/index.db"
 # (`memoria.subjects.OverlayAct`), because "preserved by a rebuild" is not
 # the same guarantee as "survives `.memoria/` being deleted outright", which
 # is what part 04 §42 actually demands of an attributed author act.
+#
+# `memoria.audit` (#37) adds two more kinds to the same table: `engagement`
+# and `audit_verdict`, the manuscript's own memoized judgements - the *other*
+# half of §8.12's "one cache, two key compositions" (the extraction's
+# paragraph/cluster_summary split is the first). Unlike the extraction's
+# rows, `memoria.audit` *does* look a judgement up by `anchor` - not to
+# decide a cache hit (the composed `key` still does that alone), but to find
+# the most recent prior judgement at a manuscript position when a key misses,
+# which is how it tells "never audited" apart from "edited since" (there is
+# nothing durable to join against otherwise: §4.1 forbids a stable pointer
+# into a passage, so the anchor there is a paragraph's position within its
+# section's `draft.md`, recomputed fresh on every call rather than stored
+# anywhere else - an aid to diagnosis, not a citation).
 PRESERVED_TABLES = ("memoria_schema", "memo")
 
 # Everything else. Dropped and regenerated on every `memoria rebuild`, which
@@ -126,6 +139,18 @@ DERIVED_TABLES = (
 # miss rather than a corruption, and the old rows sit inert.
 MEMO_SCHEMA_VERSION = "1"
 
+# The column list `memo` is created with, and the one `_widen_memo_kinds`
+# rewrites a pre-#37 table into - one definition, so they cannot drift.
+_MEMO_COLUMNS = (
+    "key TEXT PRIMARY KEY, "
+    "kind TEXT NOT NULL CHECK (kind IN ("
+    "'paragraph', 'cluster_summary', 'engagement', 'audit_verdict'"
+    ")), "
+    "anchor TEXT NOT NULL DEFAULT '', "
+    "value TEXT NOT NULL, "
+    "written_at TEXT NOT NULL"
+)
+
 _PRESERVED_DDL = (
     "CREATE TABLE IF NOT EXISTS memoria_schema("
     "key TEXT PRIMARY KEY, value TEXT NOT NULL"
@@ -136,13 +161,7 @@ _PRESERVED_DDL = (
     # membership, and what makes an orphaned row (a paragraph that was
     # renormalized out from under it) inert rather than wrong - nothing ever
     # looks a row up by `anchor`.
-    "CREATE TABLE IF NOT EXISTS memo("
-    "key TEXT PRIMARY KEY, "
-    "kind TEXT NOT NULL CHECK (kind IN ('paragraph', 'cluster_summary')), "
-    "anchor TEXT NOT NULL DEFAULT '', "
-    "value TEXT NOT NULL, "
-    "written_at TEXT NOT NULL"
-    ")",
+    "CREATE TABLE IF NOT EXISTS memo(" + _MEMO_COLUMNS + ")",
     "CREATE INDEX IF NOT EXISTS memo_kind_anchor ON memo(kind, anchor)",
 )
 
@@ -379,6 +398,13 @@ class RebuildReport:
     ``appearances`` is ``AppearancesReport`` (#19) - what the appearances
     pass produced, and what it skipped.
 
+    ``staleness`` is ``memoria.audit.StalenessMap`` (#37) - the whole
+    manuscript's not-current judgements, recomputed against whatever the rest
+    of this rebuild just regenerated. Typed loosely, like ``counts``, to keep
+    this module's imports one-way: ``memoria.audit`` imports this module for
+    ``connect``/``gather``, so the reverse import has to stay inside
+    ``rebuild`` rather than at module scope.
+
     ``elapsed_seconds`` is wall-clock time over the whole function (#21's
     "reports what it regenerated and how long it took"), timed with
     ``time.monotonic`` rather than ``time.time`` so a clock adjustment
@@ -388,6 +414,7 @@ class RebuildReport:
     records: list[NormalizedRecord]
     counts: object
     appearances: AppearancesReport
+    staleness: object
     elapsed_seconds: float
 
 
@@ -533,6 +560,7 @@ def _ensure_preserved(con: sqlite3.Connection) -> None:
     """
     for statement in _PRESERVED_DDL:
         con.execute(statement)
+    _widen_memo_kinds(con)
     row = con.execute(
         "SELECT value FROM memoria_schema WHERE key = 'memo_version'"
     ).fetchone()
@@ -550,6 +578,36 @@ def _ensure_preserved(con: sqlite3.Connection) -> None:
             "automatically - rebuild with --reset-cache to throw it away and "
             "re-run the extraction, or use a build that reads this version."
         )
+
+
+def _widen_memo_kinds(con: sqlite3.Connection) -> None:
+    """Rewrite a ``memo`` table built before #37 so it accepts the two
+    judgement kinds, keeping every row.
+
+    ``memo`` is preserved, so ``rebuild`` never drops it, and ``CREATE TABLE
+    IF NOT EXISTS`` leaves an existing table exactly as it is - which means
+    the old two-kind CHECK constraint would otherwise survive forever and
+    the first ``memoria.audit`` write would fail with a bare
+    ``sqlite3.IntegrityError``. The rows are model output the author paid
+    for, so this is not a ``MEMO_SCHEMA_VERSION`` bump (that forces
+    ``--reset-cache``): it is a lossless copy into the current DDL. SQLite
+    cannot alter a CHECK in place, hence create-copy-drop-rename.
+    """
+    row = con.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memo'"
+    ).fetchone()
+    if row is None or "'engagement'" in row[0]:
+        return
+    con.execute("DROP TABLE IF EXISTS memo_widened")
+    con.execute("CREATE TABLE memo_widened(" + _MEMO_COLUMNS + ")")
+    con.execute(
+        "INSERT INTO memo_widened (key, kind, anchor, value, written_at) "
+        "SELECT key, kind, anchor, value, written_at FROM memo"
+    )
+    con.execute("DROP TABLE memo")
+    con.execute("ALTER TABLE memo_widened RENAME TO memo")
+    con.execute("CREATE INDEX IF NOT EXISTS memo_kind_anchor ON memo(kind, anchor)")
+    con.commit()
 
 
 def _check_paragraphs_shape(con: sqlite3.Connection) -> None:
@@ -955,10 +1013,20 @@ def rebuild(
             repository, recurrence_threshold=recurrence_threshold
         )
     appearances_report = compute_appearances(repository)
+    # Imported here for the same reason as `extraction` above: `memoria.audit`
+    # imports this module (`connect`, `gather`), so the reverse direction
+    # stays confined to this function rather than module scope. The map
+    # itself needs nothing this function produced above other than a fresh
+    # index to read `gather` from - it is a hash comparison over whatever is
+    # now on disk, not a consumer of `counts` or `appearances_report`.
+    from memoria import audit
+
+    staleness_map = audit.compute_staleness_map(repository)
     return RebuildReport(
         records=records,
         counts=counts,
         appearances=appearances_report,
+        staleness=staleness_map,
         elapsed_seconds=time.monotonic() - started,
     )
 
