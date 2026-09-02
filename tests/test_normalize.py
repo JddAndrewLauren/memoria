@@ -14,6 +14,7 @@ from memoria.index import INDEX_RELATIVE_PATH, build_index, search
 from memoria.manifest import (
     DEFAULT_MANIFEST_RELATIVE_PATH,
     load_converter_pins,
+    check_ledger,
     load_manifest,
 )
 from memoria.normalize import CONVERTERS, EMAIL_CONVERTER_VERSION, normalize
@@ -220,6 +221,43 @@ def test_normalize_converts_a_new_plain_text_unit(tmp_path):
     assert record.original_file == "raw/a.txt"
     assert record.converter == CONVERTERS[".txt"][1]()
     assert len(record.raw_sha256) == 64
+
+
+def test_a_non_utf8_plain_text_unit_converts_instead_of_stopping_the_pass(tmp_path):
+    """One Windows-1252 file must not stop the whole pass. Found on the
+    Enron slice (#15): a .txt attachment carried 0x82, the UTF-8 decode
+    raised, and every unit after it stayed unwritten."""
+    evidence_root = tmp_path / "evidence"
+    full = evidence_root / "raw" / "a.txt"
+    full.parent.mkdir(parents=True)
+    full.write_bytes("He said \u201cno\u201d.\n\nSecond.".encode("cp1252"))
+    _write_raw_file(evidence_root, "b.txt", "After it.")
+    repository = Repository(root=tmp_path / "repo")
+
+    report = normalize(repository, evidence_root)
+
+    assert report.converted == ["SRC-000001", "SRC-000002"]
+    first, second = read_all(repository)
+    assert first.paragraphs == ["He said \u201cno\u201d.", "Second."]
+    assert second.paragraphs == ["After it."]
+
+
+def test_a_unit_whose_converter_raises_is_reported_and_the_pass_goes_on(tmp_path):
+    """A corrupt pdf attachment stopped a whole Enron normalize run (#106).
+    The failed unit gets no record and is named in the report; the units
+    after it are still converted."""
+    evidence_root = tmp_path / "evidence"
+    _write_raw_file(evidence_root, "a.pdf", "not a pdf at all")
+    _write_raw_file(evidence_root, "b.txt", "After it.")
+    repository = Repository(root=tmp_path / "repo")
+
+    report = normalize(repository, evidence_root)
+
+    assert list(report.failed) == ["SRC-000001"]
+    assert "SRC-000001" not in report.converted
+    assert report.converted == ["SRC-000002"]
+    (record,) = read_all(repository)
+    assert record.id == "SRC-000002"
 
 
 def test_a_run_over_unchanged_input_produces_no_diff(tmp_path):
@@ -665,6 +703,77 @@ def test_normalized_email_corpus_passes_validate(tmp_path):
     normalize(repository, evidence_root)
 
     assert validate(evidence_root, repo_root=repository.root) == []
+
+
+def test_the_enron_fixture_converts_with_its_headers_and_without_the_footer(tmp_path):
+    """docs/corpora/enron.md findings 1 and 4, found unimplemented on the M1
+    gate walk (#108): the stray header line swallowed every header into the
+    body of 38% of the slice's records, and the ZL attribution footer was a
+    paragraph in 74% of them."""
+    from pathlib import Path as _Path
+
+    fixture = _Path(__file__).parent / "fixtures" / "enron" / "plain.eml"
+    evidence_root = tmp_path / "evidence"
+    _write_raw_binary_file(evidence_root, "plain.eml", fixture.read_bytes())
+    repository = Repository(root=tmp_path / "repo")
+
+    normalize(repository, evidence_root)
+
+    (record,) = [r for r in read_all(repository) if r.source_type == "email"]
+    assert "Dana.Reyes@example.com" in record.email_from
+    assert record.paragraphs, "the body was lost with the headers"
+    body = "\n".join(record.paragraphs)
+    assert "Microsoft Mail Internet Headers" not in body
+    assert "EDRM Enron Email Data Set" not in body
+    assert "*****" not in body
+
+
+def test_a_body_carrying_the_footer_twice_loses_both(tmp_path):
+    """A forwarded message carries the producer's footer once per hop. The
+    cut is a global substitution, so neither copy survives as a paragraph."""
+    from pathlib import Path as _Path
+
+    raw = (_Path(__file__).parent / "fixtures" / "enron" / "plain.eml").read_bytes()
+    start = raw.index(b"***********")
+    footer = raw[start:]
+    doubled = raw[:start] + b"Forwarded below.\r\n\r\n" + footer + b"\r\n" + footer
+    evidence_root = tmp_path / "evidence"
+    _write_raw_binary_file(evidence_root, "twice.eml", doubled)
+    repository = Repository(root=tmp_path / "repo")
+
+    normalize(repository, evidence_root)
+
+    (record,) = [r for r in read_all(repository) if r.source_type == "email"]
+    body = "\n".join(record.paragraphs)
+    assert "Forwarded below." in body
+    assert "EDRM Enron Email Data Set" not in body
+    assert "*****" not in body
+
+
+def test_a_second_run_does_not_duplicate_attachment_entries(tmp_path):
+    """Every re-run used to append a second copy of every attachment entry
+    to the manifest (#108): 1,217 attachments, 3,636 entries after three
+    runs over the Enron slice."""
+    evidence_root = tmp_path / "evidence"
+    _write_mbox(
+        evidence_root,
+        "box.mbox",
+        [
+            _email_message(
+                from_="a@example.com", to="b@example.com",
+                date="Mon, 1 Jan 2001 10:00:00 -0000", message_id="<m1@example.com>",
+                body="Sheet attached.", attachment=("sheet.xlsx", b"PK\x03\x04"),
+            )
+        ],
+    )
+    repository = Repository(root=tmp_path / "repo")
+    normalize(repository, evidence_root)
+    report = normalize(repository, evidence_root)
+
+    assert report.added_units == []
+    entries = load_manifest(evidence_root / "raw" / "manifest.yaml")
+    assert len({e.id for e in entries}) == len(entries)
+    assert check_ledger(entries) == []
 
 
 def test_a_standalone_eml_file_converts_to_one_record(tmp_path):
