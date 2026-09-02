@@ -167,6 +167,29 @@ def read_session(repository: Repository, session_id: str, turn: int | None = Non
     )
 
 
+def turn_role(repository: Repository, session_id: str, turn: int) -> str:
+    """Who spoke turn ``turn`` of ``session_id`` - ``"Author"`` or
+    ``"Assistant"``, exactly as ``transcript.md``'s own heading names it.
+
+    What lets a caller tell the author's own words from the model's without
+    re-deriving the transcript's heading grammar - the record extractor's
+    ``[author]``/``[open]`` badge rule (#30, part 06 §9.2) turns on exactly
+    this fact: an ``[author]`` statement needs a citing turn that is
+    identifiably the author's, not the assistant's own suggestion.
+    """
+    path = transcript_path(repository, session_id)
+    if not path.is_file():
+        raise SessionError(f"no such session: {session_id}")
+    text = path.read_text(encoding="utf-8")
+    headings = list(_TURN_HEADING.finditer(text))
+    for match in headings:
+        if int(match.group("n")) == turn:
+            return match.group("role")
+    raise SessionError(
+        f"{session_id} has {len(headings)} turn(s); there is no T{turn:03d}"
+    )
+
+
 def derive_session(repository: Repository, session_id: str, jsonl_path: Path) -> DerivationResult:
     """Derive ``transcript.md`` and ``metadata.yaml`` for ``session_id`` from
     Claude Code's own per-session JSONL at ``jsonl_path``.

@@ -194,6 +194,8 @@ enumeration of kinds, and had already drifted.
 | `CHG-20261014-003` | the §11 projection of that human-authored commit | part 04 §4 / ADR-0008 |
 | `SES-20260912-1432` | that session's whole transcript, verbatim, plus its context manifest | part 04 §4 / #28, #29 |
 | `SES-20260912-1432#T017` | that transcript turn's text alone | part 04 §4 / #28 |
+| `DEC-0088` | that decision's `decisions.md` block, verbatim | part 04 §4 / #30 |
+| `RES-20261018-003` | that research memo, verbatim | part 04 §4 / #30 |
 
 The bare anchor is accepted deliberately. `SearchResult` carries
 `(src_id, anchor, source_type)`, so a search hit feeds straight back into
@@ -355,11 +357,11 @@ gives.
 ### What it refuses, and how
 
 Reference kinds part 04 §4 defines but this build does not resolve —
-`CLM-`, `RES-`, `DEC-` — return an error **naming the kind**, never a silent
+`CLM-` — return an error **naming the kind**, never a silent
 empty result. A kind that is not part of the scheme at all is named too, and
 distinguished from one that is merely unbuilt. `SUB-x` and `SUB-x/y` were on
-this list until issue #16, `CHG-` until ADR-0008, and `SES-` (with or
-without a `#T` turn) until #28.
+this list until issue #16, `CHG-` until ADR-0008, `SES-` (with or without a
+`#T` turn) until #28, and `RES-`/`DEC-` until #30.
 
 Errors reach the model as `ToolError`, which is the SDK's anticipated-failure
 type: the call comes back `is_error` with the message intact. Any other

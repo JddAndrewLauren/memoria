@@ -293,8 +293,6 @@ def test_reading_an_unresolvable_chapter_or_section_id_names_it(tmp_path):
     ("ref", "kind"),
     [
         ("CLM-0041", "CLM"),
-        ("RES-20261018-003", "RES"),
-        ("DEC-0088", "DEC"),
     ],
 )
 def test_a_not_yet_existing_kind_names_the_kind(tmp_path, ref, kind):
@@ -303,6 +301,16 @@ def test_a_not_yet_existing_kind_names_the_kind(tmp_path, ref, kind):
 
     assert kind in str(caught.value)
     assert "not resolvable in this build yet" in str(caught.value)
+
+
+def test_reading_a_nonexistent_decision_or_research_memo_names_it(tmp_path):
+    """DEC-/RES- are implemented (#30); an id that does not exist is an
+    ordinary named refusal, not the generic "not resolvable" message."""
+    repository = _repo(tmp_path)
+    with pytest.raises(ReadError, match="DEC-0088"):
+        read(repository, "DEC-0088")
+    with pytest.raises(ReadError, match="RES-20261018-003"):
+        read(repository, "RES-20261018-003")
 
 
 def test_an_unknown_kind_is_named_rather_than_treated_as_a_path(tmp_path):
