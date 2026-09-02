@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
 
-type Tone = "green" | "amber" | "blue" | "neutral";
+type Tone = "green" | "amber" | "blue" | "red" | "neutral";
 
 const TONE_CLASSES: Record<Tone, string> = {
   green: "bg-sources-tint text-sources",
   amber: "bg-amber-tint text-amber",
   blue: "bg-panel text-subjects",
+  red: "bg-panel text-manuscript",
   neutral: "bg-panel text-secondary",
 };
 

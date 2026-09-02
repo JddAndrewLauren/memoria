@@ -48,7 +48,10 @@ const READ_RESPONSE = {
 };
 
 function renderAt(path: string) {
-  const queryClient = new QueryClient();
+  // retry: false - a stubbed 404 should surface as isError on the first
+  // attempt, not after react-query's default retry/backoff outlasts
+  // findByText's timeout.
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[path]}>
@@ -128,6 +131,78 @@ describe("the source viewer (§19.4)", () => {
     expect(screen.getByText(/A blue heron flew over\./).textContent).not.toContain(
       "Added by the editor",
     );
+  });
+
+  it("shows a distinct failure line, not silence, when the cited paragraph's backlinks can't be read", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/read")) {
+          return new Response(JSON.stringify({ detail: "not found" }), { status: 404 });
+        }
+        if (url.includes("/api/sources/SRC-000184")) {
+          return new Response(JSON.stringify(SOURCE_DETAIL), { status: 200 });
+        }
+        return new Response(JSON.stringify({ detail: "not found" }), { status: 404 });
+      }),
+    );
+
+    renderAt("/sources/SRC-000184#src-000184-p2");
+
+    expect(await screen.findByText("This reference could not be read.")).toBeInTheDocument();
+    // Not indistinguishable from "this paragraph has no backlinks": that
+    // renders "Cited by" plus "Nothing links this paragraph yet.", neither
+    // of which should appear on an actual read failure.
+    expect(screen.queryByText("Cited by")).not.toBeInTheDocument();
+  });
+
+  it("gives inferred, published and unresolved distinguishable tones, not just different text", async () => {
+    const cases: Array<[confidence: string, expectedClass: string]> = [
+      ["inferred", "text-amber"],
+      ["published", "text-subjects"],
+      ["unresolved", "text-manuscript"],
+    ];
+
+    for (const [confidence, expectedClass] of cases) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          new Response(
+            JSON.stringify({ ...SOURCE_DETAIL, date_confidence: confidence, apparatus: [] }),
+            { status: 200 },
+          ),
+        ),
+      );
+
+      const { unmount } = renderAt("/sources/SRC-000184");
+      const badge = await screen.findByText(new RegExp(confidence));
+      expect(badge.closest("span")).toHaveClass(expectedClass);
+      unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("gives chapter-only and unresolved different tones despite both lacking a resolved date_confidence badge color", async () => {
+    // chapter-only's own no-date badge is covered by the "renders an honest
+    // absence" test below; this is the same record shape but with a date
+    // present and date_confidence: unresolved - the case the review found
+    // collapsed into an identical neutral badge as chapter-only.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ ...SOURCE_DETAIL, date_confidence: "unresolved", apparatus: [] }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    renderAt("/sources/SRC-000184");
+
+    const badge = await screen.findByText(/unresolved/);
+    expect(badge.closest("span")).toHaveClass("text-manuscript");
+    expect(badge.closest("span")).not.toHaveClass("text-secondary");
   });
 
   it("renders an honest absence when a record carries no date at all", async () => {

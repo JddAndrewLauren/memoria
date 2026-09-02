@@ -6,17 +6,20 @@ import { Badge } from "../components/Badge";
 import { Backlinks } from "../components/CitationPanel";
 import { useCitationPanel } from "../lib/citationPanel";
 
-type Tone = "green" | "amber" | "blue" | "neutral";
+type Tone = "green" | "amber" | "blue" | "red" | "neutral";
 
 // Five values, all of which must render distinguishably
 // (docs/normalized-record-schema.md's `date_confidence`) - not just as
-// different text in an identical badge.
+// different text in an identical badge. `chapter-only` and `unresolved`
+// are different claims about the world ("the chapter is all we have" vs.
+// "we tried and failed") and so get different tones, not just different
+// words in the same neutral badge.
 const DATE_CONFIDENCE_TONE: Record<string, Tone> = {
   exact: "green",
   inferred: "amber",
   published: "blue",
   "chapter-only": "neutral",
-  unresolved: "neutral",
+  unresolved: "red",
 };
 
 /**
@@ -42,7 +45,7 @@ export default function SourceDetailPage() {
   // The cited paragraph's backlinks - the same generic read the slide-over
   // uses, keyed to this one anchor rather than every paragraph, so an
   // ordinary full-record read stays cheap.
-  const { data: citation } = useQuery({
+  const { data: citation, isError: isCitationError } = useQuery({
     queryKey: ["read", citedAnchor],
     queryFn: () => readRef(citedAnchor as string),
     enabled: Boolean(citedAnchor),
@@ -120,6 +123,9 @@ export default function SourceDetailPage() {
         >
           Open original ↗
         </Link>
+        {citedAnchor && isCitationError && (
+          <p className="mt-6 text-xs text-muted">This reference could not be read.</p>
+        )}
         {citedAnchor && citation?.overlay && (
           <Backlinks overlay={citation.overlay} onOpen={openCitation} />
         )}
