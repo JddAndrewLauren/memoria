@@ -320,6 +320,30 @@ def test_a_paragraph_past_the_end_says_how_many_there_are(tmp_path):
         read(_repo(tmp_path), "SRC-000184 P99")
 
 
+def test_a_paragraph_reference_skips_page_markers(tmp_path):
+    """¶2 addresses the second real paragraph, not the marker between them -
+    a marker earns no extraction read (docs/normalized-record-schema.md,
+    "pdf page markers are not paragraphs")."""
+    repository = _repo(
+        tmp_path,
+        _record(paragraphs=["Page one.", "<!-- page 2 -->", "Page two."]),
+    )
+
+    result = read(repository, "SRC-000184 P2")
+
+    assert result.text == "Page two."
+
+
+def test_a_paragraph_count_past_the_end_excludes_page_markers(tmp_path):
+    repository = _repo(
+        tmp_path,
+        _record(paragraphs=["Page one.", "<!-- page 2 -->", "Page two."]),
+    )
+
+    with pytest.raises(ReadError, match="has 2 paragraphs"):
+        read(repository, "SRC-000184 P99")
+
+
 def test_a_missing_repository_file_is_a_clear_error(tmp_path):
     with pytest.raises(ReadError, match="no such file in this repository"):
         read(Repository(root=tmp_path), "docs/absent.md")

@@ -36,7 +36,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 from memoria.index import SearchFilters, SearchResult, search as search_index
 from memoria.ledger import append_read, append_search, session_id_from_env
-from memoria.records import Read, ReadError, read as read_ref
+from memoria.records import Read, ReadError, read as read_ref, real_paragraphs
 from memoria.repository import Repository, from_env
 
 mcp = MCPServer(
@@ -116,7 +116,7 @@ def render(result: Read) -> str:
         f"contemporaneous: {'true' if record.contemporaneous else 'false'}",
         f"original_file: {record.original_file}",
         f"original_locator: {record.original_locator}",
-        f"paragraphs_in_record: {len(record.paragraphs)}",
+        f"paragraphs_in_record: {len(real_paragraphs(record))}",
     ]
     return "\n".join(header) + "\n---\n" + result.text
 

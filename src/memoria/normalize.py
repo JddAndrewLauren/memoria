@@ -9,11 +9,11 @@ record is the state; there is no second store of what was converted when.
 
 **The converter seam.** ``CONVERTERS`` maps a raw file's suffix to a
 ``Converter`` - a plain function from raw bytes to a ``ConversionDraft``.
-This issue registers a plain-text converter only; #77 and #78 register docx
-/ pdf and email converters here without otherwise touching this module. A
-raw unit whose suffix has no registered converter is left in the ledger -
-its ID is still allocated - but produces no record yet, the same way a
-future stub-record format will.
+#76 registered a plain-text converter; #77 adds docx and pdf here without
+otherwise touching this module, and #78 registers email converters the same
+way. A raw unit whose suffix has no registered converter is left in the
+ledger - its ID is still allocated - but produces no record yet, the same
+way a future stub-record format will.
 
 **Email is a finer-grained raw unit** (#78, part 05 §5.1-5.2): a message
 inside an ``.mbox`` or ``.eml`` export, not the export file itself. That
@@ -30,13 +30,19 @@ from __future__ import annotations
 
 import email
 import hashlib
+import io
 import mailbox
 import re
+import zipfile
 from dataclasses import dataclass, replace
 from email.message import Message
 from email.utils import parsedate_to_datetime
-from pathlib import Path
+from importlib.metadata import version as _pkg_version
+from pathlib import Path, PurePosixPath
 from typing import Callable
+
+import pdfplumber
+from markitdown import MarkItDown, StreamInfo
 
 from memoria.manifest import (
     DEFAULT_MANIFEST_RELATIVE_PATH,
@@ -62,8 +68,9 @@ class ConversionDraft:
     provenance fields (``id``, ``original_file``, ``raw_sha256``,
     ``converter``) that are not the converter's to decide.
 
-    The email-only fields below (part 05 §5.2, ``docs/normalized-record-
-    schema.md``) are ``None`` for every non-email draft.
+    The email-only fields and the docx-only ``images`` field below (part 05
+    §5.2/§5.4, ``docs/normalized-record-schema.md``) are ``None`` for every
+    draft that does not apply.
     """
 
     source_type: str
@@ -80,6 +87,10 @@ class ConversionDraft:
     in_reply_to: str | None = None
     quoted_excised: bool | None = None
     attachments: list[dict] | None = None
+    # docx only (part 05 §5.4): embedded images by name. None for every
+    # other converter, matching ``NormalizedRecord.images`` (docs/
+    # normalized-record-schema.md, "images").
+    images: list[str] | None = None
 
 
 Converter = Callable[[bytes], ConversionDraft]
@@ -111,13 +122,97 @@ def convert_plain_text(raw_bytes: bytes) -> ConversionDraft:
     )
 
 
+# A markdown image reference and nothing else on its line - what MarkItDown
+# emits in place of a docx's embedded image (a data URI truncated to
+# "..."). Matched whole, so an image reference embedded mid-sentence in
+# real prose (not a paragraph MarkItDown itself ever produces) is left
+# alone rather than silently edited.
+_MARKDOWN_IMAGE = re.compile(r"^!\[[^\]]*\]\([^)]*\)$")
+
+
+def convert_docx(raw_bytes: bytes) -> ConversionDraft:
+    """The docx converter (part 05 §5.4): MarkItDown, no stripping pass.
+
+    Keeps whatever MarkItDown emits - headings, lists, tables, links, bold,
+    italic - verbatim, split into paragraphs on blank lines like every other
+    converter. Embedded images are the one exception: MarkItDown inlines
+    them as a data URI, which is "embedded" and the schema forbids it, so a
+    paragraph that is nothing but an image reference is dropped rather than
+    kept. The image's name is not recoverable from that data URI anyway -
+    it comes from the docx's own ``word/media/`` entries instead, listed in
+    the `images` field, docx's document body being a zip archive.
+    """
+    result = MarkItDown().convert(
+        io.BytesIO(raw_bytes), stream_info=StreamInfo(extension=".docx")
+    )
+    text = result.markdown.replace("\r\n", "\n")
+    paragraphs = [
+        p.strip()
+        for p in _BLANK_LINE.split(text)
+        if p.strip() and not _MARKDOWN_IMAGE.match(p.strip())
+    ]
+    with zipfile.ZipFile(io.BytesIO(raw_bytes)) as archive:
+        images = sorted(
+            PurePosixPath(name).name
+            for name in archive.namelist()
+            if name.startswith("word/media/")
+        )
+    return ConversionDraft(
+        source_type="document",
+        recorded_date="",
+        event_date="",
+        date_confidence="unresolved",
+        contemporaneous=True,
+        original_locator="(whole file)",
+        paragraphs=paragraphs,
+        images=images,
+    )
+
+
+def convert_pdf(raw_bytes: bytes) -> ConversionDraft:
+    """The pdf converter (part 05 §5.4): pdfplumber, page by page.
+
+    MarkItDown's own pdf path drops page boundaries, so this reads pages
+    directly and writes a ``<!-- page N -->`` marker between them - not a
+    paragraph, per ``docs/normalized-record-schema.md``'s "pdf page markers
+    are not paragraphs", and never produced for page 1, which needs no
+    marker to be found. A pdf with no extractable text on any page is a
+    stub record: no paragraphs, no markers either, since a marker with
+    nothing to locate is not worth carrying. OCR is out of scope.
+    """
+    blocks: list[str] = []
+    has_text = False
+    with pdfplumber.open(io.BytesIO(raw_bytes)) as pdf:
+        for page_number, page in enumerate(pdf.pages, start=1):
+            if page_number > 1:
+                blocks.append(f"<!-- page {page_number} -->")
+            text = (page.extract_text() or "").replace("\r\n", "\n")
+            page_paragraphs = [p.strip() for p in _BLANK_LINE.split(text) if p.strip()]
+            if page_paragraphs:
+                has_text = True
+            blocks.extend(page_paragraphs)
+    return ConversionDraft(
+        source_type="document",
+        recorded_date="",
+        event_date="",
+        date_confidence="unresolved",
+        contemporaneous=True,
+        original_locator="(whole file)",
+        paragraphs=blocks if has_text else [],
+    )
+
+
 # suffix -> (converter, pinned version string written to the record's
 # `converter` field). The version is part of the pin: a future bump to this
 # converter's behaviour changes the string, which is what makes "a changed
 # converter version reconverts exactly that unit" possible without a code
-# diff also being required to trigger it.
+# diff also being required to trigger it. docx/pdf pin the installed library
+# version rather than a literal, so the string always matches what actually
+# ran; #79 pins the library version itself exactly in pyproject.toml.
 CONVERTERS: dict[str, tuple[Converter, str]] = {
     ".txt": (convert_plain_text, "plain-text 1"),
+    ".docx": (convert_docx, f"markitdown {_pkg_version('markitdown')}"),
+    ".pdf": (convert_pdf, f"pdfplumber {_pkg_version('pdfplumber')}"),
 }
 
 # The pinned version for every email message record, whether it came from an
@@ -212,6 +307,7 @@ def normalize(
             in_reply_to=draft.in_reply_to,
             quoted_excised=draft.quoted_excised,
             attachments=draft.attachments,
+            images=draft.images,
         )
         output_root.mkdir(parents=True, exist_ok=True)
         record_path.write_text(record_to_markdown(record), encoding="utf-8")

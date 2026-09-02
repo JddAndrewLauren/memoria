@@ -15,9 +15,11 @@ from memoria.records import (
     NORMALIZED_RELATIVE_PATH,
     NormalizedRecord,
     ReadError,
+    is_page_marker,
     list_sources,
     read_all,
     read_raw_source,
+    real_paragraphs,
     record_to_markdown,
     write_normalized_records,
 )
@@ -75,6 +77,91 @@ def test_record_carries_raw_sha256_and_converter():
     )
     assert f"raw_sha256: {'a' * 64}" in markdown
     assert "converter: plain-text 1" in markdown
+
+
+# --- images field (docx, #77) ---------------------------------------------
+
+
+def test_images_field_is_absent_when_not_set():
+    """Every non-docx record: no `images:` key at all, not an empty list."""
+    markdown = record_to_markdown(_record())
+    assert "images:" not in markdown
+
+
+def test_images_field_round_trips(tmp_path):
+    output_root = tmp_path / NORMALIZED_RELATIVE_PATH
+    write_normalized_records(
+        [_record(images=["image1.png", "image2.jpg"])], output_root
+    )
+
+    (loaded,) = read_all(Repository(root=tmp_path))
+
+    assert loaded.images == ["image1.png", "image2.jpg"]
+
+
+def test_images_field_round_trips_when_empty(tmp_path):
+    """A docx with no embedded images still reports an empty list - it is
+    set, just empty, distinct from None for a record that is not docx."""
+    output_root = tmp_path / NORMALIZED_RELATIVE_PATH
+    write_normalized_records([_record(images=[])], output_root)
+
+    (loaded,) = read_all(Repository(root=tmp_path))
+
+    assert loaded.images == []
+
+
+# --- pdf page markers (#77) -------------------------------------------------
+
+
+def test_page_marker_earns_no_anchor():
+    markdown = record_to_markdown(
+        _record(paragraphs=["Page one.", "<!-- page 2 -->", "Page two."])
+    )
+    assert "<!-- page 2 -->" in markdown
+    assert '<a id="src-000184-p1"></a>' in markdown
+    assert '<a id="src-000184-p2"></a>' in markdown
+    # Only two real paragraphs - the marker between them must not consume
+    # an anchor number of its own.
+    assert '<a id="src-000184-p3"></a>' not in markdown
+
+
+def test_page_marker_round_trips(tmp_path):
+    original = _record(paragraphs=["Page one.", "<!-- page 2 -->", "Page two."])
+    output_root = tmp_path / NORMALIZED_RELATIVE_PATH
+    write_normalized_records([original], output_root)
+
+    (loaded,) = read_all(Repository(root=tmp_path))
+
+    assert loaded == original
+    assert record_to_markdown(loaded) == record_to_markdown(original)
+
+
+def test_a_paragraph_that_contains_its_own_blank_line_is_not_mistaken_for_a_marker(
+    tmp_path,
+):
+    """A real paragraph may carry an internal blank line (part 05 §5.4's
+    whitespace policy: never reflowed). The parser must recover it whole,
+    not split it apart while hunting for a page marker."""
+    original = _record(
+        paragraphs=["First.", "A paragraph carrying\n\nits own blank line."]
+    )
+    output_root = tmp_path / NORMALIZED_RELATIVE_PATH
+    write_normalized_records([original], output_root)
+
+    (loaded,) = read_all(Repository(root=tmp_path))
+
+    assert loaded == original
+
+
+def test_real_paragraphs_excludes_markers():
+    record = _record(paragraphs=["Page one.", "<!-- page 2 -->", "Page two."])
+    assert real_paragraphs(record) == ["Page one.", "Page two."]
+
+
+def test_is_page_marker():
+    assert is_page_marker("<!-- page 2 -->")
+    assert not is_page_marker("Not a marker.")
+    assert not is_page_marker("<!-- page 2 --> trailing text")
 
 
 def test_records_round_trip_through_disk(tmp_path):
