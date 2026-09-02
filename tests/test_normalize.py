@@ -14,6 +14,7 @@ from memoria.index import INDEX_RELATIVE_PATH, build_index, search
 from memoria.manifest import (
     DEFAULT_MANIFEST_RELATIVE_PATH,
     load_converter_pins,
+    check_ledger,
     load_manifest,
 )
 from memoria.normalize import CONVERTERS, EMAIL_CONVERTER_VERSION, normalize
@@ -702,6 +703,55 @@ def test_normalized_email_corpus_passes_validate(tmp_path):
     normalize(repository, evidence_root)
 
     assert validate(evidence_root, repo_root=repository.root) == []
+
+
+def test_the_enron_fixture_converts_with_its_headers_and_without_the_footer(tmp_path):
+    """docs/corpora/enron.md findings 1 and 4, found unimplemented on the M1
+    gate walk (#108): the stray header line swallowed every header into the
+    body of 38% of the slice's records, and the ZL attribution footer was a
+    paragraph in 74% of them."""
+    from pathlib import Path as _Path
+
+    fixture = _Path(__file__).parent / "fixtures" / "enron" / "plain.eml"
+    evidence_root = tmp_path / "evidence"
+    _write_raw_binary_file(evidence_root, "plain.eml", fixture.read_bytes())
+    repository = Repository(root=tmp_path / "repo")
+
+    normalize(repository, evidence_root)
+
+    (record,) = [r for r in read_all(repository) if r.source_type == "email"]
+    assert "Dana.Reyes@example.com" in record.email_from
+    assert record.paragraphs, "the body was lost with the headers"
+    body = "\n".join(record.paragraphs)
+    assert "Microsoft Mail Internet Headers" not in body
+    assert "EDRM Enron Email Data Set" not in body
+    assert "*****" not in body
+
+
+def test_a_second_run_does_not_duplicate_attachment_entries(tmp_path):
+    """Every re-run used to append a second copy of every attachment entry
+    to the manifest (#108): 1,217 attachments, 3,636 entries after three
+    runs over the Enron slice."""
+    evidence_root = tmp_path / "evidence"
+    _write_mbox(
+        evidence_root,
+        "box.mbox",
+        [
+            _email_message(
+                from_="a@example.com", to="b@example.com",
+                date="Mon, 1 Jan 2001 10:00:00 -0000", message_id="<m1@example.com>",
+                body="Sheet attached.", attachment=("sheet.xlsx", b"PK\x03\x04"),
+            )
+        ],
+    )
+    repository = Repository(root=tmp_path / "repo")
+    normalize(repository, evidence_root)
+    report = normalize(repository, evidence_root)
+
+    assert report.added_units == []
+    entries = load_manifest(evidence_root / "raw" / "manifest.yaml")
+    assert len({e.id for e in entries}) == len(entries)
+    assert check_ledger(entries) == []
 
 
 def test_a_standalone_eml_file_converts_to_one_record(tmp_path):
