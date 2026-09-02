@@ -23,6 +23,15 @@ retrospective - are implemented in ``memoria.index.search``, not here: the
 tool shapes results, the core computes them, so the same filters reach #64's
 web layer without a second, divergent copy.
 
+The ``extraction_*`` tools (#17) are a second class on the same server, and
+they are here because there is nowhere else: no model-driving service
+(``docs/poc-plan.md`` §3), and the session agent is the only model in the
+system. The server is still an adapter - **it cannot call a model and does
+not** - so the pass is a conversation: the tools hand paragraphs out, and
+every model output arrives back as tool arguments. There is no ``generate_``
+anything here, and ``extraction_derive`` and ``extraction_finish`` are local
+computation over rows.
+
 See ``docs/tool-surface.md`` for the forced signatures and what is still open.
 """
 
@@ -34,8 +43,16 @@ import sys
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
+import memoria.extraction as extraction
 from memoria.index import SearchFilters, SearchResult, search as search_index
-from memoria.ledger import append_read, append_search, session_id_from_env
+from memoria.ledger import (
+    append_extraction_batch,
+    append_extraction_brief,
+    append_extraction_summary_task,
+    append_read,
+    append_search,
+    session_id_from_env,
+)
 from memoria.records import Read, ReadError, read as read_ref, real_paragraphs
 from memoria.repository import Repository, from_env
 
@@ -46,7 +63,9 @@ mcp = MCPServer(
         "read(ref): a SRC- record ID, a paragraph of one, or a repository "
         "path. Evidence comes back verbatim, never summarized. Find text "
         "with search_text(query, filters); each hit's anchor feeds straight "
-        "into read(ref)."
+        "into read(ref). The extraction_* tools run the archive-wide "
+        "extraction pass, and are driven by the `extraction` skill rather "
+        "than reached for directly."
     ),
 )
 
@@ -191,6 +210,433 @@ def search_text(query: str, filters: SearchFilters | None = None) -> str:
     results = search_index(repository(), query, filters)
     append_search(repository(), session_id(), query, filters, results)
     return render_search(results)
+
+
+# --- the extraction (#17) ----------------------------------------------------
+
+
+def _tool_error(exc: extraction.ExtractionError) -> ToolError:
+    return ToolError(str(exc))
+
+
+@mcp.tool()
+def extraction_brief() -> str:
+    """The briefing for one extraction pass: fetch it once and hold it.
+
+    Carries the extraction prompt verbatim, every subject prompt, and the
+    names of the entries that already exist. The prompt served here is the
+    prompt hashed into every row the pass writes - there is no second copy of
+    it anywhere, and nothing paraphrases it.
+
+    Cheap to re-fetch. A session that was compacted or interrupted asks for
+    this again and is back where it was; nothing else is needed to resume.
+    """
+    result = extraction.brief(repository())
+    append_extraction_brief(
+        repository(), session_id(), [subject.id for subject in result.subjects]
+    )
+    return render_brief(result)
+
+
+def render_brief(result: extraction.Brief) -> str:
+    lines = [result.extraction_prompt, "", "## The subjects", ""]
+    for subject in result.subjects:
+        lines += [
+            f"### {subject.id}",
+            "",
+            f"Match: {subject.match}",
+            f"Hazards: {subject.hazards}",
+            f"auto-promote: {'yes' if subject.auto_promote else 'no'}",
+            "",
+        ]
+    lines += ["## The entries that exist", ""]
+    if result.entry_names:
+        lines += [f"- {entry_id} ({name})" for entry_id, name in result.entry_names]
+    else:
+        lines.append(
+            "None yet. Every mention is an unplaced surface form, which is the "
+            "expected state of a fresh archive."
+        )
+    lines += ["", f"paragraphs awaiting extraction: {result.pending}"]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def extraction_next_paragraphs(limit: int = 20) -> str:
+    """The next paragraphs with no cached reading, verbatim.
+
+    Each comes back as its anchor and its text. Read each one **alone**, per
+    the brief, and send the results back with extraction_record.
+
+    Paragraphs already read under the current prompts are never served, so
+    calling this again after an interruption resumes rather than repeats, and
+    a corpus that is fully read says so.
+    """
+    if limit < 1:
+        raise ToolError("limit must be at least 1")
+    # One call, then sliced: asking twice - once for the batch and once for a
+    # count - would read every record file in the archive twice per batch.
+    pending = extraction.pending_paragraphs(repository())
+    remaining = len(pending)
+    pending = pending[:limit]
+    if pending:
+        # A call that served nothing gets no line. The ledger is an account of
+        # what reached a context (#13), and a pass over an already-read corpus
+        # reaches one with nothing - writing "served: []" would pad the file
+        # with the absence of evidence.
+        append_extraction_batch(
+            repository(), session_id(), [paragraph.anchor for paragraph in pending]
+        )
+    return render_batch(pending, remaining)
+
+
+def render_batch(pending: list[extraction.PendingParagraph], remaining: int) -> str:
+    """One paragraph per block, text contiguous and unmodified.
+
+    The same contract ``read`` keeps: the text is never wrapped, re-indented
+    or escaped, and it comes from the record file rather than the index copy.
+    """
+    if not pending:
+        return "No paragraphs need extraction."
+    blocks = [f"anchor: {p.anchor}\n---\n{p.text}" for p in pending]
+    # Counted before recording, so this batch is still in it - a paragraph is
+    # not read until its reading is cached.
+    return (
+        "\n\n".join(blocks)
+        + f"\n\nawaiting extraction: {remaining} (including this batch)"
+    )
+
+
+@mcp.tool()
+def extraction_record(results: list[extraction.RecordedParagraph]) -> str:
+    """Cache one batch of paragraph readings.
+
+    Send the whole batch in one call. Each element is accepted or rejected on
+    its own: a malformed reading names its reason and the rest are kept, so a
+    bad element costs one paragraph rather than the batch. Re-send only what
+    was rejected, corrected against the reason given.
+
+    A relation whose ends are not both placed in that same paragraph is
+    rejected rather than quietly dropped - reaching across paragraphs is the
+    mistake worth being told about.
+    """
+    if not results:
+        raise ToolError("no results to record")
+    outcome = extraction.record_batch(
+        repository(),
+        [(result.anchor, result.to_extraction()) for result in results],
+    )
+    return render_record_outcome(outcome, len(results))
+
+
+def render_record_outcome(outcome: extraction.RecordOutcome, total: int) -> str:
+    """Per-element outcomes, so a rejected reading names its reason and the
+    good ones beside it are still kept."""
+    lines = [f"accepted {len(outcome.accepted)} of {total}"]
+    lines += [f"rejected - {reason}" for _, reason in outcome.rejected]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def extraction_derive(
+    recurrence_threshold: int = extraction.RECURRENCE_THRESHOLD_DEFAULT,
+) -> str:
+    """Recompute placements, candidates, relations and clusters. No model.
+
+    Runs after the paragraph loop and before the summary loop. Calls nothing
+    outside this machine, and is safe to re-run: it recomputes derived state
+    and destroys nothing else.
+    """
+    counts = extraction.derive(
+        repository(), recurrence_threshold=recurrence_threshold
+    )
+    return render_counts(counts)
+
+
+def render_counts(counts: extraction.DerivedCounts) -> str:
+    lines = [
+        f"paragraphs read: {counts.memo_hits} of {counts.paragraphs} "
+        f"({counts.memo_misses} not current)",
+        f"placements: {counts.placements}",
+        f"unplaced surface forms: {counts.unplaced_forms}",
+        f"relations: {counts.relations}",
+        f"proposed match terms: {counts.proposed_match_terms}",
+    ]
+    for subject_id, (raw, kept) in sorted(counts.per_subject.items()):
+        lines.append(
+            f"{subject_id}: raw {raw} -> filtered {kept} "
+            f"(threshold {counts.recurrence_threshold})"
+        )
+    lines.append(f"clusters: {counts.clusters} [{counts.clustering_backend}]")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def extraction_next_summary() -> str:
+    """The next cluster needing a summary, with what to write it from.
+
+    A leaf cluster serves its member paragraphs. A parent serves its
+    children's summaries **and no paragraph text at all** - an upper level is
+    a compression of a compression, so there is nothing below to reach for.
+
+    Echo the `membership` value back to extraction_record_summary exactly as
+    given.
+    """
+    pending = extraction.pending_cluster_summaries(repository())
+    if not pending:
+        return "No cluster needs a summary."
+    task = pending[0]
+    append_extraction_summary_task(
+        repository(), session_id(), task.cluster_id, list(task.member_anchors)
+    )
+    return render_summary_task(
+        task, len(pending), extraction.CLUSTER_SUMMARY_PROMPT
+    )
+
+
+def render_summary_task(
+    task: extraction.PendingSummary, remaining: int, prompt: str
+) -> str:
+    lines = [
+        prompt,
+        "",
+        f"cluster: {task.cluster_id}",
+        f"level: {task.level}",
+        f"membership: {task.memo_key}",
+        f"defined by: {task.label}",
+        f"remaining: {remaining}",
+        "",
+    ]
+    if task.child_summaries:
+        lines.append("## Its child clusters' summaries")
+        lines.append("")
+        lines += [f"- {summary}" for summary in task.child_summaries]
+    else:
+        lines.append("## Its member paragraphs")
+        lines.append("")
+        lines += [f"- {anchor}" for anchor in task.member_anchors]
+        lines.append("")
+        lines.append("Read them with read(ref) before writing.")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def extraction_record_summary(
+    cluster_id: str, membership: str, summary: str
+) -> str:
+    """Store one cluster's summary. The text is `[inferred]`: stored and
+    served as written, and never evidence.
+
+    `membership` must be the value served with the task. A mismatch means the
+    clusters were recomputed in between and this text is about different
+    members, which is refused rather than filed.
+    """
+    try:
+        extraction.record_summary(repository(), cluster_id, membership, summary)
+    except extraction.ExtractionError as exc:
+        raise _tool_error(exc) from exc
+    remaining = len(extraction.pending_cluster_summaries(repository()))
+    return f"recorded {cluster_id}; {remaining} cluster(s) still need a summary"
+
+
+@mcp.tool()
+def extraction_status() -> str:
+    """Where the extraction stands. Reads only; changes nothing.
+
+    Call this before starting a pass and show the author the numbers. A pass
+    reads every un-read paragraph of the archive with a model, so it happens
+    because someone asked for it, not because a tool was available.
+    """
+    return render_status(extraction.status(repository()))
+
+
+def render_status(state: extraction.Status) -> str:
+    lines = [
+        f"paragraphs: {state.extracted} of {state.paragraphs} read "
+        f"({state.pending} awaiting extraction)",
+        f"candidates: {state.candidates_raw} raw, "
+        f"{state.candidates_above_threshold} above the recurrence filter "
+        f"(threshold {state.recurrence_threshold})",
+    ]
+    for subject_id, (raw, kept) in sorted(state.per_subject.items()):
+        lines.append(f"  {subject_id}: raw {raw} -> filtered {kept}")
+    lines += [
+        f"unplaced surface forms: {state.unplaced_forms}",
+        f"proposed match terms awaiting the author: {state.proposed_match_terms}",
+    ]
+    if state.clusters_by_level:
+        levels = ", ".join(
+            f"level {level}: {count}"
+            for level, count in sorted(state.clusters_by_level.items())
+        )
+        lines.append(f"clusters: {levels} [{state.clustering_backend}]")
+    lines.append(
+        f"summaries: {state.summaries_done} written, "
+        f"{state.summaries_pending} pending"
+    )
+    if not state.derived:
+        lines.append("nothing derived yet - run extraction_derive")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def extraction_finish(
+    recurrence_threshold: int = extraction.RECURRENCE_THRESHOLD_DEFAULT,
+) -> str:
+    """Close the pass: promote what the subjects say may promote, and report.
+
+    Only subjects declaring `auto-promote: yes` create entries, and only from
+    candidates above the recurrence filter. Everything else waits, ranked, for
+    the author.
+
+    Refuses while any paragraph is still unread - nothing promotes off a
+    partial reading of the archive. A partial *summary* set is fine and is
+    reported rather than refused.
+    """
+    try:
+        report = extraction.finish_pass(
+            repository(), recurrence_threshold=recurrence_threshold
+        )
+    except extraction.ExtractionError as exc:
+        raise _tool_error(exc) from exc
+    return render_pass_report(report)
+
+
+def render_pass_report(report: extraction.PassReport) -> str:
+    lines = [render_counts(report.counts), ""]
+    if report.promotions:
+        lines.append("auto-promoted:")
+        lines += [f"  {render_promotion(promotion)}" for promotion in report.promotions]
+    else:
+        lines.append(
+            "auto-promoted: nothing - no subject declares auto-promote: yes, "
+            "or none of its candidates cleared the filter"
+        )
+    lines.append(f"clusters still needing a summary: {report.summaries_pending}")
+    lines.append(
+        "The extraction asserted nothing. Every candidate above is a "
+        "proposal; match terms decide what is placed."
+    )
+    return "\n".join(lines)
+
+
+def render_promotion(promotion: extraction.Promotion) -> str:
+    terms = ", ".join(promotion.match_terms) or "none"
+    line = f"{promotion.entry_id} (match terms: {terms})"
+    if promotion.dropped:
+        line += (
+            f" - {promotion.dropped} proposed term(s) not seeded; the cap is "
+            f"{extraction.MAX_SEEDED_MATCH_TERMS}, edit the entry to add more"
+        )
+    return line
+
+
+@mcp.tool()
+def extraction_candidates(
+    subject_id: str | None = None,
+    rejected: bool = False,
+    limit: int = 25,
+) -> str:
+    """List candidates ranked by recurrence, with the id a promotion takes.
+
+    By default those above the recurrence filter, waiting for the author;
+    `rejected=True` lists the ones the filter set aside instead, which #17
+    keeps enumerable because the filter is a guaranteed miss generator.
+    """
+    rows = extraction.candidates(
+        repository(),
+        subject_id=subject_id,
+        above_threshold=not rejected,
+        limit=limit,
+    )
+    if not rows:
+        return "No candidates" + (" below the filter." if rejected else " waiting.")
+    return "\n".join(
+        f"{c.candidate_id}  {c.subject_id}  {c.label}  x{c.recurrence}"
+        + (f"  - {c.gloss}" if c.gloss else "")
+        for c in rows
+    )
+
+
+@mcp.tool()
+def extraction_unplaced_forms(limit: int = 50) -> str:
+    """List the mentions the pass could not tie to an entry, by anchor."""
+    rows = extraction.unplaced_forms(repository(), limit=limit)
+    if not rows:
+        return "No unplaced surface forms."
+    return "\n".join(
+        f"{f.anchor}  {f.surface_form!r}  {f.subject_id or '-'}  {f.reason}"
+        + (f" ({f.proposed_entry_id})" if f.proposed_entry_id else "")
+        for f in rows
+    )
+
+
+@mcp.tool()
+def extraction_cluster(cluster_id: str) -> str:
+    """Open one cluster: its members, its paragraphs, its children, and its
+    summary if one has been written. What an author reads before promoting
+    it; the paragraphs are anchors for `read(ref)`, never text."""
+    try:
+        cluster = extraction.cluster_members(repository(), cluster_id)
+    except extraction.ExtractionError as exc:
+        raise _tool_error(exc) from exc
+    return render_cluster(cluster)
+
+
+def render_cluster(cluster: extraction.ClusterMembers) -> str:
+    lines = [
+        f"{cluster.cluster_id} level {cluster.level}"
+        + (f" under {cluster.parent_id}" if cluster.parent_id else ""),
+        f"label: {cluster.label}",
+        f"members: {', '.join(cluster.members)}",
+        f"paragraphs: {', '.join(cluster.anchors)}",
+        f"children: {', '.join(cluster.children) or 'none'}",
+        f"summary: {cluster.summary if cluster.summary else 'not yet written'}",
+    ]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def extraction_promote_candidate(
+    candidate_id: str, entry_slug: str | None = None
+) -> str:
+    """The author's one-key promotion: make one candidate an entry, seeded
+    with the match terms the extraction proposed for it.
+
+    An author act, never the pass's own. Call it only when the author has
+    named the candidate; run `extraction_derive` afterwards so the new
+    entry's placements land.
+    """
+    try:
+        promotion = extraction.promote_candidate(
+            repository(), candidate_id, extraction.CURATOR, entry_slug=entry_slug
+        )
+    except extraction.ExtractionError as exc:
+        raise _tool_error(exc) from exc
+    return "promoted " + render_promotion(promotion)
+
+
+@mcp.tool()
+def extraction_promote_cluster(
+    cluster_id: str, subject_id: str = "SUB-themes", entry_slug: str | None = None
+) -> str:
+    """The author's one-key promotion of a cluster into a Theme or an Arc,
+    seeded with the entries and relations that defined it.
+
+    `subject_id` is the author's choice between the two; the cluster itself
+    belongs to neither until this call.
+    """
+    try:
+        promotion = extraction.promote_cluster(
+            repository(),
+            cluster_id,
+            extraction.CURATOR,
+            subject_id=subject_id,
+            entry_slug=entry_slug,
+        )
+    except extraction.ExtractionError as exc:
+        raise _tool_error(exc) from exc
+    return "promoted " + render_promotion(promotion)
 
 
 def main(argv=None) -> int:

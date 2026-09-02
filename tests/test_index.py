@@ -1,6 +1,8 @@
 import sqlite3
 import time
 
+import pytest
+
 from memoria.index import (
     INDEX_RELATIVE_PATH,
     SNIPPET_ELLIPSIS,
@@ -304,7 +306,7 @@ def test_rebuild_regenerates_an_index_deleted_from_disk(tmp_path):
 def test_rebuild_reports_no_records_when_none_exist(tmp_path):
     """With no corpus chosen there is nothing to index, and that is not an
     error - it is the honest state."""
-    assert rebuild(Repository(root=tmp_path)) == []
+    assert rebuild(Repository(root=tmp_path)).records == []
 
 
 def test_search_over_the_full_corpus_returns_well_under_a_second(tmp_path):
@@ -386,3 +388,124 @@ def test_a_snippet_does_not_change_which_rows_match(tmp_path):
         (r.src_id, r.anchor) for r in thin
     ]
     assert all(r.snippet for r in with_snippet)
+
+
+# --- the rebuild rule (#17) --------------------------------------------------
+
+
+def _tables(repository):
+    from memoria.index import INDEX_RELATIVE_PATH
+
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    try:
+        return {
+            name
+            for name, in con.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    finally:
+        con.close()
+
+
+def test_every_table_is_either_preserved_or_derived(tmp_path):
+    """The rebuild rule, as a closed set.
+
+    `build_index` drops `DERIVED_TABLES` by name and leaves `PRESERVED_TABLES`
+    alone, so a table in neither list is silently outside the rule - it would
+    survive a rebuild without anyone having decided it should. That is the
+    failure worth catching, and it is the one a test of "the cache survives"
+    would miss entirely.
+    """
+    from memoria.index import DERIVED_TABLES, PRESERVED_TABLES
+
+    repository = _index(tmp_path, [_record("SRC-000001", ["A paragraph."])])
+
+    named = set(PRESERVED_TABLES) | set(DERIVED_TABLES)
+    # FTS5 keeps its own shadow tables beside the virtual table; they are
+    # SQLite's, not ours, and are dropped with their parent.
+    ours = {name for name in _tables(repository) if not name.startswith("records_")}
+    assert ours == named
+
+
+def test_rebuild_regenerates_the_fts5_table_without_orphan_shadow_tables(tmp_path):
+    """`build_index` used to delete the whole file, which regenerated the FTS5
+    virtual table for free. It cannot any more - the memo cache lives in that
+    file - so the shadow tables are now dropped by `DROP TABLE records`
+    instead, and this is the check that they really are."""
+    records = [_record("SRC-000001", ["The fox ran through the woods."])]
+    repository = _index(tmp_path, records)
+    build_index(repository, records)
+    build_index(repository, records)
+
+    shadows = {name for name in _tables(repository) if name.startswith("records_")}
+    assert shadows == {
+        "records_data",
+        "records_idx",
+        "records_content",
+        "records_docsize",
+        "records_config",
+    }
+    assert len(search(repository, "fox")) == 1
+
+
+def test_build_index_no_longer_deletes_the_database_file(tmp_path):
+    """The file is long-lived now, because the memo cache is in it."""
+    from memoria.index import INDEX_RELATIVE_PATH
+
+    records = [_record("SRC-000001", ["A paragraph."])]
+    repository = _index(tmp_path, records)
+    db_path = repository.root / INDEX_RELATIVE_PATH
+    con = sqlite3.connect(db_path)
+    con.execute(
+        "INSERT INTO memo (key, kind, anchor, value, written_at) "
+        "VALUES ('k', 'paragraph', 'a', '{}', '')"
+    )
+    con.commit()
+    con.close()
+
+    build_index(repository, records)
+
+    con = sqlite3.connect(db_path)
+    try:
+        assert con.execute("SELECT COUNT(*) FROM memo").fetchone()[0] == 1
+    finally:
+        con.close()
+
+
+def test_a_cache_this_build_cannot_read_is_refused_rather_than_dropped(tmp_path):
+    """Discarding a cache the author paid a model to fill is the one
+    unrecoverable mistake this module can make, so an unknown schema version
+    stops and names the flag that would do it on purpose."""
+    from memoria.index import INDEX_RELATIVE_PATH, IndexSchemaError
+
+    records = [_record("SRC-000001", ["A paragraph."])]
+    repository = _index(tmp_path, records)
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.execute("UPDATE memoria_schema SET value = '99' WHERE key = 'memo_version'")
+    con.commit()
+    con.close()
+
+    with pytest.raises(IndexSchemaError, match="reset-cache"):
+        build_index(repository, records)
+
+
+def test_reset_cache_discards_it_deliberately(tmp_path):
+    from memoria.index import INDEX_RELATIVE_PATH
+
+    records = [_record("SRC-000001", ["A paragraph."])]
+    repository = _index(tmp_path, records)
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.execute("UPDATE memoria_schema SET value = '99' WHERE key = 'memo_version'")
+    con.commit()
+    con.close()
+
+    build_index(repository, records, reset_cache=True)
+
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    try:
+        assert con.execute(
+            "SELECT value FROM memoria_schema WHERE key = 'memo_version'"
+        ).fetchone()[0] == "1"
+    finally:
+        con.close()

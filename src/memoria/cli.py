@@ -4,7 +4,8 @@ import argparse
 import sys
 
 from memoria import changes
-from memoria.index import INDEX_RELATIVE_PATH, rebuild
+from memoria.extraction import RECURRENCE_THRESHOLD_DEFAULT
+from memoria.index import INDEX_RELATIVE_PATH, IndexSchemaError, rebuild
 from memoria.normalize import normalize as run_normalize
 from memoria.records import NORMALIZED_RELATIVE_PATH
 from memoria.repository import NoEvidenceRoot, from_env, require_evidence_root
@@ -17,15 +18,73 @@ from memoria.write import Checkpointed, checkpoint
 # import from it.
 
 
+def _report_derived(counts) -> None:
+    """Print what the derive step produced.
+
+    #17 asks that the raw and filtered candidate counts be reported, and the
+    reason is not tidiness: the recurrence filter is a known miss generator
+    (part 06 §8.4), so the gap between the two numbers is the size of what is
+    being set aside. A filter whose cost is never printed is a filter nobody
+    argues with.
+    """
+    if counts.memo_misses:
+        print(
+            f"rebuild: {counts.memo_hits} of {counts.paragraphs} paragraphs "
+            f"read by the extraction; {counts.memo_misses} not current - run "
+            "the extraction to read them"
+        )
+    print(
+        f"rebuild: {counts.placements} placement(s), "
+        f"{counts.unplaced_forms} unplaced surface form(s), "
+        f"{counts.relations} relation(s), "
+        f"{counts.proposed_match_terms} proposed match term(s)"
+    )
+    for subject_id, (raw, kept) in sorted(counts.per_subject.items()):
+        print(
+            f"rebuild:   {subject_id}: {raw} candidate(s) raw -> {kept} above "
+            f"the recurrence filter (threshold {counts.recurrence_threshold})"
+        )
+    if counts.clusters:
+        print(
+            f"rebuild: {counts.clusters} cluster(s) "
+            f"[{counts.clustering_backend}]"
+        )
+    elif counts.placements or counts.candidates_raw:
+        print(
+            "rebuild: no clusters - install the `graph` extra "
+            "(`pip install -e '.[graph]'`) to cluster the co-occurrence graph"
+        )
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="memoria")
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser(
         "validate", help="Verify the raw evidence corpus against its manifest"
     )
-    subparsers.add_parser(
+    rebuild_parser = subparsers.add_parser(
         "rebuild",
-        help="Delete and regenerate the search index from the normalized records",
+        help="Delete and regenerate all derived state from the normalized records",
+    )
+    rebuild_parser.add_argument(
+        "--recurrence-threshold",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "How many distinct paragraphs a candidate must appear in to clear "
+            f"the recurrence filter (default {RECURRENCE_THRESHOLD_DEFAULT}). "
+            "Rejected candidates are kept and stay listable either way."
+        ),
+    )
+    rebuild_parser.add_argument(
+        "--reset-cache",
+        action="store_true",
+        help=(
+            "Also discard the extraction's memo cache. This throws away model "
+            "output that only another extraction pass can replace; a plain "
+            "rebuild keeps it."
+        ),
     )
     subparsers.add_parser(
         "checkpoint",
@@ -91,7 +150,16 @@ def main(argv=None):
         return 0
 
     if args.command == "rebuild":
-        records = rebuild(repository)
+        try:
+            report = rebuild(
+                repository,
+                recurrence_threshold=args.recurrence_threshold,
+                reset_cache=args.reset_cache,
+            )
+        except IndexSchemaError as exc:
+            print(f"rebuild: {exc}", file=sys.stderr)
+            return 1
+        records = report.records
         print(
             f"rebuild: indexed {len(records)} records to "
             f"{repository.root / INDEX_RELATIVE_PATH}"
@@ -102,6 +170,7 @@ def main(argv=None):
                 "normalize` to produce them, or choose an evidence corpus "
                 "(see docs/open-problems.md 2.4)"
             )
+        _report_derived(report.counts)
         change_ids = changes.rebuild(repository)
         print(
             f"rebuild: wrote {len(change_ids)} change projection(s) to "
