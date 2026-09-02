@@ -213,7 +213,7 @@ def test_normalize_converts_a_new_plain_text_unit(tmp_path):
     assert record.id == "SRC-000001"
     assert record.paragraphs == ["First paragraph.", "Second paragraph."]
     assert record.original_file == "raw/a.txt"
-    assert record.converter == CONVERTERS[".txt"][1]
+    assert record.converter == CONVERTERS[".txt"][1]()
     assert len(record.raw_sha256) == 64
 
 
@@ -295,7 +295,7 @@ def test_a_changed_converter_version_reconverts_the_unit(tmp_path, monkeypatch):
     monkeypatch.setitem(
         normalize_module.CONVERTERS,
         ".txt",
-        (normalize_module.convert_plain_text, "plain-text 2"),
+        (normalize_module.convert_plain_text, lambda: "plain-text 2"),
     )
     report = normalize(repository, evidence_root)
 
@@ -664,7 +664,7 @@ def test_normalize_converts_a_docx_with_full_structure(tmp_path):
     assert "* First bullet" in body and "* Second bullet" in body
     assert "| Header A | Header B |" in body
     assert record.images == ["image1.png"]
-    assert record.converter == CONVERTERS[".docx"][1]
+    assert record.converter == CONVERTERS[".docx"][1]()
     # Not embedded: no image data anywhere in the body (docs/
     # normalized-record-schema.md, "images").
     assert "data:image" not in body
@@ -736,7 +736,7 @@ def test_normalize_converts_a_two_page_pdf_with_a_page_marker(tmp_path):
     assert '<a id="src-000001-p2"></a>' in markdown
     # The marker itself never earns an anchor of its own.
     assert '<a id="src-000001-p3"></a>' not in markdown
-    assert record.converter == CONVERTERS[".pdf"][1]
+    assert record.converter == CONVERTERS[".pdf"][1]()
 
 
 def test_pdf_page_marker_is_absent_from_the_fts5_index(tmp_path):

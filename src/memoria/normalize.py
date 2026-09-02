@@ -41,9 +41,6 @@ from importlib.metadata import version as _pkg_version
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
-import pdfplumber
-from markitdown import MarkItDown, StreamInfo
-
 from memoria.manifest import (
     DEFAULT_MANIFEST_RELATIVE_PATH,
     ManifestEntry,
@@ -141,7 +138,15 @@ def convert_docx(raw_bytes: bytes) -> ConversionDraft:
     kept. The image's name is not recoverable from that data URI anyway -
     it comes from the docx's own ``word/media/`` entries instead, listed in
     the `images` field, docx's document body being a zip archive.
+
+    ``markitdown`` is imported here, not at module level: it is an optional
+    ``convert`` extra (pyproject.toml), and importing it eagerly would make
+    ``memoria.normalize`` - and therefore ``memoria.cli``, which imports it
+    unconditionally - fail on a core-only install even for subcommands that
+    never touch a docx.
     """
+    from markitdown import MarkItDown, StreamInfo
+
     result = MarkItDown().convert(
         io.BytesIO(raw_bytes), stream_info=StreamInfo(extension=".docx")
     )
@@ -179,7 +184,12 @@ def convert_pdf(raw_bytes: bytes) -> ConversionDraft:
     marker to be found. A pdf with no extractable text on any page is a
     stub record: no paragraphs, no markers either, since a marker with
     nothing to locate is not worth carrying. OCR is out of scope.
+
+    ``pdfplumber`` is imported here, not at module level, for the same
+    core-only-install reason as ``convert_docx``'s ``markitdown`` import.
     """
+    import pdfplumber
+
     blocks: list[str] = []
     has_text = False
     with pdfplumber.open(io.BytesIO(raw_bytes)) as pdf:
@@ -209,10 +219,18 @@ def convert_pdf(raw_bytes: bytes) -> ConversionDraft:
 # diff also being required to trigger it. docx/pdf pin the installed library
 # version rather than a literal, so the string always matches what actually
 # ran; #79 pins the library version itself exactly in pyproject.toml.
-CONVERTERS: dict[str, tuple[Converter, str]] = {
-    ".txt": (convert_plain_text, "plain-text 1"),
-    ".docx": (convert_docx, f"markitdown {_pkg_version('markitdown')}"),
-    ".pdf": (convert_pdf, f"pdfplumber {_pkg_version('pdfplumber')}"),
+#
+# The pin is a zero-arg callable, not a precomputed string: resolving it
+# calls ``_pkg_version`` on the docx/pdf extras' distributions, which raises
+# if they are not installed. Building this dict is core-only-install-safe
+# only if that resolution stays deferred to conversion time, per unit
+# actually processed - never at module import.
+_Pin = Callable[[], str]
+
+CONVERTERS: dict[str, tuple[Converter, _Pin]] = {
+    ".txt": (convert_plain_text, lambda: "plain-text 1"),
+    ".docx": (convert_docx, lambda: f"markitdown {_pkg_version('markitdown')}"),
+    ".pdf": (convert_pdf, lambda: f"pdfplumber {_pkg_version('pdfplumber')}"),
 }
 
 # The pinned version for every email message record, whether it came from an
@@ -273,7 +291,8 @@ def normalize(
             if registration is None:
                 unconvertible.append(entry.id)
                 continue
-            converter, pinned_version = registration
+            converter, pin = registration
+            pinned_version = pin()
             get_draft = lambda c=converter, e=entry: c((evidence_root / e.path).read_bytes())
 
         record_path = output_root / f"{entry.id}.md"
