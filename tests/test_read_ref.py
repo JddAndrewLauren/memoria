@@ -614,3 +614,89 @@ def test_a_snippet_is_not_a_reference(tmp_path):
 
     # The anchor on the same hit does resolve - that is the path evidence takes.
     assert read(repository, hit.anchor).text
+
+
+# --- raw: the pre-normalization original (#113) -----------------------------
+
+
+def _repo_with_evidence(tmp_path, *records):
+    write_normalized_records(
+        list(records) or [_record()], tmp_path / NORMALIZED_RELATIVE_PATH
+    )
+    evidence_root = tmp_path / "evidence"
+    (evidence_root / "raw" / "vol-01").mkdir(parents=True)
+    (evidence_root / "raw" / "vol-01" / "text.txt").write_text(
+        "The unnormalized text.\n", encoding="utf-8"
+    )
+    return Repository(root=tmp_path, evidence_root=evidence_root)
+
+
+def test_raw_read_serves_the_pre_normalization_original(tmp_path):
+    result = read(_repo_with_evidence(tmp_path), "SRC-000184", raw=True)
+
+    assert result.text == "The unnormalized text.\n"
+
+
+def test_raw_read_is_bare_like_the_full_source_read(tmp_path):
+    """No header, no delimiter - the same undecorated contract (#113)."""
+    result = read(_repo_with_evidence(tmp_path), "SRC-000184", raw=True)
+
+    assert result.paragraph is None
+    assert "ref:" not in result.text
+    assert "original_locator" not in result.text
+
+
+def test_raw_reads_citation_is_marked_raw(tmp_path):
+    """The ledger names a raw read as the original, not the record (#113)."""
+    result = read(_repo_with_evidence(tmp_path), "SRC-000184", raw=True)
+
+    assert result.citation == "SRC-000184 raw"
+
+
+def test_raw_is_refused_for_a_paragraph_reference(tmp_path):
+    repository = _repo_with_evidence(tmp_path)
+
+    with pytest.raises(ReadError, match="raw only serves a whole SRC- record"):
+        read(repository, "SRC-000184 P1", raw=True)
+
+
+def test_raw_is_refused_for_a_path_reference(tmp_path):
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "note.md").write_text("# note\n", encoding="utf-8")
+
+    with pytest.raises(ReadError, match="raw only serves a whole SRC- record"):
+        read(Repository(root=tmp_path), "docs/note.md", raw=True)
+
+
+def test_raw_is_refused_for_a_subject_reference(tmp_path):
+    from memoria.subjects import write_builtin_subjects
+
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+
+    with pytest.raises(ReadError, match="raw only serves a whole SRC- record"):
+        read(repository, "SUB-people", raw=True)
+
+
+def test_raw_without_an_evidence_root_raises_the_named_refusal(tmp_path):
+    """The same `NoEvidenceRoot`, not a `ReadError` in its shape (#113)."""
+    from memoria.repository import NoEvidenceRoot
+
+    with pytest.raises(NoEvidenceRoot):
+        read(_repo(tmp_path), "SRC-000184", raw=True)
+
+
+def test_raw_refuses_a_binary_original_naming_its_type(tmp_path):
+    write_normalized_records(
+        [_record(original_file="raw/vol-01/letter.docx")],
+        tmp_path / NORMALIZED_RELATIVE_PATH,
+    )
+    evidence_root = tmp_path / "evidence"
+    (evidence_root / "raw" / "vol-01").mkdir(parents=True)
+    (evidence_root / "raw" / "vol-01" / "letter.docx").write_bytes(
+        b"\xff\xfenot valid utf-8"
+    )
+    repository = Repository(root=tmp_path, evidence_root=evidence_root)
+
+    with pytest.raises(ReadError, match=r"\.docx"):
+        read(repository, "SRC-000184", raw=True)

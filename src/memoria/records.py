@@ -71,6 +71,7 @@ class NormalizedRecord:
     # cannot be a dataclass field, so the frontmatter key and the attribute
     # name part ways here (record_to_markdown/parse_record map between them).
     thread_id: str | None = None
+    subject: str | None = None
     email_from: str | None = None
     email_to: str | None = None
     email_cc: str | None = None
@@ -155,6 +156,8 @@ def record_to_markdown(record: NormalizedRecord) -> str:
         frontmatter["chapter"] = record.chapter
     if record.thread_id is not None:
         frontmatter["thread_id"] = record.thread_id
+    if record.subject is not None:
+        frontmatter["subject"] = record.subject
     if record.email_from is not None:
         frontmatter["from"] = record.email_from
     if record.email_to is not None:
@@ -272,7 +275,7 @@ _REQUIRED_FIELDS = (
 )
 _OPTIONAL_FIELDS = (
     "recipient", "dateline", "salutation", "work", "chapter",
-    "thread_id", "in_reply_to", "images",
+    "thread_id", "subject", "in_reply_to", "images",
 )
 # Frontmatter keys whose attribute name differs (#78's email fields): `from`
 # is a reserved word and cannot be a dataclass field / constructor kwarg.
@@ -637,7 +640,10 @@ class RawSource:
 def read_raw_source(repository: Repository, record_id: str) -> RawSource:
     """Serve the un-normalized file ``record_id`` was normalized from.
 
-    Raises ``ReadError`` for an unknown record or a missing file, and
+    Raises ``ReadError`` for an unknown record, a missing file, or a binary
+    original (docx, pdf) - text is the only payload this returns, so a file
+    that does not decode as UTF-8 is refused naming its type rather than
+    handed back as bytes pretending to be text (#113). Raises
     ``NoEvidenceRoot`` (``memoria.repository``) when no evidence corpus is
     configured - the same refusal every evidence read gives, rather than a
     guessed default (``Repository.evidence_root``'s own docstring).
@@ -647,10 +653,14 @@ def read_raw_source(repository: Repository, record_id: str) -> RawSource:
     path = _confined_to(evidence_root, PurePosixPath(record.original_file))
     if not path.is_file():
         raise ReadError(f"no such original file: {record.original_file}")
-    return RawSource(
-        text=path.read_text(encoding="utf-8"),
-        original_locator=record.original_locator,
-    )
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ReadError(
+            f"{record.original_file} is a binary {path.suffix} file - "
+            "read_raw_source serves text only"
+        ) from exc
+    return RawSource(text=text, original_locator=record.original_locator)
 
 
 @dataclass(frozen=True)
@@ -671,7 +681,7 @@ class Read:
     paragraph: int | None = None
 
 
-def read(repository: Repository, ref: str) -> Read:
+def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
     """Serve any stable reference. The single read tool's core (part 11 §25).
 
     Dispatch is read off the reference, because the ID scheme already names
@@ -682,14 +692,22 @@ def read(repository: Repository, ref: str) -> Read:
     path - returns the file exactly as it is on disk, which is what keeps
     reading through the tool from ever being worse than ``cat``.
 
-    Two things this deliberately does not do, so that they are not later
-    mistaken for omissions: it does not decorate with the curated overlay
-    (#20, which owes a ``raw`` parameter when it does, since undecorated is
-    currently what every read is), and it resolves no reference kind but
-    ``SRC-``, ``SUB-``, ``CHP-``, ``SEC-``, ``CHG-`` and repository paths -
-    the rest exist as a named error, not as silence. Ledgering the served
-    read is the caller's job (``memoria.ledger``, #13): this function has no
-    session to ledger against.
+    ``raw=True`` goes one level further than that: for a whole ``SRC-``
+    record it serves the pre-normalization original at ``original_file``
+    through ``read_raw_source`` - the file grep would have found before a
+    normalizer ever ran (#113) - rather than the normalized record. It is
+    refused for anything else: a paragraph reference, a path, a subject, a
+    chapter, a section or a change carries no ``original_file`` to serve.
+    ``docs/tool-surface.md`` documents this as the ``raw`` parameter's shape,
+    for #20 to reuse rather than invent a second one.
+
+    One thing this still deliberately does not do, so it is not later
+    mistaken for an omission: it does not decorate with the curated overlay
+    (#20). It resolves no reference kind but ``SRC-``, ``SUB-``, ``CHP-``,
+    ``SEC-``, ``CHG-`` and repository paths - the rest exist as a named
+    error, not as silence. Ledgering the served read is the caller's job
+    (``memoria.ledger``, #13): this function has no session to ledger
+    against.
     """
     try:
         reference = references.parse(ref)
@@ -699,6 +717,22 @@ def read(repository: Repository, ref: str) -> Read:
         # exception types would eventually catch one of them.
         raise ReadError(str(exc)) from exc
     citation = references.format_citation(reference)
+
+    if raw:
+        if not isinstance(reference, references.SourceReference) or (
+            reference.paragraph is not None
+        ):
+            raise ReadError(
+                f"raw only serves a whole SRC- record's pre-normalization "
+                f"original, not {citation!r} (see docs/tool-surface.md)"
+            )
+        raw_source = read_raw_source(repository, reference.record_id)
+        return Read(
+            ref=ref,
+            citation=f"{citation} raw",
+            text=raw_source.text,
+            record=load(repository, reference.record_id),
+        )
 
     if isinstance(reference, references.UnknownReference):
         raise ReadError(_unknown_kind_message(reference))

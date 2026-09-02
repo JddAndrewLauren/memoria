@@ -184,6 +184,27 @@ def test_parse_entry_requires_an_id():
         parse_entry(text)
 
 
+@pytest.mark.parametrize(
+    "bad_id",
+    [
+        "SUB-people",  # bare subject id - no /<entry-slug> at all (#119)
+        "people/bob",  # missing the SUB- prefix
+        "SUB-people/",  # empty entry-slug segment
+        "SUB-/bob",  # empty subject segment
+    ],
+)
+def test_parse_entry_rejects_a_malformed_id_shape(bad_id):
+    text = entry_to_markdown(_entry()).replace("id: SUB-people/bob\n", f"id: {bad_id}\n")
+    with pytest.raises(SubjectError, match="SUB-<subject>/<entry-slug>"):
+        parse_entry(text)
+
+
+def test_parse_entry_accepts_a_well_formed_id():
+    original = _entry(id="SUB-people/bob")
+    text = entry_to_markdown(original)
+    assert parse_entry(text) == original
+
+
 # --- testimony and badged statements are distinguishable --------------------
 
 

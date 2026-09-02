@@ -70,6 +70,18 @@ def _repo(tmp_path):
     return Repository(root=tmp_path)
 
 
+def _repo_with_evidence(tmp_path):
+    """A repository whose evidence root holds the original the record was
+    normalized from - what a raw read serves (#113)."""
+    write_normalized_records([_record()], tmp_path / NORMALIZED_RELATIVE_PATH)
+    evidence_root = tmp_path / "evidence"
+    (evidence_root / "raw" / "vol-01").mkdir(parents=True)
+    (evidence_root / "raw" / "vol-01" / "text.txt").write_text(
+        "The unnormalized text.\n", encoding="utf-8"
+    )
+    return Repository(root=tmp_path, evidence_root=evidence_root)
+
+
 @pytest.fixture(autouse=True)
 def _restore_server_repository():
     """`server._repository` is a module global; leaking it across tests would
@@ -232,6 +244,14 @@ def test_a_full_source_read_is_rendered_bare(tmp_path):
     assert rendered.encode("utf-8") == path.read_bytes()
 
 
+def test_a_raw_read_is_rendered_bare(tmp_path):
+    """The pre-normalization original, indistinguishable from `cat` at the
+    surface - same contract as the full-source read (#113)."""
+    rendered = server.render(read(_repo_with_evidence(tmp_path), "SRC-000184", raw=True))
+
+    assert rendered == "The unnormalized text.\n"
+
+
 def test_a_path_read_is_rendered_bare(tmp_path):
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "note.md").write_text("# note\n", encoding="utf-8")
@@ -255,12 +275,24 @@ def test_the_tool_maps_a_core_error_onto_one_the_model_can_read(tmp_path):
         read(server.repository(), "SUB-people/bob")
 
 
+def test_a_raw_read_without_an_evidence_root_maps_to_the_named_tool_error(tmp_path):
+    """`NoEvidenceRoot` reaches the model as a `ToolError` too (#113) - the
+    same named refusal every other evidence read gives, not a second failure
+    shape it has to learn, and nothing else on the surface changes."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    server._repository = _repo(tmp_path)
+
+    with pytest.raises(ToolError, match="MEMORIA_EVIDENCE_ROOT"):
+        server.read("SRC-000184", raw=True)
+
+
 def test_the_server_registers_a_read_tool(tmp_path):
     """The one test that touches the SDK, so a rename breaks one thing."""
     tools = asyncio.run(server.mcp.list_tools())
 
     (tool,) = [t for t in tools if t.name == "read"]
-    assert set(tool.input_schema["properties"]) == {"ref"}
+    assert set(tool.input_schema["properties"]) == {"ref", "raw"}
     assert tool.input_schema["required"] == ["ref"]
     assert "verbatim" in (tool.description or "")
 
@@ -385,6 +417,81 @@ def test_search_text_filters_compose(tmp_path):
     assert "SRC-000002" not in rendered
 
 
+def test_search_text_answers_messages_from_x_to_y_with_the_header_filters_alone(
+    tmp_path,
+):
+    """#111: the M1 gate walk on #15 - "how many messages did Dave Perrino
+    send to Diana Scholtes" - fell back to Bash because `search_text` could
+    not see the `from`/`to` header fields at all. This is the same shape
+    answered by `search_text` alone: three email records, a query that
+    matches every body, both header filters, and exactly the one record's
+    anchor comes back."""
+    from memoria.index import SearchFilters
+
+    repository = _index(
+        tmp_path,
+        [
+            _record(
+                id="SRC-000003",
+                paragraphs=["Perrino wrote to Scholtes about the pond."],
+                email_from="Dave Perrino <dperrino@example.com>",
+                email_to="Diana Scholtes <dscholtes@example.com>",
+            ),
+            _record(
+                id="SRC-000004",
+                paragraphs=["Perrino wrote to Crandall about the pond."],
+                email_from="Dave Perrino <dperrino@example.com>",
+                email_to="Sean Crandall <scrandall@example.com>",
+            ),
+            _record(
+                id="SRC-000005",
+                paragraphs=["Semperger wrote to Scholtes about the pond."],
+                email_from="Cara Semperger <csemperger@example.com>",
+                email_to="Diana Scholtes <dscholtes@example.com>",
+            ),
+        ],
+    )
+    server._repository = repository
+
+    rendered = server.search_text(
+        "pond", SearchFilters(from_="perrino", to="scholtes")
+    )
+
+    assert "SRC-000003" in rendered
+    assert "SRC-000004" not in rendered
+    assert "SRC-000005" not in rendered
+
+
+def test_search_text_ledgers_the_header_filters_exactly_as_the_existing_four(
+    tmp_path,
+):
+    from memoria.index import SearchFilters
+    from memoria.ledger import event_path
+
+    repository = _index(
+        tmp_path,
+        [
+            _record(
+                id="SRC-000006",
+                paragraphs=["Perrino wrote to Scholtes about the pond."],
+                email_from="Dave Perrino <dperrino@example.com>",
+                email_to="Diana Scholtes <dscholtes@example.com>",
+            )
+        ],
+    )
+    server._repository = repository
+    server._session_id = "SES-test"
+
+    server.search_text("pond", SearchFilters(from_="perrino", to="scholtes"))
+
+    (line,) = (
+        event_path(repository, "SES-test").read_text(encoding="utf-8").splitlines()
+    )
+    event = json.loads(line)
+    assert event["filters"]["from_"] == "perrino"
+    assert event["filters"]["to"] == "scholtes"
+
+
 # --- the ledger (#13) -------------------------------------------------------
 
 
@@ -404,6 +511,20 @@ def test_a_served_read_is_ledgered_full_source_included(tmp_path):
     assert event["tool"] == "read"
     assert event["ref"] == "SRC-000184"
     assert event["served"] == ["SRC-000184"]
+
+
+def test_a_served_raw_read_is_ledgered_with_its_citation_marked_raw(tmp_path):
+    """The raw read is ledgered like any other, and the served citation
+    names it as the original rather than the record (#113)."""
+    server._repository = _repo_with_evidence(tmp_path)
+    server._session_id = "SES-test"
+
+    server.read("SRC-000184", raw=True)
+
+    (event,) = _events(tmp_path, "SES-test")
+    assert event["tool"] == "read"
+    assert event["ref"] == "SRC-000184"
+    assert event["served"] == ["SRC-000184 raw"]
 
 
 def test_a_failed_read_is_not_ledgered(tmp_path):

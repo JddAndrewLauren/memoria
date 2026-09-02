@@ -19,9 +19,10 @@ stop being a router and become a wall, and people would go around it.
 
 `search_text(query, filters)` is the retrieval half (#12). The four §25
 filters - event date, recorded date, source type, contemporaneous/
-retrospective - are implemented in ``memoria.index.search``, not here: the
-tool shapes results, the core computes them, so the same filters reach #64's
-web layer without a second, divergent copy.
+retrospective - plus #111's `from`/`to` header filters, are implemented in
+``memoria.index.search``, not here: the tool shapes results, the core
+computes them, so the same filters reach #64's web layer without a second,
+divergent copy.
 
 The ``extraction_*`` tools (#17) are a second class on the same server, and
 they are here because there is nowhere else: no model-driving service
@@ -54,7 +55,7 @@ from memoria.ledger import (
     session_id_from_env,
 )
 from memoria.records import Read, ReadError, read as read_ref, real_paragraphs
-from memoria.repository import Repository, from_env
+from memoria.repository import NoEvidenceRoot, Repository, from_env
 
 mcp = MCPServer(
     "memoria",
@@ -141,7 +142,7 @@ def render(result: Read) -> str:
 
 
 @mcp.tool()
-def read(ref: str) -> str:
+def read(ref: str, raw: bool = False) -> str:
     """Read any stable reference, verbatim.
 
     Accepts a normalized source record by ID (`SRC-000184`), one paragraph of
@@ -155,16 +156,24 @@ def read(ref: str) -> str:
     full-source read. Evidence text is never summarized, abridged or
     reformatted.
 
+    `raw=True`, for a bare record ID only, serves the pre-normalization
+    original behind that record instead - the file the normalizer read, not
+    what it produced. Refused for anything else, and for a binary original
+    (docx, pdf) rather than handed back as bytes.
+
     Reference kinds the archive defines but this build does not resolve yet -
     SES-, CHG-, CLM-, RES-, DEC- - return an error naming the kind.
     """
     try:
-        result = read_ref(repository(), ref)
-    except ReadError as exc:
+        result = read_ref(repository(), ref, raw=raw)
+    except (ReadError, NoEvidenceRoot) as exc:
         # ToolError is the SDK's anticipated-failure type: it reaches the
         # model as is_error with this message intact. A bare exception would
         # be reported as "Error executing tool read" with the reason stripped,
-        # which is the silent failure #11 exists to forbid.
+        # which is the silent failure #11 exists to forbid. NoEvidenceRoot is
+        # the one other core exception a raw read can raise (#113): the same
+        # named refusal every evidence read gives, not a second failure
+        # shape the model has to learn.
         #
         # Not ledgered: the ledger records what was served (#13), and a
         # failed read served nothing.
@@ -198,10 +207,12 @@ def search_text(query: str, filters: SearchFilters | None = None) -> str:
     straight into `read(ref)` with no reconstruction. Carries no text of its
     own: evidence is read, not summarized.
 
-    `filters` narrows by `event_date`, `recorded_date`, `source_type` and
-    `contemporaneous` (true excludes retrospective editorial commentary);
-    all compose. Dates match the record's verbatim frontmatter string
-    exactly.
+    `filters` narrows by `event_date`, `recorded_date`, `source_type`,
+    `contemporaneous` (true excludes retrospective editorial commentary),
+    and `from_`/`to` (case-insensitive substring match against the record's
+    verbatim `from`/`to` header string - a string filter, not entity
+    resolution: it does not resolve a name to a person); all compose. Dates
+    match the record's verbatim frontmatter string exactly.
 
     Returns "No results." rather than an empty string when nothing matches.
     An unbuilt corpus (no `.memoria/index.db` yet) is the same as an empty
