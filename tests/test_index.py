@@ -904,6 +904,28 @@ def test_appearances_are_unaffected_by_the_gather_overlay_and_vice_versa(tmp_pat
     assert [o.action for o in list_overlay(repository)] == ["exclude"]
 
 
+def test_appearances_and_gather_never_return_the_same_anchor(tmp_path):
+    """AC 3, in the criterion's own words: appearances and the gathered set
+    are "separately queryable and never cross". One entry, one ``book``
+    record, no placements - the anchor the lexical pass finds must show up
+    on exactly one of the two sides, never both, since a book paragraph is
+    an audit target (docs/normalized-record-schema.md) and never evidence
+    ``gather`` may cite."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    repository = Repository(root=tmp_path)
+    _write_entry(tmp_path, entry)
+    book = _record("SRC-000001", ["Bob argued with Carol."], source_type="book")
+    write_normalized_records([book], tmp_path / NORMALIZED_RELATIVE_PATH)
+    build_index(repository, [book])
+
+    compute_appearances(repository)
+    appeared = {a.anchor for a in list_appearances(repository, "SUB-people/bob")}
+    gathered = {g.anchor for g in gather(repository, "SUB-people/bob")}
+
+    assert appeared == {"src-000001-p1"}
+    assert gathered.isdisjoint(appeared)
+
+
 def test_computing_appearances_does_not_write_to_the_entry_file(tmp_path):
     """AC 4: nothing writes an appearance back into an entry."""
     entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Some testimony.")

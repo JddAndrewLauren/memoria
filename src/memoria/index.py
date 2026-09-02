@@ -749,12 +749,22 @@ def _lexical_match(con: sqlite3.Connection, term: str) -> list[str]:
     lexical pass part 06 §8.3 says gathering "stays" as, over and above
     whatever the extraction placed. Quoted as an FTS5 phrase so a term with
     more than one word, or one that happens to collide with FTS5 query
-    syntax, is still matched literally."""
+    syntax, is still matched literally.
+
+    Scoped away from ``source_type: book`` paragraphs - the inverse of
+    ``_lexical_match_book``'s scoping - because those are audit targets
+    (docs/normalized-record-schema.md: "never evidence to write from"), and
+    §8.11 keeps the gathered set and appearances "separately queryable and
+    never cross": a book paragraph an appearance names must not also surface
+    through gather's own lexical pass."""
     query = '"' + term.replace('"', '""') + '"'
     return [
         row[0]
         for row in con.execute(
-            "SELECT anchor FROM records WHERE records MATCH ?", (query,)
+            "SELECT records.anchor FROM records "
+            "JOIN paragraphs ON paragraphs.anchor = records.anchor "
+            "WHERE records MATCH ? AND paragraphs.source_type != 'book'",
+            (query,),
         )
     ]
 
@@ -774,7 +784,10 @@ def gather(repository: Repository, entry_id: str) -> list[GatheredSource]:
     - a direct lexical match against each of the entry's own word-shaped
       match terms, the deterministic pass that gathering "stays" as (§8.3) -
       catching a literal mention the model missed, which is the recall this
-      module's docstring calls the design's central risk;
+      module's docstring calls the design's central risk. Scoped away from
+      ``source_type: book`` paragraphs (``_lexical_match``): those are audit
+      targets, appearances' side of the §8.11 separation, and must never
+      cross into the gathered set;
     - for the ``entry``- and ``relation``-shaped match terms together, the
       **intersection** of what each one names - the placements rows for
       every named entry and the relations rows for every named relation.
