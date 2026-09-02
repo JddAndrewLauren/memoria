@@ -6,8 +6,10 @@ normalized source records for dangling SRC- ID references and stale
 
 import hashlib
 import re
+from datetime import datetime
 from pathlib import Path
 
+from memoria.index import list_overlay
 from memoria.manifest import (
     DEFAULT_MANIFEST_RELATIVE_PATH,
     check_ledger,
@@ -15,6 +17,7 @@ from memoria.manifest import (
     load_manifest,
 )
 from memoria.records import NORMALIZED_RELATIVE_PATH
+from memoria.repository import Repository
 from memoria.subjects import SUBJECTS_RELATIVE_PATH, SubjectError, parse_entry, parse_subject
 
 _SRC_ID_RE = re.compile(r"SRC-\d{6}", re.IGNORECASE)
@@ -96,6 +99,7 @@ def validate(
     errors.extend(_validate_raw_sha256_matches_manifest(repo_root, entries))
     errors.extend(_validate_subjects(repo_root))
     errors.extend(_validate_converter_pins(repo_root, manifest_path))
+    errors.extend(_validate_gather_overlay(repo_root))
 
     return errors
 
@@ -188,6 +192,30 @@ def _validate_normalized_src_ids(repo_root: Path) -> list[str]:
                     f"unresolved SRC- ID: {referenced_id} referenced in "
                     f"{path.name}"
                 )
+    return errors
+
+
+def _validate_gather_overlay(repo_root: Path) -> list[str]:
+    """Every pin and exclusion carries actor and timestamp attribution
+    (issue #18, part 06 §8.3's overlay). ``gather_overlay``'s columns are
+    all ``NOT NULL``, but that only rules out ``NULL`` - an empty string
+    still satisfies it, so this is the check that actually holds the
+    requirement."""
+    errors = []
+    for overlay in list_overlay(Repository(root=repo_root)):
+        if not overlay.actor_name.strip() or not overlay.actor_email.strip():
+            errors.append(
+                f"{overlay.action} of {overlay.anchor} on {overlay.entry_id} "
+                "is missing actor attribution"
+            )
+            continue
+        try:
+            datetime.fromisoformat(overlay.at)
+        except ValueError:
+            errors.append(
+                f"{overlay.action} of {overlay.anchor} on {overlay.entry_id} "
+                f"has an unparseable timestamp: {overlay.at!r}"
+            )
     return errors
 
 
