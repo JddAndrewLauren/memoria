@@ -45,13 +45,19 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 import memoria.extraction as extraction
-from memoria.index import SearchFilters, SearchResult, search as search_index
+from memoria.index import (
+    ReadOverlay,
+    SearchFilters,
+    SearchResult,
+    search as search_index,
+)
 from memoria.ledger import (
     append_extraction_batch,
     append_extraction_brief,
     append_extraction_summary_task,
     append_read,
     append_search,
+    append_search_global,
     session_id_from_env,
 )
 from memoria.records import Read, ReadError, read as read_ref, real_paragraphs
@@ -64,9 +70,12 @@ mcp = MCPServer(
         "read(ref): a SRC- record ID, a paragraph of one, or a repository "
         "path. Evidence comes back verbatim, never summarized. Find text "
         "with search_text(query, filters); each hit's anchor feeds straight "
-        "into read(ref). The extraction_* tools run the archive-wide "
-        "extraction pass, and are driven by the `extraction` skill rather "
-        "than reached for directly."
+        "into read(ref). search_global(query, filters, summarize) returns "
+        "references grouped by the extraction's clusters instead of a flat "
+        "list - with summarize=true it also serves each cluster's memoized "
+        "[inferred] summary, never evidence. The extraction_* tools run the "
+        "archive-wide extraction pass, and are driven by the `extraction` "
+        "skill rather than reached for directly."
     ),
 )
 
@@ -99,6 +108,28 @@ def session_id() -> str:
     return _session_id
 
 
+def render_overlay(overlay: ReadOverlay) -> str:
+    """Shape one curated overlay into what the model sees (#20).
+
+    Every field is printed, even when empty - ``"none"`` rather than an
+    absent line - so a paragraph with no overlay comes back the same shape
+    as one with one, per ``docs/tool-surface.md``'s "reads of paragraphs
+    with no overlay return ... an explicit empty overlay, not a different
+    shape".
+    """
+
+    def _list(items: list[str]) -> str:
+        return ", ".join(items) if items else "none"
+
+    return "\n".join(
+        [
+            f"entry links: {_list(overlay.entry_links)}",
+            f"exclusions: {_list(overlay.exclusions)}",
+            f"citing settlements: {_list(overlay.citing_settlements)}",
+        ]
+    )
+
+
 def render(result: Read) -> str:
     """Shape one read into what the model sees.
 
@@ -119,8 +150,20 @@ def render(result: Read) -> str:
     header are contracts rather than styling, and ``docs/tool-surface.md``
     states them: the verbatim text appears **contiguously and unmodified** -
     never wrapped, re-indented or escaped - and there is exactly one
-    delimiter convention, which the curated overlay (#20) must reuse by
-    appending after the text rather than interleaving.
+    delimiter convention. **The curated overlay (#20) reuses it**, appending
+    a second ``---``-delimited block after the text rather than interleaving
+    with it. ``render_overlay``'s own output never contains a bare ``---``
+    line - every field it prints is an entry id or the literal ``none`` -
+    so the *last* ``\\n---\\n`` in a decorated paragraph's rendering is
+    always the true text/overlay boundary, even if the paragraph's own
+    verbatim text happens to contain one: split from the end, not the
+    start, the way ``tests/test_read_ref.py`` and ``tests/test_mcp_server.py``
+    do. (The header, symmetrically, never contains one either, so the
+    *first* ``\\n---\\n`` is always the header/text boundary.) A
+    ``raw=True`` paragraph read, or one whose index could not be read,
+    carries no ``overlay`` (``memoria.records.read``), so it stays a bare
+    header-plus-text pair, the same shape a plain read had before this
+    issue.
 
     ``original_locator`` is printed and never parsed: it is a pointer a person
     follows, not an offset (#25).
@@ -138,7 +181,10 @@ def render(result: Read) -> str:
         f"original_locator: {record.original_locator}",
         f"paragraphs_in_record: {len(real_paragraphs(record))}",
     ]
-    return "\n".join(header) + "\n---\n" + result.text
+    rendered = "\n".join(header) + "\n---\n" + result.text
+    if result.overlay is not None:
+        rendered += "\n---\n" + render_overlay(result.overlay)
+    return rendered
 
 
 @mcp.tool()
@@ -156,10 +202,19 @@ def read(ref: str, raw: bool = False) -> str:
     full-source read. Evidence text is never summarized, abridged or
     reformatted.
 
-    `raw=True`, for a bare record ID only, serves the pre-normalization
-    original behind that record instead - the file the normalizer read, not
-    what it produced. Refused for anything else, and for an original that
-    does not decode as UTF-8, rather than handed back as bytes.
+    A paragraph read also carries the curated overlay: which entries it is
+    linked to, which have excluded it, and which settlements cite it - a
+    second `---`-delimited block after the text, never mixed into it. A
+    degraded index (stale schema, or locked by a concurrent rebuild) drops
+    only the overlay; the paragraph itself still comes back undecorated
+    rather than failing.
+
+    `raw=True` serves the least-processed version of what it is given,
+    refused for anything but a SRC- reference: for a bare record ID, the
+    pre-normalization original behind it - the file the normalizer read, not
+    what it produced, refused too for an original that does not decode as
+    UTF-8 rather than handed back as bytes; for one paragraph, that
+    paragraph with no curated overlay appended.
 
     Reference kinds the archive defines but this build does not resolve yet -
     SES-, CHG-, CLM-, RES-, DEC- - return an error naming the kind.
@@ -221,6 +276,89 @@ def search_text(query: str, filters: SearchFilters | None = None) -> str:
     results = search_index(repository(), query, filters)
     append_search(repository(), session_id(), query, filters, results)
     return render_search(results)
+
+
+@mcp.tool()
+def search_global(
+    query: str | None = None,
+    filters: SearchFilters | None = None,
+    summarize: bool = False,
+) -> str:
+    """The global tool over the extraction's clusters (part 11 §25, #74).
+
+    Returns paragraph references grouped by cluster rather than `search_text`'s
+    flat ranked list, each group labelled by the entries and relations that
+    define it - a cluster already promoted into a Theme or Arc is labelled by
+    that entry instead. Every reference is an anchor that `read(ref)` accepts
+    verbatim, exactly like a `search_text` hit; no reference carries text.
+
+    `query` is optional: given, it full-text searches like `search_text` and
+    groups the hits by cluster; omitted, it returns every paragraph of every
+    matched cluster - the whole-corpus map step, most useful with
+    `filters.level` set. A paragraph nests inside a cluster at every level of
+    the hierarchy at once, so exactly one level is grouped per call - the
+    level used is always named in the returned scope line, whether or not
+    `filters.level` set it.
+
+    `summarize=true` also serves each matched cluster's memoized `[inferred]`
+    text - never generated on this call, only served - or says none has been
+    written yet. `summarize=false` (the default) never returns cluster text
+    at all: a summary is a compression, never evidence, and is served only
+    when explicitly asked for.
+    """
+    result = extraction.search_global(
+        repository(), query, filters, summarize=summarize
+    )
+    clusters = [group.cluster_id for group in result.groups]
+    served = [r.anchor for group in result.groups for r in group.results]
+    append_search_global(
+        repository(),
+        session_id(),
+        query,
+        filters,
+        summarize,
+        result.summary_served,
+        clusters,
+        served,
+    )
+    return render_global(result)
+
+
+def render_global(result: extraction.GlobalSearchResult) -> str:
+    """Shape one `search_global` result into what the model sees: one block
+    per matched cluster, then the §33-style scope line naming what ran.
+
+    A cluster routed to a promoted entry (`ClusterGroup.entry_id`) is headed
+    by that entry rather than by its own auto-generated label - #74's "a
+    promoted cluster routes to the entry, not to its stale label" - but the
+    cluster id still rides alongside it. Dropping it would make an over-route
+    unverifiable from the served text alone, and would disagree with the
+    ledger line for the same call, which always names the cluster
+    (`memoria.ledger.append_search_global`'s `clusters` field). A summary
+    line appears only when the call asked for one (`result.summarize`), and
+    says so explicitly when none has been written yet - it is never left
+    silent, which would read as "no summary exists" when it may simply not
+    have been asked for.
+    """
+    if not result.groups:
+        return result.scope
+    blocks = []
+    for group in result.groups:
+        header = (
+            f"entry: {group.entry_id}  (cluster: {group.cluster_id})"
+            if group.entry_id
+            else f"cluster: {group.cluster_id}  label: {group.label}"
+        )
+        lines = [header, f"level: {group.level}"]
+        if result.summarize:
+            lines.append(
+                f"summary: [inferred] {group.summary}"
+                if group.summary
+                else "summary: not yet written"
+            )
+        lines += [f"{r.src_id} {r.anchor}" for r in group.results]
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks) + "\n\n" + result.scope
 
 
 # --- the extraction (#17) ----------------------------------------------------

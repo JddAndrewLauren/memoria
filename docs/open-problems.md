@@ -257,8 +257,10 @@ Build detail rather than open decisions, from `poc-plan.md` §7:
   read of a spreadsheet is unlikely to be worth it, surfacing that one was attached to
   a message may be (part 05 §5.4);
 - which §25 tools ship, and their exact signatures — `read(ref)` forced
-  2026-09-01 (issue #11, [`tool-surface.md`](tool-surface.md)); `search_global` (#74)
-  and `search_semantic` (#81) scheduled for M2; the rest open;
+  2026-09-01 (issue #11), `search_text(query, filters)` forced the same day (issue
+  #12), and `search_global(query, filters, summarize)` forced 2026-09-01 (issue #74)
+  ([`tool-surface.md`](tool-surface.md)); `search_semantic` (#81) scheduled for M2;
+  the rest open;
 - the Curator's scope and trigger policy;
 - **the subject and length of the authorship-track piece** — now constrained by §4.1
   above, and forced at part 16's M4;

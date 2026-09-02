@@ -17,12 +17,17 @@ puts the rebuild rule (``PRESERVED_TABLES`` / ``DERIVED_TABLES``) beside the
 function that enforces it, where one test can check that every table in the
 file is named by exactly one of the two.
 
-**It also owns the gathered set and its pin/exclude overlay** (#18, part 06
-§8.3): ``gather`` recombines what ``placements``/``relations`` already hold
-with a direct lexical match against an entry's own word-shaped match terms,
-and ``pin``/``exclude`` record the author's attributed overlay in the
-preserved ``gather_overlay`` table - the second thing in this file, beside
-the memo cache, that a rebuild does not throw away.
+**It also owns the gathered set and its pin/exclude overlay** (#18, #21, part
+06 §8.3): ``gather`` recombines what ``placements``/``relations`` already
+hold with a direct lexical match against an entry's own word-shaped match
+terms, plus the overlay. ``pin``/``exclude`` record the author's attributed
+overlay **on the entry file itself** (``memoria.subjects.OverlayAct``),
+through the durable write path (``memoria.write``) - not in this database at
+all. Part 04 §42 is explicit that "deleting ``.memoria/index.db`` must never
+destroy intellectual work"; an index-only overlay row would fail that the
+moment someone deletes ``.memoria/`` rather than merely running
+``memoria rebuild`` against it, so this file holds no table for it and there
+is nothing here for a rebuild to preserve or lose.
 
 **And appearances, lexical engine only** (#19, part 06 §8.11): the manuscript
 passages an entry turns out to touch, with a short note on how - kept in the
@@ -40,13 +45,23 @@ rather than silently returning nothing (``AppearancesReport``).
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, replace as dataclass_replace
 from datetime import datetime, timezone
 
 from memoria.records import NormalizedRecord, real_paragraphs, read_all
 from memoria.repository import Repository
-from memoria.subjects import classify_match_term, load_all_entries, load_entry
-from memoria.write import Actor
+from memoria.subjects import (
+    OverlayAct,
+    SubjectError,
+    classify_match_term,
+    entry_to_markdown,
+    find_entry_path,
+    load_all_entries,
+    load_entry,
+    parse_entry,
+)
+from memoria.write import Actor, Rejected, WriteError, serve, write as write_file
 
 INDEX_RELATIVE_PATH = ".memoria/index.db"
 
@@ -68,17 +83,18 @@ INDEX_RELATIVE_PATH = ".memoria/index.db"
 # real failure mode here, someone adding a table and forgetting to say which
 # side of the line it falls on.
 
-# The memo cache and its schema marker, and the pin/exclude overlay. **The
-# only rows in this file a rebuild does not throw away**, and the memo
-# cache's reason is narrow: everything else here can be recomputed from
-# evidence plus the author's durable acts, and it cannot be recomputed at
-# all without a model. That is the whole predicate - not "paragraph rows
-# versus cluster rows" - which is why one table with a `kind` column carries
-# both (part 06 §8.12's "one cache, two key compositions"). The overlay is
-# preserved for a different reason (#18, part 06 §8.3): a pin or exclusion
-# is itself an attributed author act, not recomputable evidence, so a
-# rebuild that erased it would silently reverse a decision the author made.
-PRESERVED_TABLES = ("memoria_schema", "memo", "gather_overlay")
+# The memo cache and its schema marker - **the only rows in this file a
+# rebuild does not throw away**. Everything else here can be recomputed from
+# evidence plus the author's durable acts, and the memo cache cannot be
+# recomputed at all without a model. That is the whole predicate - not
+# "paragraph rows versus cluster rows" - which is why one table with a
+# `kind` column carries both (part 06 §8.12's "one cache, two key
+# compositions"). The pin/exclude overlay used to be a third preserved
+# table here (#18); #21 moved it onto the entry file instead
+# (`memoria.subjects.OverlayAct`), because "preserved by a rebuild" is not
+# the same guarantee as "survives `.memoria/` being deleted outright", which
+# is what part 04 §42 actually demands of an attributed author act.
+PRESERVED_TABLES = ("memoria_schema", "memo")
 
 # Everything else. Dropped and regenerated on every `memoria rebuild`, which
 # is §42's contract made mechanical.
@@ -124,20 +140,6 @@ _PRESERVED_DDL = (
     "written_at TEXT NOT NULL"
     ")",
     "CREATE INDEX IF NOT EXISTS memo_kind_anchor ON memo(kind, anchor)",
-    # One row per (entry, anchor): the author's most recent pin or exclude of
-    # that source against that entry (#18, part 06 §8.3). `INSERT OR
-    # REPLACE`'d, never appended to - a later act simply supersedes an
-    # earlier one, the same "click-authorized" shape as a settlement (§8.7).
-    # `actor_name`/`actor_email` and `at` are the attribution `memoria
-    # validate` checks for (issue #18's seventh criterion); they are plain
-    # columns rather than a git commit trailer because these rows are never
-    # backed by a file - there is nothing else to attribute them from.
-    "CREATE TABLE IF NOT EXISTS gather_overlay("
-    "entry_id TEXT NOT NULL, anchor TEXT NOT NULL, "
-    "action TEXT NOT NULL CHECK (action IN ('pin', 'exclude')), "
-    "actor_name TEXT NOT NULL, actor_email TEXT NOT NULL, at TEXT NOT NULL, "
-    "PRIMARY KEY (entry_id, anchor)"
-    ")",
 )
 
 _DERIVED_DDL = (
@@ -326,6 +328,15 @@ class SearchFilters:
     word. An empty string is not a filter: it is treated exactly like
     ``None``, because a substring match on ``""`` would otherwise return
     every record that merely *has* the header (see ``filter_predicate``).
+
+    ``level`` is the seventh, added 2026-09-01 for ``search_global`` (#74,
+    ADR-0005 "Build shape" 4) - a cluster level, not a column on
+    ``paragraphs``. It rides on this dataclass so one ``filters`` argument
+    still covers everything a caller might narrow by (part 11 §25's filter
+    list groups it with the other six), but ``filter_predicate`` below never
+    references it: search_global consults it directly against ``clusters``,
+    and ``search_text`` has no cluster to filter by, so it is silently
+    unconsulted there rather than refused.
     """
 
     event_date: str | None = None
@@ -334,6 +345,7 @@ class SearchFilters:
     contemporaneous: bool | None = None
     from_: str | None = None
     to: str | None = None
+    level: int | None = None
 
 
 @dataclass(frozen=True)
@@ -349,11 +361,17 @@ class RebuildReport:
 
     ``appearances`` is ``AppearancesReport`` (#19) - what the appearances
     pass produced, and what it skipped.
+
+    ``elapsed_seconds`` is wall-clock time over the whole function (#21's
+    "reports what it regenerated and how long it took"), timed with
+    ``time.monotonic`` rather than ``time.time`` so a clock adjustment
+    mid-rebuild cannot report a negative duration.
     """
 
     records: list[NormalizedRecord]
     counts: object
     appearances: AppearancesReport
+    elapsed_seconds: float
 
 
 def build_index(
@@ -689,6 +707,7 @@ def rebuild(
     everything it touches is disposable. This function never names
     ``auto_promote``, and a test holds that.
     """
+    started = time.monotonic()
     records = read_all(repository)
     build_index(repository, records, reset_cache=reset_cache)
     # Imported here rather than at module scope: `memoria.extraction` imports
@@ -704,10 +723,15 @@ def rebuild(
             repository, recurrence_threshold=recurrence_threshold
         )
     appearances_report = compute_appearances(repository)
-    return RebuildReport(records=records, counts=counts, appearances=appearances_report)
+    return RebuildReport(
+        records=records,
+        counts=counts,
+        appearances=appearances_report,
+        elapsed_seconds=time.monotonic() - started,
+    )
 
 
-# --- the gathered set and its pin/exclude overlay (#18, part 06 §8.3) -------
+# --- the gathered set and its pin/exclude overlay (#18, #21, part 06 §8.3) --
 
 
 @dataclass(frozen=True)
@@ -746,29 +770,64 @@ def _now() -> str:
 def _record_overlay(
     repository: Repository, entry_id: str, anchor: str, action: str, actor: Actor
 ) -> None:
-    con = connect(repository)
-    try:
-        con.execute(
-            "INSERT INTO gather_overlay "
-            "(entry_id, anchor, action, actor_name, actor_email, at) "
-            "VALUES (?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT (entry_id, anchor) DO UPDATE SET "
-            "action = excluded.action, actor_name = excluded.actor_name, "
-            "actor_email = excluded.actor_email, at = excluded.at",
-            (entry_id, anchor, action, actor.name, actor.email, _now()),
+    """Durably record one pin or exclusion on ``entry_id``'s own file,
+    through the write path (ADR-0003) - not in this index at all (#21). A
+    later act against the same ``anchor`` replaces the earlier one; the row
+    order is by ``anchor`` so the file is stable to diff.
+
+    Refuses an unattributed ``actor`` outright, before the file is touched
+    at all. Relying on ``write_file``'s commit to catch this (it refuses an
+    empty git author identity) is not enough: ``_replace_atomically`` runs
+    *before* the commit, so the unattributed act would land on disk and be
+    staged even though the commit that was supposed to attribute it never
+    happens - a partially-applied durable write, exactly what part 04 §3's
+    write path exists to rule out.
+    """
+    if not actor.name.strip() or not actor.email.strip():
+        raise WriteError(
+            f"cannot record {action} of {anchor} on {entry_id}: an author "
+            "act must be attributed - actor name and email may not be "
+            "empty"
         )
-        con.commit()
-    finally:
-        con.close()
+    subject_id, entry_slug = entry_id.split("/", 1)
+    path = find_entry_path(repository, subject_id, entry_slug)
+    if path is None:
+        raise SubjectError(f"no such entry: {entry_id}")
+    relative_path = path.relative_to(repository.root).as_posix()
+
+    served = serve(repository, relative_path)
+    entry = parse_entry(served.text, source=relative_path)
+    overlay = sorted(
+        [act for act in entry.overlay if act.anchor != anchor]
+        + [
+            OverlayAct(
+                anchor=anchor,
+                action=action,
+                actor_name=actor.name,
+                actor_email=actor.email,
+                at=_now(),
+            )
+        ],
+        key=lambda act: act.anchor,
+    )
+    content = entry_to_markdown(dataclass_replace(entry, overlay=overlay))
+
+    result = write_file(repository, relative_path, served.token, content, actor)
+    if isinstance(result, Rejected):
+        raise WriteError(
+            f"cannot record {action} of {anchor} on {entry_id}: "
+            f"{relative_path} changed since it was read"
+        )
 
 
 def pin(repository: Repository, entry_id: str, anchor: str, actor: Actor) -> None:
     """Author act: ``anchor`` stays in ``entry_id``'s gathered set regardless
     of what the matching pass finds (part 06 §8.3's overlay).
 
-    Recorded in the preserved ``gather_overlay`` table, so it survives
-    ``memoria rebuild`` - the same durability class as the memo cache, for
-    the same reason: this is not derivable state.
+    Recorded on the entry file itself (``memoria.subjects.OverlayAct``), not
+    in the index (#21) - part 04 §42 requires a pin to survive
+    ``.memoria/`` being deleted outright, not merely a ``memoria rebuild``
+    against it, and only a durable, committed file can promise that.
 
     Overwrites a prior pin or exclusion of the same source against the same
     entry, attributed and timestamped to this call - the author's later act
@@ -785,23 +844,28 @@ def exclude(repository: Repository, entry_id: str, anchor: str, actor: Actor) ->
 
 
 def list_overlay(repository: Repository) -> list[OverlayEntry]:
-    """Every pin/exclude row in the repository's index.
+    """Every pin/exclude row across every entry, read off the entry files
+    themselves (#21).
 
     Only ``memoria validate``'s attribution check needs every row at once;
-    ``gather`` reads its own entry's rows directly.
+    ``gather`` reads its own entry's rows directly, off the ``Entry`` it
+    already loaded.
     """
-    db_path = repository.root / INDEX_RELATIVE_PATH
-    if not db_path.exists():
-        return []
-    con = connect(repository)
-    try:
-        rows = con.execute(
-            "SELECT entry_id, anchor, action, actor_name, actor_email, at "
-            "FROM gather_overlay ORDER BY entry_id, anchor"
-        ).fetchall()
-    finally:
-        con.close()
-    return [OverlayEntry(*row) for row in rows]
+    return sorted(
+        (
+            OverlayEntry(
+                entry_id=entry_id,
+                anchor=act.anchor,
+                action=act.action,
+                actor_name=act.actor_name,
+                actor_email=act.actor_email,
+                at=act.at,
+            )
+            for entry_id, entry in load_all_entries(repository).items()
+            for act in entry.overlay
+        ),
+        key=lambda row: (row.entry_id, row.anchor),
+    )
 
 
 def _lexical_match(con: sqlite3.Connection, term: str) -> list[str]:
@@ -922,12 +986,9 @@ def gather(repository: Repository, entry_id: str) -> list[GatheredSource]:
         if cooccurrence:
             anchors.update(cooccurrence)
 
-        overlay = dict(
-            con.execute(
-                "SELECT anchor, action FROM gather_overlay WHERE entry_id = ?",
-                (entry_id,),
-            ).fetchall()
-        )
+        # The overlay lives on the entry itself (#21), already loaded above
+        # - no query against this index needed.
+        overlay = {act.anchor: act.action for act in entry.overlay}
         for anchor, action in overlay.items():
             if action == "exclude":
                 anchors.discard(anchor)
@@ -951,6 +1012,87 @@ def gather(repository: Repository, entry_id: str) -> list[GatheredSource]:
             for anchor, src_id in rows
         ),
         key=lambda gathered: gathered.anchor,
+    )
+
+
+@dataclass(frozen=True)
+class ReadOverlay:
+    """The curated overlay a decorated evidence read carries (#20, part 06
+    §8.3 / ``poc-plan.md`` §7): which entries this paragraph is currently
+    gathered into, which entries have excluded it, and which settlements
+    cite it.
+
+    ``citing_settlements`` is always empty in this build. Settlements are an
+    M4 concept (``docs/plan/16-build-order.md``) with no durable storage yet
+    to query - the field exists now so the overlay's shape does not change
+    again when M4 lands one.
+    """
+
+    entry_links: list[str]
+    exclusions: list[str]
+    citing_settlements: list[str]
+
+
+def overlay_for_anchor(repository: Repository, anchor: str) -> ReadOverlay | None:
+    """The curated overlay for one paragraph's anchor (#20).
+
+    ``entry_links`` is the **gathered-set-inverse**: every entry currently
+    on disk whose ``gather`` result includes this anchor - the same word-,
+    entry- and relation-shaped recall ``gather`` runs for a placement's
+    intended entry, and the same pin/exclude overlay it applies, just read
+    backwards from the anchor rather than forward from one entry. A
+    placements-only version under-reports exactly the recall ``gather``
+    itself exists to mitigate (part 06 §8.3's "central risk"), so this calls
+    ``gather`` once per entry rather than duplicating its matching logic - a
+    second, drifting copy of that logic would be worse than the extra
+    queries.
+
+    ``exclusions`` names every entry that has excluded this anchor, whether
+    or not it was otherwise gathered - the curator act itself, not just its
+    effect on membership.
+
+    Both are scoped to ``load_all_entries`` - entries actually on disk -
+    rather than to whatever ``placements``/``gather_overlay`` happen to
+    still name, so a deleted or renamed entry never surfaces from a stale
+    index.
+
+    Returns an empty overlay when there is no index yet (no ``memoria
+    rebuild`` has run), the same no-index behaviour ``search`` and
+    ``gather`` already give. Returns ``None`` - never raises - when the
+    index exists but cannot be read right now: a schema older than this
+    build (``IndexSchemaError``) or a concurrent writer holding it locked
+    (``sqlite3.Error``). The overlay is best-effort decoration; the
+    paragraph's own verbatim text is never conditioned on it, so a caller
+    degrades to an undecorated read rather than losing the read entirely -
+    ``poc-plan.md`` §7's verbatim-text guarantee may not weaken, and
+    decorating it was never license to.
+    """
+    db_path = repository.root / INDEX_RELATIVE_PATH
+    if not db_path.exists():
+        return ReadOverlay(entry_links=[], exclusions=[], citing_settlements=[])
+    try:
+        con = connect(repository)
+        try:
+            excluded_rows = con.execute(
+                "SELECT entry_id FROM gather_overlay "
+                "WHERE anchor = ? AND action = 'exclude'",
+                (anchor,),
+            ).fetchall()
+        finally:
+            con.close()
+        entries = load_all_entries(repository)
+        entry_links = sorted(
+            entry_id
+            for entry_id in entries
+            if any(g.anchor == anchor for g in gather(repository, entry_id))
+        )
+    except (IndexSchemaError, sqlite3.Error):
+        return None
+    exclusions = sorted(
+        entry_id for (entry_id,) in excluded_rows if entry_id in entries
+    )
+    return ReadOverlay(
+        entry_links=entry_links, exclusions=exclusions, citing_settlements=[]
     )
 
 
@@ -1037,9 +1179,9 @@ def compute_appearances(repository: Repository) -> AppearancesReport:
 
     Stored in the ``appearances`` table and never merged into the gathered
     set (§8.11): the two stay separately queryable by construction, since
-    nothing here writes to ``placements``, ``relations`` or
-    ``gather_overlay``, and ``gather`` never reads this table. Nothing here
-    writes to an entry file either - appearances are read-only about the
+    nothing here writes to ``placements`` or ``relations``, and ``gather``
+    never reads this table. Nothing here writes to an entry file either
+    (unlike ``pin``/``exclude``, #21) - appearances are read-only about the
     manuscript, never fed back into it.
 
     Regenerated identically on every call: existing rows are dropped and

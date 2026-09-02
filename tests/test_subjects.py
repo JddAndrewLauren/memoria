@@ -11,6 +11,7 @@ import pytest
 from memoria.subjects import (
     BUILTIN_SUBJECTS,
     Entry,
+    OverlayAct,
     Subject,
     SubjectError,
     classify_match_term,
@@ -175,6 +176,44 @@ def test_entry_to_markdown_and_parse_entry_are_inverses():
 def test_entry_with_no_match_terms_round_trips():
     original = _entry(match_terms=[])
     text = entry_to_markdown(original)
+    assert parse_entry(text) == original
+
+
+def test_entry_overlay_round_trips():
+    """#21: a pin/exclusion recorded on the entry (``OverlayAct``) survives
+    the ``entry_to_markdown``/``parse_entry`` cycle - the same inverse
+    property AC 3/4's durability guarantee depends on."""
+    original = _entry(
+        overlay=[
+            OverlayAct(
+                anchor="src-000001-p1",
+                action="pin",
+                actor_name="Author",
+                actor_email="author@example.com",
+                at="2026-09-01T00:00:00+00:00",
+            )
+        ]
+    )
+    text = entry_to_markdown(original)
+    assert "overlay:" in text
+    assert parse_entry(text) == original
+
+
+def test_entry_with_no_overlay_writes_no_overlay_key():
+    """The common case - never pinned or excluded - writes no bare
+    ``overlay: []`` into every entry's frontmatter."""
+    text = entry_to_markdown(_entry())
+    assert "overlay" not in text
+
+
+def test_entry_extra_frontmatter_round_trips():
+    """A rewrite (``pin``/``exclude``, #21 - the first code path that
+    rewrites an *existing* entry file) must not drop a frontmatter key this
+    module does not itself model, the same contract
+    ``memoria.manifest.ManifestEntry.extra`` keeps."""
+    original = _entry(extra={"custom_key": "keep-me"})
+    text = entry_to_markdown(original)
+    assert "custom_key: keep-me" in text
     assert parse_entry(text) == original
 
 

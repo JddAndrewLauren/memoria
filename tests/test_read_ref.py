@@ -7,9 +7,13 @@ checkable rather than merely asserted, so they compare bytes rather than
 substrings.
 """
 
+import sqlite3
+
 import pytest
 import yaml
 
+from memoria import extraction as ex
+from memoria.index import INDEX_RELATIVE_PATH, ReadOverlay, build_index, exclude, pin
 from memoria.manuscript import create_chapter, create_section
 from memoria.records import (
     NORMALIZED_RELATIVE_PATH,
@@ -21,6 +25,8 @@ from memoria.records import (
     write_normalized_records,
 )
 from memoria.repository import Repository
+from memoria.subjects import Entry, entry_to_markdown
+from memoria.write import Actor
 
 # Whitespace chosen to break a naive parser: a paragraph that contains its own
 # blank line (so blank-line splitting would cut it in two), one with leading
@@ -653,18 +659,25 @@ def test_raw_reads_citation_is_marked_raw(tmp_path):
     assert result.citation == "SRC-000184 raw"
 
 
-def test_raw_is_refused_for_a_paragraph_reference(tmp_path):
+def test_raw_serves_a_paragraph_undecorated(tmp_path):
+    """#20's second meaning for the same flag: a paragraph `raw` read
+    succeeds, with no curated overlay attached and the same text a plain
+    read gives."""
     repository = _repo_with_evidence(tmp_path)
 
-    with pytest.raises(ReadError, match="raw only serves a whole SRC- record"):
-        read(repository, "SRC-000184 P1", raw=True)
+    result = read(repository, "SRC-000184 P1", raw=True)
+
+    assert result.overlay is None
+    assert result.paragraph == 1
+    assert result.text == read(repository, "SRC-000184 P1").text
+    assert result.citation == "SRC-000184 ¶1 raw"
 
 
 def test_raw_is_refused_for_a_path_reference(tmp_path):
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "note.md").write_text("# note\n", encoding="utf-8")
 
-    with pytest.raises(ReadError, match="raw only serves a whole SRC- record"):
+    with pytest.raises(ReadError, match="raw only serves a SRC- reference"):
         read(Repository(root=tmp_path), "docs/note.md", raw=True)
 
 
@@ -674,7 +687,7 @@ def test_raw_is_refused_for_a_subject_reference(tmp_path):
     repository = Repository(root=tmp_path)
     write_builtin_subjects(repository)
 
-    with pytest.raises(ReadError, match="raw only serves a whole SRC- record"):
+    with pytest.raises(ReadError, match="raw only serves a SRC- reference"):
         read(repository, "SUB-people", raw=True)
 
 
@@ -739,3 +752,243 @@ def test_raw_refuses_a_non_utf8_text_original_without_calling_it_binary(tmp_path
     message = str(caught.value)
     assert "does not decode as UTF-8" in message
     assert "text in another encoding" in message
+
+
+# --- the curated overlay (#20) -----------------------------------------------
+
+_AUTHOR = Actor(name="Author", email="author@example.com")
+
+
+def _write_entry(tmp_path, entry):
+    subject_slug = entry.id.split("/", 1)[0][len("SUB-") :]
+    slug = entry.id.split("/", 1)[1]
+    directory = tmp_path / "subjects" / subject_slug
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{slug}.md").write_text(entry_to_markdown(entry))
+
+
+def _overlay_repo(tmp_path, entries=()):
+    """The default `_record()`, indexed, with `entries` written to disk -
+    the shape a decorated read's overlay needs beneath it."""
+    for entry in entries:
+        _write_entry(tmp_path, entry)
+    record = _record()
+    repository = _repo(tmp_path, record)
+    build_index(repository, [record])
+    return repository
+
+
+def test_a_decorated_paragraph_read_names_the_entries_it_is_placed_in(tmp_path):
+    """AC 1: entry links come back alongside the verbatim text."""
+    entry = Entry(id="SUB-people/bob", match_terms=["heron"], body="")
+    repository = _overlay_repo(tmp_path, [entry])
+    ex.record_extraction(
+        repository,
+        "src-000184-p1",
+        ex.ParagraphExtraction(
+            placements=(ex.ProposedPlacement("SUB-people/bob", "heron"),)
+        ),
+    )
+    ex.derive(repository)
+
+    result = read(repository, "SRC-000184 P1")
+
+    assert result.overlay == ReadOverlay(
+        entry_links=["SUB-people/bob"], exclusions=[], citing_settlements=[]
+    )
+
+
+def test_the_decorated_texts_verbatim_text_is_byte_identical_to_the_undecorated_read(
+    tmp_path,
+):
+    """AC 2, with an overlay actually present - decoration is a sibling
+    field, never folded into `text`."""
+    entry = Entry(id="SUB-people/bob", match_terms=["heron"], body="")
+    repository = _overlay_repo(tmp_path, [entry])
+    ex.record_extraction(
+        repository,
+        "src-000184-p1",
+        ex.ParagraphExtraction(
+            placements=(ex.ProposedPlacement("SUB-people/bob", "heron"),)
+        ),
+    )
+    ex.derive(repository)
+
+    decorated = read(repository, "SRC-000184 P1")
+    undecorated = read(repository, "SRC-000184 P1", raw=True)
+
+    assert decorated.overlay is not None
+    assert undecorated.overlay is None
+    assert decorated.text == undecorated.text == AWKWARD[0]
+
+
+def test_a_full_source_read_is_unaffected_by_the_overlay(tmp_path):
+    """AC 3: the raw undecorated full-source read stays exactly what it was
+    - `read`'s overlay only ever attaches to a paragraph."""
+    entry = Entry(id="SUB-people/bob", match_terms=["heron"], body="")
+    repository = _overlay_repo(tmp_path, [entry])
+    ex.record_extraction(
+        repository,
+        "src-000184-p1",
+        ex.ParagraphExtraction(
+            placements=(ex.ProposedPlacement("SUB-people/bob", "heron"),)
+        ),
+    )
+    ex.derive(repository)
+
+    result = read(repository, "SRC-000184")
+
+    assert result.overlay is None
+
+
+def test_a_paragraph_with_no_overlay_gets_an_explicit_empty_one(tmp_path):
+    """AC 5: no overlay is a fully-shaped, empty `ReadOverlay`, not `None`
+    and not a different return shape."""
+    repository = _overlay_repo(tmp_path)
+
+    result = read(repository, "SRC-000184 P1")
+
+    assert result.overlay == ReadOverlay(
+        entry_links=[], exclusions=[], citing_settlements=[]
+    )
+
+
+def test_entry_links_reflect_lexical_recall_not_just_placements(tmp_path):
+    """Retry item 2 / AC 1: entry links are the gathered-set-inverse, not a
+    placements-only narrowing of it - a paragraph an entry gathers purely
+    through its word-shaped match terms' lexical recall (no extraction
+    placement, no `ex.derive` at all) still names the entry, matching
+    `gather`'s own membership exactly."""
+    entry = Entry(id="SUB-people/bob", match_terms=["heron"], body="")
+    repository = _overlay_repo(tmp_path, [entry])
+
+    result = read(repository, "SRC-000184 P1")
+
+    assert result.overlay.entry_links == ["SUB-people/bob"]
+
+
+def test_a_pin_adds_an_entry_link_with_no_placement_behind_it(tmp_path):
+    entry = Entry(id="SUB-people/bob", match_terms=[], body="")
+    repository = _overlay_repo(tmp_path, [entry])
+    pin(repository, "SUB-people/bob", "src-000184-p1", _AUTHOR)
+
+    result = read(repository, "SRC-000184 P1")
+
+    assert result.overlay.entry_links == ["SUB-people/bob"]
+    assert result.overlay.exclusions == []
+
+
+def test_a_pin_or_exclusion_against_an_entry_no_longer_on_disk_is_dropped(tmp_path):
+    """Retry item 3: a stale index must not name an entry that has been
+    deleted or renamed since - `entry_links`/`exclusions` are scoped to
+    `load_all_entries`, not to whatever the index rows still say."""
+    entry = Entry(id="SUB-people/bob", match_terms=[], body="")
+    repository = _overlay_repo(tmp_path, [entry])
+    pin(repository, "SUB-people/bob", "src-000184-p1", _AUTHOR)
+    exclude(repository, "SUB-people/carol", "src-000184-p1", _AUTHOR)
+    # "carol" never existed on disk; "bob" is removed after being pinned.
+    (tmp_path / "subjects" / "people" / "bob.md").unlink()
+
+    result = read(repository, "SRC-000184 P1")
+
+    assert result.overlay.entry_links == []
+    assert result.overlay.exclusions == []
+
+
+def test_an_exclusion_drops_the_entry_link_but_is_still_named(tmp_path):
+    """A curator act against a placement is reported, not hidden - the
+    reader sees both that the entry excluded this paragraph and that it
+    would otherwise have been linked."""
+    entry = Entry(id="SUB-people/bob", match_terms=["heron"], body="")
+    repository = _overlay_repo(tmp_path, [entry])
+    ex.record_extraction(
+        repository,
+        "src-000184-p1",
+        ex.ParagraphExtraction(
+            placements=(ex.ProposedPlacement("SUB-people/bob", "heron"),)
+        ),
+    )
+    ex.derive(repository)
+    exclude(repository, "SUB-people/bob", "src-000184-p1", _AUTHOR)
+
+    result = read(repository, "SRC-000184 P1")
+
+    assert result.overlay.entry_links == []
+    assert result.overlay.exclusions == ["SUB-people/bob"]
+
+
+def test_citing_settlements_is_always_empty_in_this_build(tmp_path):
+    """Settlements are an M4 concept (docs/plan/16-build-order.md) with no
+    durable storage yet - the field is served, not populated."""
+    repository = _overlay_repo(tmp_path)
+
+    result = read(repository, "SRC-000184 P1")
+
+    assert result.overlay.citing_settlements == []
+
+
+def test_a_decorated_read_is_rendered_with_the_overlay_delimited_from_text(tmp_path):
+    """AC 4, at the adapter surface: the model-facing render, not just the
+    core value, keeps decoration out of the verbatim text."""
+    from memoria.mcp.server import render
+
+    entry = Entry(id="SUB-people/bob", match_terms=["heron"], body="")
+    repository = _overlay_repo(tmp_path, [entry])
+    ex.record_extraction(
+        repository,
+        "src-000184-p1",
+        ex.ParagraphExtraction(
+            placements=(ex.ProposedPlacement("SUB-people/bob", "heron"),)
+        ),
+    )
+    ex.derive(repository)
+
+    rendered = render(read(repository, "SRC-000184 P1"))
+
+    header, _, rest = rendered.partition("\n---\n")
+    payload, _, overlay_block = rest.rpartition("\n---\n")
+    assert payload == AWKWARD[0]
+    assert "entry links: SUB-people/bob" in overlay_block
+
+
+def test_a_stale_index_schema_degrades_the_overlay_rather_than_failing_the_read(
+    tmp_path,
+):
+    """Retry item 1 (BLOCKER): an index predating #111's `email_from`/
+    `email_to` columns must not turn a paragraph read that used to succeed
+    into an `IndexSchemaError` - decoration is best-effort, and the
+    verbatim text is never conditioned on it (poc-plan.md §7)."""
+    entry = Entry(id="SUB-people/bob", match_terms=["heron"], body="")
+    repository = _overlay_repo(tmp_path, [entry])
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.execute("DROP TABLE paragraphs")
+    con.execute(
+        "CREATE TABLE paragraphs("
+        "anchor TEXT PRIMARY KEY, src_id TEXT, source_type TEXT, "
+        "event_date TEXT, recorded_date TEXT, contemporaneous INTEGER"
+        ")"
+    )
+    con.commit()
+    con.close()
+
+    result = read(repository, "SRC-000184 P1")
+
+    assert result.text == AWKWARD[0]
+    assert result.overlay is None
+
+
+def test_an_unreadable_index_file_degrades_the_overlay_rather_than_failing_the_read(
+    tmp_path,
+):
+    """The same guarantee against a corrupted or mid-write index file, not
+    just a stale schema - a `sqlite3.Error` of any kind degrades the
+    overlay rather than the read, the same as a locked one held by a
+    concurrent `memoria rebuild`."""
+    entry = Entry(id="SUB-people/bob", match_terms=["heron"], body="")
+    repository = _overlay_repo(tmp_path, [entry])
+    (repository.root / INDEX_RELATIVE_PATH).write_bytes(b"not a sqlite file")
+
+    result = read(repository, "SRC-000184 P1")
+
+    assert result.text == AWKWARD[0]
+    assert result.overlay is None
