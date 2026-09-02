@@ -1461,7 +1461,14 @@ def _dump_derived(repository):
     """Every derived table's rows, sorted - the whole content a full
     rebuild is supposed to reproduce byte-for-byte against the incremental
     path (#21 AC 2), ``records`` (the FTS5 full-text index) included:
-    ``SELECT *`` works on an fts5 table the same as on any other."""
+    ``SELECT *`` works on an fts5 table the same as on any other.
+
+    ``extraction_meta.derived_at`` is dropped: it is a wall-clock reading
+    of *when* a derive ran, not content the derive computed, and two
+    derives never run at the same instant. Comparing it would make the
+    parity assertion a coin flip on whether the two calls happened to
+    land in the same second.
+    """
     from memoria.index import DERIVED_TABLES
 
     con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
@@ -1469,12 +1476,16 @@ def _dump_derived(repository):
     sqlite_vec.load(con)
     con.enable_load_extension(False)
     try:
-        return {
+        dump = {
             table: sorted(con.execute(f"SELECT * FROM {table}").fetchall())
             for table in DERIVED_TABLES
         }
     finally:
         con.close()
+    dump["extraction_meta"] = [
+        row for row in dump["extraction_meta"] if row[0] != "derived_at"
+    ]
+    return dump
 
 
 def test_a_full_rebuild_is_byte_identical_to_the_incremental_path(tmp_path):
