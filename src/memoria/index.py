@@ -323,7 +323,9 @@ class SearchFilters:
     the correspondents in a real export are bare display names in mixed
     order, so this matches strings and resolves no person; that stays entry
     match-term work. ``from_`` rather than ``from``, which is a reserved
-    word.
+    word. An empty string is not a filter: it is treated exactly like
+    ``None``, because a substring match on ``""`` would otherwise return
+    every record that merely *has* the header (see ``filter_predicate``).
     """
 
     event_date: str | None = None
@@ -551,10 +553,19 @@ def filter_predicate(filters: SearchFilters | None) -> tuple[str, list]:
     if filters.contemporaneous is not None:
         clauses.append("paragraphs.contemporaneous = ?")
         params.append(1 if filters.contemporaneous else 0)
-    if filters.from_ is not None:
+    # An empty header string is no filter at all, not a filter that matches
+    # everything: `INSTR(x, "") > 0` holds for every non-null `x`, so
+    # `from_=""` would have quietly narrowed a search to "every record that
+    # has a `from` header" and answered as if that were the caller's
+    # question. The four filters above take `None` for "not applied"; an
+    # empty substring carries no more constraint than `None` does, so it is
+    # treated the same way rather than raised on - nothing else in
+    # `SearchFilters` validates a value, and a raise here would surface
+    # through `search_text` (#12) as a bare exception.
+    if filters.from_:
         clauses.append("INSTR(LOWER(paragraphs.email_from), LOWER(?)) > 0")
         params.append(filters.from_)
-    if filters.to is not None:
+    if filters.to:
         clauses.append("INSTR(LOWER(paragraphs.email_to), LOWER(?)) > 0")
         params.append(filters.to)
     return " AND ".join(clauses), params
@@ -576,10 +587,12 @@ def search(
 
     ``filters`` narrows by event date, recorded date, source type,
     contemporaneous/retrospective and the ``from``/``to`` header strings
-    (``SearchFilters``); all compose. Applied in the core so the same filters
-    reach every caller - the MCP tool (#12), the web API (#64) and
+    (``SearchFilters``); all compose. Applied in the core so one predicate
+    builder serves every caller - the MCP tool (#12), the web API (#64) and
     cross-layer search (#24) - without a second, divergent copy in any of
-    them (§40.1).
+    them (§40.1). A caller still chooses which filters it exposes: the MCP
+    tool passes a whole ``SearchFilters``, while #64's route enumerates the
+    original four query params and does not yet pass ``from_``/``to``.
 
     ``snippet`` is opt-in and off by default, so a hit carries identifiers
     and nothing else unless a caller asks otherwise (#95). It is a match
