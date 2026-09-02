@@ -218,6 +218,7 @@ def main(argv=None):
             f"rebuild: wrote {len(change_ids)} change projection(s) to "
             f"{repository.root / changes.CHANGES_RELATIVE_PATH}"
         )
+        print(f"rebuild: completed in {report.elapsed_seconds:.2f}s")
         return 0
 
     if args.command == "checkpoint":
