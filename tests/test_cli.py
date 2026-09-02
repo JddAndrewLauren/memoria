@@ -118,6 +118,40 @@ def test_validate_refuses_clearly_when_no_corpus_is_configured(tmp_path):
     assert "no default" in result.stderr
 
 
+def test_validate_exits_nonzero_and_reports_when_index_schema_version_is_unknown(
+    tmp_path,
+):
+    """`validate` reaches the index through `list_overlay` -> `connect` ->
+    `_ensure_preserved` (#18), which refuses to read a cache carrying a
+    schema version this build does not know (#117). That must land as a
+    clean `validate: <message>` and exit 1, like `rebuild` already does for
+    the same exception - not an uncaught traceback (#118)."""
+    import sqlite3
+
+    from memoria.index import INDEX_RELATIVE_PATH
+
+    evidence_root, _ = _make_valid_corpus(tmp_path)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=str(evidence_root))
+
+    rebuilt = run_cli("rebuild", env=env, cwd=repo_root)
+    assert rebuilt.returncode == 0, rebuilt.stderr
+
+    db_path = repo_root / INDEX_RELATIVE_PATH
+    con = sqlite3.connect(db_path)
+    con.execute("UPDATE memoria_schema SET value = '99' WHERE key = 'memo_version'")
+    con.commit()
+    con.close()
+
+    result = run_cli("validate", env=env, cwd=repo_root)
+
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    assert "validate: " in result.stderr
+    assert "schema version '99'" in result.stderr
+
+
 def test_normalize_converts_a_plain_text_unit(tmp_path):
     evidence_root = tmp_path / "evidence"
     raw_file = evidence_root / "raw" / "a.txt"
