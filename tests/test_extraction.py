@@ -563,6 +563,85 @@ def test_promoting_a_cluster_seeds_a_candidate_member_as_a_plain_word(tmp_path):
     ]
 
 
+def test_a_cluster_of_many_members_still_seeds_its_relations(tmp_path):
+    """AC 8, second half, at the cap. Members alone fill
+    `MAX_SEEDED_MATCH_TERMS` on a big cluster; the relations that defined it
+    must not be the part that falls off, and what fell off is counted."""
+    names = [f"person{n:02d}" for n in range(ex.MAX_SEEDED_MATCH_TERMS + 2)]
+    entries = [Entry(id=f"SUB-people/{n}", match_terms=[n], body="") for n in names]
+    repository = _repo(tmp_path, ["Everyone was there."] * 3, entries=entries)
+    for number in (1, 2, 3):
+        _memo(
+            repository,
+            f"src-000001-p{number}",
+            placements=tuple(_place(f"SUB-people/{n}", n) for n in names),
+            relations=(
+                ex.ProposedRelation("SUB-people/person00", "hosts", "SUB-people/person01"),
+            ),
+        )
+    ex.derive(repository, recurrence_threshold=1)
+    (cluster_id,) = {row[0] for row in _rows(repository, "clusters")}
+
+    promotion = ex.promote_cluster(repository, cluster_id, ex.CURATOR)
+
+    assert len(promotion.match_terms) == ex.MAX_SEEDED_MATCH_TERMS
+    assert "SUB-people/person00 -> hosts -> SUB-people/person01" in promotion.match_terms
+    assert promotion.dropped == len(names) + 1 - ex.MAX_SEEDED_MATCH_TERMS
+
+
+def test_a_theme_is_never_placed_and_never_offered_to_the_model(tmp_path):
+    """ADR-0005 decision 6: a Theme gathers by co-occurrence, over #18's join.
+    A Theme named `grief` must not collect every paragraph with the word in
+    it, so its name licenses nothing and the brief does not list it."""
+    entries = [
+        Entry(id="SUB-themes/grief", match_terms=[], body=""),
+        Entry(id="SUB-people/bob", match_terms=["Bob"], body=""),
+    ]
+    repository = _repo(tmp_path, ["Grief.", "Grief again."], entries=entries)
+    _memo(repository, "src-000001-p1", placements=(_place("SUB-themes/grief", "grief"),))
+    _memo(repository, "src-000001-p2", unplaced=(_form("grief", ""),))
+
+    assert [e for e, _ in ex.brief(repository).entry_names] == ["SUB-people/bob"]
+    ex.derive(repository, recurrence_threshold=1)
+
+    assert _rows(repository, "placements") == []
+    assert not any(row[0] == "SUB-themes/grief" for row in _rows(repository, "proposed_match_terms"))
+    assert len(_rows(repository, "unplaced_forms")) == 2
+
+
+def test_candidates_unplaced_forms_and_cluster_members_are_enumerable(tmp_path):
+    """AC 9 and AC 12: rows are enumerable through a reader, not only through
+    SQL a test happens to write. `status` counts; these list."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    repository = _repo(tmp_path, ["Bob and Carol."] * 3 + ["Zed."], entries=[entry])
+    for number in (1, 2, 3):
+        _memo(
+            repository,
+            f"src-000001-p{number}",
+            placements=(_place("SUB-people/bob", "Bob"),),
+            unplaced=(_form("Carol"),),
+        )
+    _memo(repository, "src-000001-p4", unplaced=(_form("Zed", ""),))
+    ex.derive(repository, recurrence_threshold=5)
+
+    (carol,) = ex.candidates(repository)
+    assert (carol.label, carol.recurrence, carol.above_threshold) == ("Carol", 3, False)
+    assert ex.candidates(repository, above_threshold=True) == []
+    assert ex.candidates(repository, subject_id="SUB-events") == []
+    assert [f.surface_form for f in ex.unplaced_forms(repository)] == ["Carol"] * 3 + ["Zed"]
+
+    ex.derive(repository, recurrence_threshold=1)
+    (cluster_id,) = {row[0] for row in _rows(repository, "clusters")}
+    opened = ex.cluster_members(repository, cluster_id)
+
+    assert opened.anchors == ("src-000001-p1", "src-000001-p2", "src-000001-p3")
+    assert "SUB-people/bob" in opened.members
+    assert opened.children == ()
+    assert opened.summary is None
+    with pytest.raises(ex.ExtractionError):
+        ex.cluster_members(repository, "CL-nope")
+
+
 def test_a_promoted_entry_carries_an_empty_body(tmp_path):
     """ADR-0005 build shape 2: nothing machine-written enters an entry body.
     Prose about an entry has a designed producer, and it is not this."""

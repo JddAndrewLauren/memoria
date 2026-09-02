@@ -338,7 +338,9 @@ def render_record_outcome(outcome: extraction.RecordOutcome, total: int) -> str:
 
 
 @mcp.tool()
-def extraction_derive(recurrence_threshold: int = 5) -> str:
+def extraction_derive(
+    recurrence_threshold: int = extraction.RECURRENCE_THRESHOLD_DEFAULT,
+) -> str:
     """Recompute placements, candidates, relations and clusters. No model.
 
     Runs after the paragraph loop and before the summary loop. Calls nothing
@@ -422,7 +424,8 @@ def render_summary_task(
 def extraction_record_summary(
     cluster_id: str, membership: str, summary: str
 ) -> str:
-    """Store one cluster's summary, marked `[inferred]`.
+    """Store one cluster's summary. The text is `[inferred]`: stored and
+    served as written, and never evidence.
 
     `membership` must be the value served with the task. A mismatch means the
     clusters were recomputed in between and this text is about different
@@ -477,7 +480,9 @@ def render_status(state: extraction.Status) -> str:
 
 
 @mcp.tool()
-def extraction_finish(recurrence_threshold: int = 5) -> str:
+def extraction_finish(
+    recurrence_threshold: int = extraction.RECURRENCE_THRESHOLD_DEFAULT,
+) -> str:
     """Close the pass: promote what the subjects say may promote, and report.
 
     Only subjects declaring `auto-promote: yes` create entries, and only from
@@ -501,11 +506,7 @@ def render_pass_report(report: extraction.PassReport) -> str:
     lines = [render_counts(report.counts), ""]
     if report.promotions:
         lines.append("auto-promoted:")
-        lines += [
-            f"  {promotion.entry_id} "
-            f"(match terms: {', '.join(promotion.match_terms) or 'none'})"
-            for promotion in report.promotions
-        ]
+        lines += [f"  {render_promotion(promotion)}" for promotion in report.promotions]
     else:
         lines.append(
             "auto-promoted: nothing - no subject declares auto-promote: yes, "
@@ -517,6 +518,125 @@ def render_pass_report(report: extraction.PassReport) -> str:
         "proposal; match terms decide what is placed."
     )
     return "\n".join(lines)
+
+
+def render_promotion(promotion: extraction.Promotion) -> str:
+    terms = ", ".join(promotion.match_terms) or "none"
+    line = f"{promotion.entry_id} (match terms: {terms})"
+    if promotion.dropped:
+        line += (
+            f" - {promotion.dropped} proposed term(s) not seeded; the cap is "
+            f"{extraction.MAX_SEEDED_MATCH_TERMS}, edit the entry to add more"
+        )
+    return line
+
+
+@mcp.tool()
+def extraction_candidates(
+    subject_id: str | None = None,
+    rejected: bool = False,
+    limit: int = 25,
+) -> str:
+    """List candidates ranked by recurrence, with the id a promotion takes.
+
+    By default those above the recurrence filter, waiting for the author;
+    `rejected=True` lists the ones the filter set aside instead, which #17
+    keeps enumerable because the filter is a guaranteed miss generator.
+    """
+    rows = extraction.candidates(
+        repository(),
+        subject_id=subject_id,
+        above_threshold=not rejected,
+        limit=limit,
+    )
+    if not rows:
+        return "No candidates" + (" below the filter." if rejected else " waiting.")
+    return "\n".join(
+        f"{c.candidate_id}  {c.subject_id}  {c.label}  x{c.recurrence}"
+        + (f"  - {c.gloss}" if c.gloss else "")
+        for c in rows
+    )
+
+
+@mcp.tool()
+def extraction_unplaced_forms(limit: int = 50) -> str:
+    """List the mentions the pass could not tie to an entry, by anchor."""
+    rows = extraction.unplaced_forms(repository(), limit=limit)
+    if not rows:
+        return "No unplaced surface forms."
+    return "\n".join(
+        f"{f.anchor}  {f.surface_form!r}  {f.subject_id or '-'}  {f.reason}"
+        + (f" ({f.proposed_entry_id})" if f.proposed_entry_id else "")
+        for f in rows
+    )
+
+
+@mcp.tool()
+def extraction_cluster(cluster_id: str) -> str:
+    """Open one cluster: its members, its paragraphs, its children, and its
+    summary if one has been written. What an author reads before promoting
+    it; the paragraphs are anchors for `read(ref)`, never text."""
+    try:
+        cluster = extraction.cluster_members(repository(), cluster_id)
+    except extraction.ExtractionError as exc:
+        raise _tool_error(exc) from exc
+    return render_cluster(cluster)
+
+
+def render_cluster(cluster: extraction.ClusterMembers) -> str:
+    lines = [
+        f"{cluster.cluster_id} level {cluster.level}"
+        + (f" under {cluster.parent_id}" if cluster.parent_id else ""),
+        f"label: {cluster.label}",
+        f"members: {', '.join(cluster.members)}",
+        f"paragraphs: {', '.join(cluster.anchors)}",
+        f"children: {', '.join(cluster.children) or 'none'}",
+        f"summary: {cluster.summary if cluster.summary else 'not yet written'}",
+    ]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def extraction_promote_candidate(
+    candidate_id: str, entry_slug: str | None = None
+) -> str:
+    """The author's one-key promotion: make one candidate an entry, seeded
+    with the match terms the extraction proposed for it.
+
+    An author act, never the pass's own. Call it only when the author has
+    named the candidate; run `extraction_derive` afterwards so the new
+    entry's placements land.
+    """
+    try:
+        promotion = extraction.promote_candidate(
+            repository(), candidate_id, extraction.CURATOR, entry_slug=entry_slug
+        )
+    except extraction.ExtractionError as exc:
+        raise _tool_error(exc) from exc
+    return "promoted " + render_promotion(promotion)
+
+
+@mcp.tool()
+def extraction_promote_cluster(
+    cluster_id: str, subject_id: str = "SUB-themes", entry_slug: str | None = None
+) -> str:
+    """The author's one-key promotion of a cluster into a Theme or an Arc,
+    seeded with the entries and relations that defined it.
+
+    `subject_id` is the author's choice between the two; the cluster itself
+    belongs to neither until this call.
+    """
+    try:
+        promotion = extraction.promote_cluster(
+            repository(),
+            cluster_id,
+            extraction.CURATOR,
+            subject_id=subject_id,
+            entry_slug=entry_slug,
+        )
+    except extraction.ExtractionError as exc:
+        raise _tool_error(exc) from exc
+    return "promoted " + render_promotion(promotion)
 
 
 def main(argv=None) -> int:

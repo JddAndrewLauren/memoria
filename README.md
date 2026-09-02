@@ -203,6 +203,14 @@ where it stopped; nothing is lost and nothing repeats, because what is left to
 do is a query over what has no cached reading rather than a cursor to keep.
 `docs/tool-surface.md` records the tools and why they are shaped as they are.
 
+What the pass produces waits for the author. Candidates above the recurrence
+filter, the ones it set aside, the mentions nothing licensed and every
+cluster are all listable from the same session (`extraction_candidates`,
+`extraction_unplaced_forms`, `extraction_cluster`), and a candidate or cluster
+becomes an entry only when the author names it to
+`extraction_promote_candidate` or `extraction_promote_cluster` — or when its
+subject declares `auto-promote: yes`, which Themes and Arcs never do.
+
 `memoria checkpoint` commits tracked, durable files with uncommitted
 modifications — outside edits made in Obsidian or another editor, never
 untracked files or Derived state — as one commit under one `CHG-` id

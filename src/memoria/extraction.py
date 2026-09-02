@@ -72,6 +72,23 @@ RECURRENCE_THRESHOLD_DEFAULT = 5
 # rather than a dump.
 MAX_SEEDED_MATCH_TERMS = 12
 
+# The subjects whose entries gather by co-occurrence (ADR-0005 decision 6)
+# rather than by being mentioned. Their entries are never handed to the model
+# as placeable and never license a placement: a Theme named "grief" must not
+# collect every paragraph containing the word, because its gathered set is
+# #18's join over the placements of the entries and relations that define it.
+CO_OCCURRENCE_SUBJECTS = frozenset({"SUB-themes", "SUB-arcs"})
+
+
+def placeable_entries(entries: dict[str, Entry]) -> dict[str, Entry]:
+    """The entries the extraction may place: everything outside
+    ``CO_OCCURRENCE_SUBJECTS``."""
+    return {
+        entry_id: entry
+        for entry_id, entry in entries.items()
+        if entry_id.split("/", 1)[0] not in CO_OCCURRENCE_SUBJECTS
+    }
+
 # How much of a candidate's gloss is forms and how much is relations.
 GLOSS_FORMS = 5
 GLOSS_RELATIONS = 5
@@ -553,7 +570,9 @@ def derive(
                 continue
             readings[anchor] = ParagraphExtraction.from_json(value)
 
-        state = _Derived(entries=entries, threshold=recurrence_threshold)
+        state = _Derived(
+            entries=placeable_entries(entries), threshold=recurrence_threshold
+        )
         state.read_placements(readings)
         state.build_candidates()
         state.read_relations(readings)
@@ -620,7 +639,7 @@ def _clear_derived(con: sqlite3.Connection) -> None:
         "candidate_paragraphs",
         "proposed_match_terms",
         "clusters",
-        "cluster_nodes",
+        "cluster_members",
         "cluster_relations",
         "cluster_paragraphs",
         "extraction_meta",
@@ -662,7 +681,7 @@ class _Derived:
         # anchor -> {normalized form: entry_id} for the placements that landed.
         self._placed: dict[str, dict[str, str]] = {}
         self.clusters: list[dict] = []
-        self.cluster_nodes: list[tuple[str, str]] = []
+        self.cluster_members: list[tuple[str, str]] = []
         self.cluster_relations: list[tuple[str, str, str, str, int]] = []
         self.cluster_paragraphs: list[tuple[str, str]] = []
 
@@ -699,7 +718,10 @@ class _Derived:
 
         Entry-reference and relation match terms are not consulted here. They
         are how a Theme *gathers* - a co-occurrence join over placements,
-        which is #18's - and a Theme is never itself placed by the extractor.
+        which is #18's - and a Theme is never itself placed by the extractor:
+        ``derive`` hands this state ``placeable_entries`` only, so a Theme's
+        name licenses nothing and a placement naming one is unplaced as
+        ``NO_SUCH_ENTRY``.
         """
         for anchor in sorted(readings):
             reading = readings[anchor]
@@ -925,11 +947,11 @@ class _Derived:
     # -- pass 5: clusters ----------------------------------------------------
 
     def build_clusters(self) -> str:
-        """Cluster the co-occurrence graph, and record what came back.
+        """Cluster by co-occurrence, and record what came back.
 
-        **The graph's nodes are placed entries and candidates together.** This
-        reads past #17's literal wording and it is forced: on a fresh archive
-        nothing is promoted, so an entries-only graph has nothing in it and
+        **A cluster's members are placed entries and candidates together.**
+        This reads past #17's literal wording and it is forced: on a fresh
+        archive nothing is promoted, so entries alone co-occur nowhere and
         "clusters are proposed under Themes and Arcs" fails on every archive's
         first run. It is also what ADR-0005 decision 1 means - entities *are*
         entries, and a candidate is precisely an un-promoted one - and the
@@ -1007,7 +1029,7 @@ class _Derived:
                     "anchors": anchors,
                 }
             )
-            self.cluster_nodes += [
+            self.cluster_members += [
                 (cluster_id, node) for node in assignment.members
             ]
             self.cluster_paragraphs += [(cluster_id, anchor) for anchor in anchors]
@@ -1096,8 +1118,9 @@ class _Derived:
             self.clusters,
         )
         con.executemany(
-            "INSERT OR IGNORE INTO cluster_nodes (cluster_id, node_ref) VALUES (?, ?)",
-            self.cluster_nodes,
+            "INSERT OR IGNORE INTO cluster_members (cluster_id, member_ref) "
+            "VALUES (?, ?)",
+            self.cluster_members,
         )
         con.executemany(
             "INSERT OR IGNORE INTO cluster_paragraphs (cluster_id, anchor) "
@@ -1181,6 +1204,11 @@ class Promotion:
     path: str
     match_terms: tuple[str, ...]
     seeded_from: str
+    # Match terms are the author's (CONTEXT.md), so a seed that was cut to
+    # ``MAX_SEEDED_MATCH_TERMS`` says how many it left behind rather than
+    # letting the author believe the entry carries everything the extraction
+    # proposed.
+    dropped: int = 0
 
 
 def promote_candidate(
@@ -1225,6 +1253,7 @@ def promote_candidate(
         forms[:MAX_SEEDED_MATCH_TERMS],
         actor,
         seeded_from=candidate_id,
+        dropped=max(0, len(forms) - MAX_SEEDED_MATCH_TERMS),
     )
 
 
@@ -1268,8 +1297,8 @@ def promote_cluster(
         nodes = [
             node
             for node, in con.execute(
-                "SELECT node_ref FROM cluster_nodes WHERE cluster_id = ? "
-                "ORDER BY node_ref",
+                "SELECT member_ref FROM cluster_members WHERE cluster_id = ? "
+                "ORDER BY member_ref",
                 (cluster_id,),
             )
         ]
@@ -1287,25 +1316,38 @@ def promote_cluster(
     finally:
         con.close()
 
-    terms: list[str] = []
+    member_terms: list[str] = []
     for node in nodes:
         if node.startswith(CANDIDATE_REF_PREFIX):
             word = candidate_labels.get(node)
             if word:
-                terms.append(word)
+                member_terms.append(word)
         else:
-            terms.append(node)
-    for from_ref, verb, to_ref in relations:
-        if from_ref.startswith(CANDIDATE_REF_PREFIX) or to_ref.startswith(
-            CANDIDATE_REF_PREFIX
-        ):
-            continue
-        terms.append(f"{from_ref} -> {verb} -> {to_ref}")
+            member_terms.append(node)
+    relation_terms = [
+        f"{from_ref} -> {verb} -> {to_ref}"
+        for from_ref, verb, to_ref in relations
+        if not from_ref.startswith(CANDIDATE_REF_PREFIX)
+        and not to_ref.startswith(CANDIDATE_REF_PREFIX)
+    ]
 
-    seeded = _deduplicate(terms)[:MAX_SEEDED_MATCH_TERMS]
+    # The cap holds room for relations. Members alone would fill it on any
+    # cluster of MAX_SEEDED_MATCH_TERMS members and more, and a Theme seeded
+    # with no relation at all is not what AC 8 promises; so the strongest
+    # relations take up to half, members follow, and the rest of the
+    # relations fill whatever is left.
+    half = MAX_SEEDED_MATCH_TERMS // 2
+    terms = _deduplicate(relation_terms[:half] + member_terms + relation_terms[half:])
+    seeded = terms[:MAX_SEEDED_MATCH_TERMS]
     slug = entry_slug or entry_slug_for(label or cluster_id)
     return _materialize(
-        repository, subject_id, slug, seeded, actor, seeded_from=cluster_id
+        repository,
+        subject_id,
+        slug,
+        seeded,
+        actor,
+        seeded_from=cluster_id,
+        dropped=len(terms) - len(seeded),
     )
 
 
@@ -1317,6 +1359,7 @@ def _materialize(
     actor: Actor,
     *,
     seeded_from: str,
+    dropped: int = 0,
 ) -> Promotion:
     """Write one entry file through the durable write path, and commit it."""
     entry_id = f"{subject_id}/{slug}"
@@ -1337,6 +1380,7 @@ def _materialize(
         path=relative_path,
         match_terms=tuple(match_terms),
         seeded_from=seeded_from,
+        dropped=dropped,
     )
 
 
@@ -1458,7 +1502,8 @@ def brief(repository: Repository) -> Brief:
         extraction_prompt=EXTRACTION_PROMPT,
         subjects=tuple(subjects),
         entry_names=tuple(
-            (entry_id, implicit_name_term(entry_id)) for entry_id in sorted(entries)
+            (entry_id, implicit_name_term(entry_id))
+            for entry_id in sorted(placeable_entries(entries))
         ),
         subjects_digest=digest,
         pending=len(pending_paragraphs(repository)),
@@ -1843,6 +1888,157 @@ def status(repository: Repository) -> Status:
         ),
         clustering_backend=meta.get("clustering_backend", ""),
         derived="derived_at" in meta,
+    )
+
+
+
+# --- enumeration -------------------------------------------------------------
+#
+# #17: "candidates the filter rejects stay enumerable, and so do unplaced
+# surface forms" - both miss rates are countable the day ground truth exists.
+# `status` counts; these list, and they are the only route by which an author
+# reaches a candidate or cluster id to promote.
+
+
+@dataclass(frozen=True)
+class Candidate:
+    """One candidate as the recurrence filter left it, kept either way."""
+
+    candidate_id: str
+    subject_id: str
+    label: str
+    gloss: str
+    recurrence: int
+    above_threshold: bool
+
+
+@dataclass(frozen=True)
+class UnplacedForm:
+    """A mention the pass could not tie to an entry."""
+
+    anchor: str
+    surface_form: str
+    subject_id: str
+    reason: str
+    proposed_entry_id: str
+
+
+@dataclass(frozen=True)
+class ClusterMembers:
+    """One cluster opened up: its members, its paragraphs, its children."""
+
+    cluster_id: str
+    level: int
+    parent_id: str
+    label: str
+    members: tuple[str, ...]
+    anchors: tuple[str, ...]
+    children: tuple[str, ...]
+    summary: str | None
+
+
+def candidates(
+    repository: Repository,
+    *,
+    subject_id: str | None = None,
+    above_threshold: bool | None = None,
+    limit: int | None = None,
+) -> list[Candidate]:
+    """Candidates ranked by recurrence - all of them, or one subject's, or
+    only those on one side of the filter."""
+    clauses, params = [], []
+    if subject_id is not None:
+        clauses.append("subject_id = ?")
+        params.append(subject_id)
+    if above_threshold is not None:
+        clauses.append("above_threshold = ?")
+        params.append(int(above_threshold))
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    tail = "" if limit is None else f" LIMIT {int(limit)}"
+    con = connect(repository)
+    try:
+        rows = con.execute(
+            "SELECT candidate_id, subject_id, label, gloss, recurrence, "
+            f"above_threshold FROM candidates {where} "
+            f"ORDER BY recurrence DESC, subject_id, label{tail}",
+            params,
+        ).fetchall()
+    finally:
+        con.close()
+    return [
+        Candidate(candidate_id, subject_id, label, gloss, recurrence, bool(above))
+        for candidate_id, subject_id, label, gloss, recurrence, above in rows
+    ]
+
+
+def unplaced_forms(
+    repository: Repository, *, limit: int | None = None
+) -> list[UnplacedForm]:
+    """Every mention left unplaced, by anchor."""
+    tail = "" if limit is None else f" LIMIT {int(limit)}"
+    con = connect(repository)
+    try:
+        rows = con.execute(
+            "SELECT anchor, surface_form, subject_id, reason, proposed_entry_id "
+            f"FROM unplaced_forms ORDER BY anchor, surface_form{tail}"
+        ).fetchall()
+    finally:
+        con.close()
+    return [UnplacedForm(*row) for row in rows]
+
+
+def cluster_members(repository: Repository, cluster_id: str) -> ClusterMembers:
+    """One cluster's members, member paragraphs and child clusters (AC 12).
+
+    The summary comes back too when one exists for this membership, so an
+    author inspecting a cluster before promoting it sees everything the pass
+    holds about it in one place.
+    """
+    con = connect(repository)
+    try:
+        row = con.execute(
+            "SELECT level, parent_id, label, membership_hash FROM clusters "
+            "WHERE cluster_id = ?",
+            (cluster_id,),
+        ).fetchone()
+        if row is None:
+            raise ExtractionError(f"no such cluster: {cluster_id}")
+        level, parent_id, label, membership_hash = row
+        members = [
+            ref
+            for ref, in con.execute(
+                "SELECT member_ref FROM cluster_members WHERE cluster_id = ? "
+                "ORDER BY member_ref",
+                (cluster_id,),
+            )
+        ]
+        anchors = [
+            anchor
+            for anchor, in con.execute(
+                "SELECT anchor FROM cluster_paragraphs WHERE cluster_id = ? "
+                "ORDER BY anchor",
+                (cluster_id,),
+            )
+        ]
+        children = [
+            child
+            for child, in con.execute(
+                "SELECT cluster_id FROM clusters WHERE parent_id = ? "
+                "ORDER BY cluster_id",
+                (cluster_id,),
+            )
+        ]
+    finally:
+        con.close()
+    return ClusterMembers(
+        cluster_id=cluster_id,
+        level=level,
+        parent_id=parent_id,
+        label=label,
+        members=tuple(members),
+        anchors=tuple(anchors),
+        children=tuple(children),
+        summary=cluster_summary(repository, cluster_id),
     )
 
 

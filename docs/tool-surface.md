@@ -34,6 +34,18 @@ write, and they exist because there is nowhere else to put them.
 | `extraction_record_summary(cluster_id, membership, summary)` | **Forced** — issue #17 |
 | `extraction_status()` | **Forced** — issue #17 |
 | `extraction_finish(recurrence_threshold)` | **Forced** — issue #17 |
+| `extraction_candidates(subject_id, rejected, limit)` | **Forced** — issue #17 |
+| `extraction_unplaced_forms(limit)` | **Forced** — issue #17 |
+| `extraction_cluster(cluster_id)` | **Forced** — issue #17 |
+| `extraction_promote_candidate(candidate_id, entry_slug)` | **Forced** — issue #17 |
+| `extraction_promote_cluster(cluster_id, subject_id, entry_slug)` | **Forced** — issue #17 |
+
+The last five are the author's side of the pass rather than the pass itself.
+#17 keeps rejected candidates and unplaced forms *enumerable* and offers
+promotion as a one-key act; the three list tools are the enumeration, and the
+two promote tools are the key. They exist on the server for the same reason
+the rest do — the author's session has no other route to the rows — and they
+act only on an id the author named.
 
 ### Why they are on this server
 
@@ -107,8 +119,9 @@ nobody read.
   summaries and no evidence at all.
 
 Not ledgered: `extraction_record`, `extraction_record_summary`,
-`extraction_derive`, `extraction_finish` and `extraction_status`. They supply
-nothing to the model; they take from it or compute. An account of *acts* rather
+`extraction_derive`, `extraction_finish`, `extraction_status`, the three list
+tools and the two promote tools. They supply nothing to the model; they take
+from it, compute, or list derived rows. An account of *acts* rather
 than reads would be a second, broader ledger — the same call this document
 already makes about failed reads.
 

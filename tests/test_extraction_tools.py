@@ -33,6 +33,11 @@ EXTRACTION_TOOLS = (
     "extraction_record_summary",
     "extraction_status",
     "extraction_finish",
+    "extraction_candidates",
+    "extraction_unplaced_forms",
+    "extraction_cluster",
+    "extraction_promote_candidate",
+    "extraction_promote_cluster",
 )
 
 
@@ -102,7 +107,7 @@ def _ledger(repository):
 
 
 def test_the_server_registers_every_extraction_tool_with_its_arguments():
-    """One SDK-touching test for all eight, so a rename breaks one place."""
+    """One SDK-touching test for all of them, so a rename breaks one place."""
     tools = {tool.name: tool for tool in asyncio.run(server.mcp.list_tools())}
 
     for name in EXTRACTION_TOOLS:
@@ -360,6 +365,84 @@ def test_finish_before_the_corpus_is_read_is_a_tool_error(tmp_path):
 
 
 # --- the ledger --------------------------------------------------------------
+
+
+def test_the_author_can_list_and_promote_a_waiting_candidate(tmp_path):
+    """AC 8 and the issue's "wait, ranked, for a one-key promotion": the
+    surface has to reach the candidate, or nothing under a subject declaring
+    `auto-promote: no` can ever become an entry."""
+    _serve(tmp_path, ["Carol."] * 3)
+    server.extraction_record(
+        [_recorded(f"src-000001-p{n}", unplaced=[("Carol", "SUB-people")]) for n in (1, 2, 3)]
+    )
+    server.extraction_derive(recurrence_threshold=2)
+
+    listed = server.extraction_candidates()
+    candidate_id = listed.split()[0]
+    assert "SUB-people" in listed and "x3" in listed
+    assert server.extraction_candidates(rejected=True) == "No candidates below the filter."
+
+    rendered = server.extraction_promote_candidate(candidate_id)
+
+    assert rendered.startswith("promoted SUB-people/carol")
+    assert (tmp_path / "subjects" / "people" / "carol.md").exists()
+    server.extraction_derive(recurrence_threshold=2)
+    assert server.extraction_candidates() == "No candidates waiting."
+
+
+def test_rejected_candidates_and_unplaced_forms_are_enumerable(tmp_path):
+    """AC 9. Both miss rates are countable only if the misses can be listed."""
+    _serve(tmp_path, ["One.", "Two."])
+    server.extraction_record(
+        [
+            _recorded("src-000001-p1", unplaced=[("Bob", "SUB-people")]),
+            _recorded("src-000001-p2", unplaced=[("Bob", "SUB-people"), ("Zed", "")]),
+        ]
+    )
+    server.extraction_derive(recurrence_threshold=5)
+
+    assert "Bob  x2" in server.extraction_candidates(rejected=True)
+    unplaced = server.extraction_unplaced_forms()
+    assert "src-000001-p2  'Zed'" in unplaced
+    assert "src-000001-p1  'Bob'" in unplaced
+
+
+def test_a_cluster_opens_to_its_members_paragraphs_and_children(tmp_path):
+    """AC 12 at the surface, and how the author reads a cluster before
+    promoting it."""
+    entries = [
+        Entry(id="SUB-people/bob", match_terms=["Bob"], body=""),
+        Entry(id="SUB-events/acquisition", match_terms=["the acquisition"], body=""),
+    ]
+    _serve(tmp_path, ["Bob and the acquisition."] * 3, entries=entries)
+    server.extraction_record(
+        [
+            _recorded(
+                f"src-000001-p{n}",
+                placements=[
+                    ("SUB-people/bob", "Bob"),
+                    ("SUB-events/acquisition", "the acquisition"),
+                ],
+            )
+            for n in (1, 2, 3)
+        ]
+    )
+    server.extraction_derive(recurrence_threshold=1)
+    task = server.extraction_next_summary()
+    cluster_id = task.split("cluster: ")[1].split()[0]
+
+    rendered = server.extraction_cluster(cluster_id)
+
+    assert "members: SUB-events/acquisition, SUB-people/bob" in rendered
+    assert "paragraphs: src-000001-p1, src-000001-p2, src-000001-p3" in rendered
+    assert "summary: not yet written" in rendered
+    with pytest.raises(ToolError):
+        server.extraction_cluster("CL-nope")
+
+    rendered = server.extraction_promote_cluster(cluster_id, subject_id="SUB-arcs")
+
+    assert rendered.startswith("promoted SUB-arcs/")
+    assert "SUB-people/bob" in rendered
 
 
 def test_a_served_batch_is_ledgered_by_anchor(tmp_path):

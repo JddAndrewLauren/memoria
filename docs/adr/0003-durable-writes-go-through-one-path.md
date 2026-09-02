@@ -120,6 +120,14 @@ client can simply issue one.
   provided the commits exist now, which this decision secures.
 - **§40.6 is amended in place** to record that the git-revision comparison was wrong, so a
   future reader does not re-derive the trap from the plan text.
+- **Creation is a second door, not a bypass** (amended 2026-09-01, #17). Promotion
+  materializes an entry file that has no prior read and so no token. Rather than a
+  token-less write around the module, `create` lives in it, gated by non-existence:
+  `Rejected(outcome="exists")` if the path has a file behind it, otherwise the same
+  confinement, checkpoint, atomic replace and path-scoped attributed commit as `write`.
+  It can never overwrite, which is the property the token exists to protect; what it
+  gives up is only the ability to be told a file was changed underneath it, and a file
+  that does not exist has nothing underneath.
 - **Revisit if** a durable write appears that genuinely needs two files changed together,
   or if Curator passes become atomic over a run rather than per-file — at which point the
   token is the wrong shape for that caller and it needs a pass-level baseline instead.

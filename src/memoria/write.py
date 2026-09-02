@@ -21,11 +21,13 @@ multi-file atomicity. A write applies to the file the client read, whole, or
 it is rejected and says so.
 
 ``write`` still cannot create a file - a token is minted from a file that
-exists, so a path with no file behind it never matches one - but "and a new
-durable file is not this issue's to bring into being" is no longer true of
-the module. Promotion (#17) creates entries, so ``create`` is that second
-door, in here rather than around here, keeping the confinement, the atomic
-replace, the commit and the attribution that make a durable write durable. A residual TOCTOU window
+exists, so a path with no file behind it never matches one. This module's
+earlier docstring added "and a new durable file is not this issue's to bring
+into being"; that is no longer true of the module. Promotion (#17) creates
+entries, so ``create`` is that second door, in here rather than around here,
+gated by non-existence instead of a token and keeping the confinement, the
+atomic replace, the commit and the attribution that make a durable write
+durable (ADR-0003, amended). A residual TOCTOU window
 between the staleness check and the write is knowingly accepted (ADR-0003)
 - closing it needs a lock, and Obsidian will never take one.
 """

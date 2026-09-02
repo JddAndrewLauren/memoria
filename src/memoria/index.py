@@ -68,7 +68,7 @@ DERIVED_TABLES = (
     "candidate_paragraphs",
     "proposed_match_terms",
     "clusters",
-    "cluster_nodes",
+    "cluster_members",
     "cluster_relations",
     "cluster_paragraphs",
     "extraction_meta",
@@ -182,9 +182,12 @@ _DERIVED_DDL = (
     ")",
     "CREATE INDEX IF NOT EXISTS clusters_level ON clusters(level)",
     "CREATE INDEX IF NOT EXISTS clusters_parent ON clusters(parent_id)",
-    "CREATE TABLE IF NOT EXISTS cluster_nodes("
-    "cluster_id TEXT NOT NULL, node_ref TEXT NOT NULL, "
-    "PRIMARY KEY (cluster_id, node_ref)"
+    # `member_ref` is an entry reference or a `candidate:` ref - a cluster's
+    # members are placed entries and candidates together (see
+    # `extraction.build_clusters`), which is why the column is not `entry_id`.
+    "CREATE TABLE IF NOT EXISTS cluster_members("
+    "cluster_id TEXT NOT NULL, member_ref TEXT NOT NULL, "
+    "PRIMARY KEY (cluster_id, member_ref)"
     ")",
     "CREATE TABLE IF NOT EXISTS cluster_relations("
     "cluster_id TEXT NOT NULL, from_ref TEXT NOT NULL, verb TEXT NOT NULL, "
@@ -570,15 +573,14 @@ def rebuild(
     build_index(repository, records, reset_cache=reset_cache)
     # Imported here rather than at module scope: `memoria.extraction` imports
     # this module for the schema and the connection, so the module-level
-    # direction has to stay one-way.
+    # direction has to stay one-way. Nothing else is fetched from it - an
+    # absent threshold is left to `derive`'s own default rather than copied.
     from memoria import extraction
 
-    counts = extraction.derive(
-        repository,
-        recurrence_threshold=(
-            extraction.RECURRENCE_THRESHOLD_DEFAULT
-            if recurrence_threshold is None
-            else recurrence_threshold
-        ),
-    )
+    if recurrence_threshold is None:
+        counts = extraction.derive(repository)
+    else:
+        counts = extraction.derive(
+            repository, recurrence_threshold=recurrence_threshold
+        )
     return RebuildReport(records=records, counts=counts)

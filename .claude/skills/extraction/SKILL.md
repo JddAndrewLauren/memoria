@@ -66,6 +66,18 @@ and go back to step 1. The database knows what is done.
 candidates, relations and clusters from what you just recorded plus the
 entries' current match terms. Report its numbers to the author.
 
+## Finish
+
+`extraction_finish()`. This promotes candidates only under subjects that
+declare `auto-promote: yes`, and only above the recurrence filter. Themes and
+Arcs ship with it off.
+
+It runs **before** the summary loop, not after: an auto-promotion changes
+which paragraphs an entry gathers, which can re-draw the clusters, and a
+summary written before that would describe a membership that no longer
+exists. Finishing first means the summary loop runs over the clusters the
+pass actually ends with.
+
 ## The summary loop
 
 1. `extraction_next_summary()`.
@@ -77,11 +89,21 @@ entries' current match terms. Report its numbers to the author.
    echoing `membership` exactly as served.
 4. Repeat until it says `No cluster needs a summary.`
 
-## Finish
+## Promotion is the author's
 
-`extraction_finish()`. This promotes candidates only under subjects that
-declare `auto-promote: yes`, and only above the recurrence filter. Themes and
-Arcs ship with it off.
+Nothing under a subject declaring `auto-promote: no` becomes an entry unless
+the author says so, one at a time:
+
+- `extraction_candidates()` lists what is waiting, ranked by recurrence, with
+  the id each needs; `rejected=True` shows what the filter set aside.
+- `extraction_unplaced_forms()` lists the mentions nothing licensed.
+- `extraction_cluster(cluster_id)` opens a cluster - members, paragraphs,
+  children, summary - so the author can read it before deciding.
+- `extraction_promote_candidate(candidate_id)` and
+  `extraction_promote_cluster(cluster_id, subject_id)` are the one-key
+  promotions. **Only on the author's word, naming the candidate or cluster.**
+  Never promote on your own judgement, and never in bulk. After promoting,
+  run `extraction_derive()` again so the new entry's placements land.
 
 ## If you run out of capacity
 

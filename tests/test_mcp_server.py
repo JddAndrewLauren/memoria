@@ -287,6 +287,11 @@ def test_the_tool_surface_is_the_read_tools_and_the_extraction_tools():
         "extraction_record_summary",
         "extraction_status",
         "extraction_finish",
+        "extraction_candidates",
+        "extraction_unplaced_forms",
+        "extraction_cluster",
+        "extraction_promote_candidate",
+        "extraction_promote_cluster",
     }
 
 

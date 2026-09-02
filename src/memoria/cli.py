@@ -4,6 +4,7 @@ import argparse
 import sys
 
 from memoria import changes
+from memoria.extraction import RECURRENCE_THRESHOLD_DEFAULT
 from memoria.index import INDEX_RELATIVE_PATH, IndexSchemaError, rebuild
 from memoria.normalize import normalize as run_normalize
 from memoria.records import NORMALIZED_RELATIVE_PATH
@@ -72,8 +73,8 @@ def main(argv=None):
         metavar="N",
         help=(
             "How many distinct paragraphs a candidate must appear in to clear "
-            "the recurrence filter (default 5). Rejected candidates are kept "
-            "and stay listable either way."
+            f"the recurrence filter (default {RECURRENCE_THRESHOLD_DEFAULT}). "
+            "Rejected candidates are kept and stay listable either way."
         ),
     )
     rebuild_parser.add_argument(
