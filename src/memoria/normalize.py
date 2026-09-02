@@ -99,6 +99,23 @@ Converter = Callable[[bytes], ConversionDraft]
 _BLANK_LINE = re.compile(r"\n[ \t]*\n+")
 
 
+def _decode_text(raw_bytes: bytes) -> str:
+    """UTF-8, or cp1252 when the bytes are not UTF-8.
+
+    Found walking the M1 gate (#15) over the Enron slice: one ``.txt``
+    attachment was Windows-1252 (byte 0x82, a smart quote), the decode
+    raised, and the whole pass stopped with every unit after it unwritten.
+    cp1252 is what a Windows-era text file that is not UTF-8 almost always
+    is, and ``errors="replace"`` means a stray byte costs one character, not
+    the corpus. Every input that decoded before decodes identically, so the
+    converter pin is unchanged.
+    """
+    try:
+        return raw_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw_bytes.decode("cp1252", errors="replace")
+
+
 def convert_plain_text(raw_bytes: bytes) -> ConversionDraft:
     """The plain-text converter this issue ships.
 
@@ -108,7 +125,7 @@ def convert_plain_text(raw_bytes: bytes) -> ConversionDraft:
     whitespace policy applies to every converter alike, not only the richer
     ones #77/#78 add.
     """
-    text = raw_bytes.decode("utf-8").replace("\r\n", "\n")
+    text = _decode_text(raw_bytes).replace("\r\n", "\n")
     paragraphs = [p.strip() for p in _BLANK_LINE.split(text) if p.strip()]
     return ConversionDraft(
         source_type="document",
@@ -238,7 +255,10 @@ CONVERTERS: dict[str, tuple[Converter, _Pin]] = {
 # The pinned version for every email message record, whether it came from an
 # `.mbox` export or a standalone `.eml` file - both go through the same
 # quoted-reply splitter and header handling (`_convert_email_message`).
-EMAIL_CONVERTER_VERSION = "email 1"
+# Bumped 1 -> 2 on the M1 gate walk (#15, #108): the header repair and the
+# footer cut below change the paragraphs of most Enron records, and the
+# drift report is how that cost is shown before the extraction re-reads them.
+EMAIL_CONVERTER_VERSION = "email 2"
 
 # Suffixes `_process_email_containers` treats as an "export": a file holding
 # one or more raw email-message units. `.eml` holds exactly one - handling
@@ -284,6 +304,12 @@ class NormalizeReport:
     # ``sum(...values())`` is "how many paragraph hashes changed" - the
     # two numbers the drift report gates a converter bump on.
     paragraph_drift: dict[str, int] = field(default_factory=dict)
+    # Units whose converter raised, by ID, with the exception's text. The
+    # pass goes on past them (found on the Enron slice, #106: a corrupt pdf
+    # attachment stopped the whole run and left every later record
+    # unwritten). No record is written for a failed unit, and it is retried
+    # on the next run because nothing on disk says it was skipped.
+    failed: dict[str, str] = field(default_factory=dict)
 
 
 def normalize(
@@ -326,6 +352,7 @@ def normalize(
     skipped = []
     unconvertible = []
     paragraph_drift: dict[str, int] = {}
+    failed: dict[str, str] = {}
     for entry in entries:
         if entry.deleted:
             continue
@@ -357,7 +384,11 @@ def normalize(
             skipped.append(entry.id)
             continue
 
-        draft = get_draft()
+        try:
+            draft = get_draft()
+        except Exception as exc:  # noqa: BLE001 - one bad unit must not end the pass
+            failed[entry.id] = f"{type(exc).__name__}: {exc}"
+            continue
         record = NormalizedRecord(
             id=entry.id,
             source_type=draft.source_type,
@@ -397,6 +428,7 @@ def normalize(
         skipped=skipped,
         unconvertible=unconvertible,
         paragraph_drift=paragraph_drift,
+        failed=failed,
     )
 
 
@@ -559,16 +591,40 @@ def _process_email_containers(
             )
             drafts[entry_id_by_index[index]] = draft
 
-    combined = others + list(new_entries.values())
+    # An attachment ledgered by a prior run is already in `others` (sync
+    # found its file) *and* in `new_entries` (pass 2 reused its entry). Keep
+    # one: before this, every run appended a second copy of every
+    # attachment entry, and `validate` reported the duplicates (#108).
+    combined = [e for e in others if e.id not in new_entries] + list(new_entries.values())
     combined.sort(key=lambda e: id_number(e.id))
     return combined, added_ids, drafts
+
+
+# ZL's production wrote this bare line into the header block of two in five
+# Enron messages (docs/corpora/enron.md, finding 1). It has no colon, so the
+# standard library reads it as the header/body separator and silently reads
+# every header below it - From, To, Subject, Thread-Index - as body text.
+# Deleting the one line before parsing is the whole repair; a message
+# without it is unchanged. Applied to `.eml` only: an mbox goes through
+# `mailbox`, which parses on its own.
+_BOGUS_HEADER_LINE = re.compile(rb"^Microsoft Mail Internet Headers Version [\d.]+\r?\n", re.MULTILINE)
+
+# The producer's attribution footer, appended to every body in the export and
+# fenced by asterisk rules (docs/corpora/enron.md, finding 4). Not the
+# sender's words: left in, every record gains a paragraph that says nothing
+# and every paragraph hash depends on it. Cut before the quoted-reply split
+# so neither the splitter nor the paragraph splitter ever sees it.
+_ZL_FOOTER = re.compile(
+    r"\n?\*{5,}[ \t]*\nEDRM Enron Email Data Set has been produced .*?\n\*{5,}[ \t]*\n?",
+    re.DOTALL,
+)
 
 
 def _read_container_messages(path: Path) -> list[Message]:
     """Every message inside a raw email export, in file order - the order
     ``email_message_index`` numbers them by."""
     if path.suffix == ".eml":
-        return [email.message_from_bytes(path.read_bytes())]
+        return [email.message_from_bytes(_BOGUS_HEADER_LINE.sub(b"", path.read_bytes(), count=1))]
     box = mailbox.mbox(str(path), create=False)
     try:
         return list(box)
@@ -705,7 +761,7 @@ def _convert_email_message(
         paragraphs: list[str] = []
         quoted_excised = False
     else:
-        clean_body, quoted_excised = _split_quoted_reply(body_text)
+        clean_body, quoted_excised = _split_quoted_reply(_ZL_FOOTER.sub("\n", body_text))
         paragraphs = [p.strip() for p in _BLANK_LINE.split(clean_body) if p.strip()]
 
     date_header = message.get("Date")

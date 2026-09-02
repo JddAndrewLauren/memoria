@@ -66,7 +66,9 @@ actually read evidence. Anything reading only this repo's own
 ## The MCP server
 
 Memoria is an MCP server, and Claude Code in this repo is the client
-(`docs/poc-plan.md` §3). It exposes one tool so far:
+(`docs/poc-plan.md` §3). Its two read tools are `read(ref)` and
+`search_text(query, filters)`; the `extraction_*` tools are described under
+*The extraction* below, and `docs/tool-surface.md` lists all of them.
 
 ```
 read(ref)
@@ -144,6 +146,14 @@ compile error in `ui/`, not a runtime surprise nobody sees.
 .venv/bin/memoria checkpoint
 .venv/bin/memoria seed-subjects
 ```
+
+`memoria normalize` reads the evidence root, gives every new raw unit a `SRC-`
+ID in the manifest ledger, and writes one normalized record per unit that has
+a converter. A unit whose converter raises (a corrupt pdf, a text file in an
+encoding nothing recognises) gets no record and is listed on stderr with the
+reason; the pass goes on, and the unit is retried on the next run. The M1
+gate walk (#15) is where that rule came from: before it, one bad attachment
+stopped the whole pass with every later record unwritten.
 
 `memoria validate` verifies that every raw file in the evidence corpus matches
 the hash recorded in its manifest, and exits non-zero, naming the offending file,
