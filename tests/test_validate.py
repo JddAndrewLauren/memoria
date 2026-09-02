@@ -428,3 +428,82 @@ def test_validate_accepts_every_match_term_shape_on_an_entry(tmp_path):
     errors = validate(evidence_root, repo_root)
 
     assert errors == []
+
+
+# --- #91's three gaps: a missing prompt, a misfiled entry, an unspaced
+# relation ------------------------------------------------------------------
+
+
+def test_validate_fails_a_subject_directory_missing_its_prompt(tmp_path):
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    entry_path = repo_root / "subjects" / "people" / "bob.md"
+    entry_path.parent.mkdir(parents=True, exist_ok=True)
+    entry_path.write_text(
+        entry_to_markdown(Entry(id="SUB-people/bob", body="Bob.")),
+        encoding="utf-8",
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert len(errors) == 1
+    assert "_subject.md" in errors[0]
+    assert "missing" in errors[0].lower()
+
+
+def test_validate_fails_an_entry_whose_id_disagrees_with_its_directory(tmp_path):
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    _write_subject_prompt(
+        repo_root, "SUB-people", subject_to_markdown(_make_subject())
+    )
+    entry_path = repo_root / "subjects" / "people" / "carol.md"
+    entry_path.write_text(
+        entry_to_markdown(Entry(id="SUB-places/carol", body="Carol.")),
+        encoding="utf-8",
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert len(errors) == 1
+    assert "carol.md" in errors[0]
+    assert "SUB-places/carol" in errors[0]
+    assert "SUB-people" in errors[0]
+
+
+def test_validate_passes_an_entry_whose_id_matches_its_directory(tmp_path):
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    _write_subject_prompt(
+        repo_root, "SUB-people", subject_to_markdown(_make_subject())
+    )
+    entry_path = repo_root / "subjects" / "people" / "carol.md"
+    entry_path.write_text(
+        entry_to_markdown(Entry(id="SUB-people/carol", body="Carol.")),
+        encoding="utf-8",
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert errors == []
+
+
+def test_validate_fails_and_names_an_unspaced_relation_match_term(tmp_path):
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    _write_subject_prompt(
+        repo_root, "SUB-people", subject_to_markdown(_make_subject())
+    )
+    entry_path = repo_root / "subjects" / "people" / "bob.md"
+    entry_path.write_text(
+        entry_to_markdown(
+            Entry(
+                id="SUB-people/bob",
+                match_terms=["SUB-people/bob->pressures->SUB-people/author"],
+                body="Bob.",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert len(errors) == 1
+    assert "bob.md" in errors[0]
+    assert "relation" in errors[0].lower()

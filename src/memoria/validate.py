@@ -6,8 +6,10 @@ normalized source records for dangling SRC- ID references and stale
 
 import hashlib
 import re
+from datetime import datetime
 from pathlib import Path
 
+from memoria.index import list_overlay
 from memoria.manifest import (
     DEFAULT_MANIFEST_RELATIVE_PATH,
     check_ledger,
@@ -15,6 +17,7 @@ from memoria.manifest import (
     load_manifest,
 )
 from memoria.records import NORMALIZED_RELATIVE_PATH
+from memoria.repository import Repository
 from memoria.subjects import SUBJECTS_RELATIVE_PATH, SubjectError, parse_entry, parse_subject
 
 _SRC_ID_RE = re.compile(r"SRC-\d{6}", re.IGNORECASE)
@@ -96,6 +99,7 @@ def validate(
     errors.extend(_validate_raw_sha256_matches_manifest(repo_root, entries))
     errors.extend(_validate_subjects(repo_root))
     errors.extend(_validate_converter_pins(repo_root, manifest_path))
+    errors.extend(_validate_gather_overlay(repo_root))
 
     return errors
 
@@ -191,9 +195,36 @@ def _validate_normalized_src_ids(repo_root: Path) -> list[str]:
     return errors
 
 
+def _validate_gather_overlay(repo_root: Path) -> list[str]:
+    """Every pin and exclusion carries actor and timestamp attribution
+    (issue #18, part 06 §8.3's overlay). ``gather_overlay``'s columns are
+    all ``NOT NULL``, but that only rules out ``NULL`` - an empty string
+    still satisfies it, so this is the check that actually holds the
+    requirement."""
+    errors = []
+    for overlay in list_overlay(Repository(root=repo_root)):
+        if not overlay.actor_name.strip() or not overlay.actor_email.strip():
+            errors.append(
+                f"{overlay.action} of {overlay.anchor} on {overlay.entry_id} "
+                "is missing actor attribution"
+            )
+            continue
+        try:
+            datetime.fromisoformat(overlay.at)
+        except ValueError:
+            errors.append(
+                f"{overlay.action} of {overlay.anchor} on {overlay.entry_id} "
+                f"has an unparseable timestamp: {overlay.at!r}"
+            )
+    return errors
+
+
 def _validate_subjects(repo_root: Path) -> list[str]:
-    """Every subject prompt carries its four required declarations, and
-    every entry's match terms are one of the three shapes (issue #16)."""
+    """Every subject prompt carries its four required declarations, every
+    entry's match terms are one of the three shapes (issue #16), and - #91's
+    three gaps found reviewing that fix - a subject directory has a prompt at
+    all, an entry's frontmatter ``id`` agrees with the directory it sits in,
+    and a relation match term is diagnosed as one even without a verb."""
     subjects_dir = repo_root / SUBJECTS_RELATIVE_PATH
     if not subjects_dir.is_dir():
         return []
@@ -209,13 +240,29 @@ def _validate_subjects(repo_root: Path) -> list[str]:
                 )
             except SubjectError as exc:
                 errors.append(str(exc))
+        else:
+            # A subject whose prompt was never written, or was deleted, used
+            # to be invisible to `validate` rather than an error - the
+            # directory's entries were still checked below, but nothing said
+            # the subject itself was missing.
+            errors.append(f"{subject_prompt}: missing subject prompt")
 
+        expected_subject_id = f"SUB-{subject_dir.name}"
         for entry_path in sorted(subject_dir.glob("*.md")):
             if entry_path.name == "_subject.md":
                 continue
             try:
-                parse_entry(entry_path.read_text(encoding="utf-8"), source=str(entry_path))
+                entry = parse_entry(
+                    entry_path.read_text(encoding="utf-8"), source=str(entry_path)
+                )
             except SubjectError as exc:
                 errors.append(str(exc))
+                continue
+            entry_subject_id = entry.id.split("/", 1)[0]
+            if entry_subject_id != expected_subject_id:
+                errors.append(
+                    f"{entry_path}: entry id {entry.id!r} does not match its "
+                    f"directory - expected subject {expected_subject_id!r}"
+                )
 
     return errors

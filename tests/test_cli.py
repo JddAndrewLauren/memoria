@@ -38,6 +38,12 @@ def test_help_lists_checkpoint():
     assert "checkpoint" in result.stdout
 
 
+def test_help_lists_seed_subjects():
+    result = run_cli("--help")
+    assert result.returncode == 0
+    assert "seed-subjects" in result.stdout
+
+
 def _make_valid_corpus(tmp_path):
     rel_path = "raw/vol-01/text.txt"
     evidence_root = tmp_path / "evidence"
@@ -175,6 +181,61 @@ def test_rebuild_needs_no_corpus_at_all(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "run `memoria normalize` to produce them" in result.stdout
     assert "wrote 0 change projection(s)" in result.stdout
+    assert "0 appearance(s) over 0 lexically-matchable" in result.stdout
+
+
+def test_seed_subjects_needs_no_corpus_at_all(tmp_path):
+    """The subjects tree lives in the repository, not the corpus, so it must
+    not demand an evidence root it never uses."""
+    (tmp_path / "pyproject.toml").write_text("")
+    env = {k: v for k, v in os.environ.items() if k != "MEMORIA_EVIDENCE_ROOT"}
+
+    result = run_cli("seed-subjects", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_seed_subjects_writes_the_five_built_ins_and_reports_them(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("")
+    env = {k: v for k, v in os.environ.items() if k != "MEMORIA_EVIDENCE_ROOT"}
+
+    result = run_cli("seed-subjects", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    for slug in ("people", "timeline", "events", "themes", "arcs"):
+        subject_path = tmp_path / "subjects" / slug / "_subject.md"
+        assert subject_path.is_file()
+        assert str(subject_path) in result.stdout
+
+
+def test_seed_subjects_does_not_clobber_an_author_edit(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("")
+    env = {k: v for k, v in os.environ.items() if k != "MEMORIA_EVIDENCE_ROOT"}
+    run_cli("seed-subjects", env=env, cwd=tmp_path)
+    subject_path = tmp_path / "subjects" / "people" / "_subject.md"
+    edited = subject_path.read_text(encoding="utf-8") + "\nAuthor note.\n"
+    subject_path.write_text(edited, encoding="utf-8")
+
+    result = run_cli("seed-subjects", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "nothing to write" in result.stdout
+    assert subject_path.read_text(encoding="utf-8") == edited
+
+
+def test_validate_passes_on_a_repository_seeded_by_seed_subjects(tmp_path):
+    evidence_root, _ = _make_valid_corpus(tmp_path)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "pyproject.toml").write_text("")
+    env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=str(evidence_root))
+
+    seed_result = run_cli("seed-subjects", env=env, cwd=repo_root)
+    assert seed_result.returncode == 0, seed_result.stderr
+
+    result = run_cli("validate", env=env, cwd=repo_root)
+
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def _git_repo(tmp_path):

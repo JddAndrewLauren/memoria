@@ -1,21 +1,34 @@
+import dataclasses
 import sqlite3
 import time
+from datetime import datetime
 
 import pytest
 
+from memoria import extraction as ex
 from memoria.index import (
     INDEX_RELATIVE_PATH,
     SNIPPET_ELLIPSIS,
     SNIPPET_MATCH_END,
     SNIPPET_MATCH_START,
+    Appearance,
+    GatheredSource,
     SearchFilters,
     build_index,
+    compute_appearances,
+    exclude,
     filter_predicate,
+    gather,
+    list_appearances,
+    list_overlay,
+    pin,
     rebuild,
     search,
 )
+from memoria.records import NORMALIZED_RELATIVE_PATH, NormalizedRecord, write_normalized_records
 from memoria.repository import Repository
-from memoria.records import NormalizedRecord
+from memoria.subjects import Entry, entry_to_markdown
+from memoria.write import Actor
 
 
 def _record(
@@ -509,3 +522,475 @@ def test_reset_cache_discards_it_deliberately(tmp_path):
         ).fetchone()[0] == "1"
     finally:
         con.close()
+
+
+# --- the gathered set and its pin/exclude overlay (#18) ----------------------
+
+
+def _write_entry(tmp_path, entry):
+    subject_slug = entry.id.split("/", 1)[0][len("SUB-") :]
+    slug = entry.id.split("/", 1)[1]
+    directory = tmp_path / "subjects" / subject_slug
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{slug}.md").write_text(entry_to_markdown(entry))
+
+
+def _gather_repo(tmp_path, paragraphs, entries, record_id="SRC-000001"):
+    """A repository with an index and some entries, normalized-record-backed
+    so `memoria rebuild` (not just `build_index`) works against it."""
+    repository = Repository(root=tmp_path)
+    for entry in entries:
+        _write_entry(tmp_path, entry)
+    record = _record(record_id, paragraphs)
+    write_normalized_records([record], tmp_path / NORMALIZED_RELATIVE_PATH)
+    build_index(repository, [record])
+    return repository
+
+
+def _memo(repository, anchor, **kwargs):
+    ex.record_extraction(repository, anchor, ex.ParagraphExtraction(**kwargs))
+
+
+def _place(entry_id, surface_form):
+    return ex.ProposedPlacement(entry_id, surface_form)
+
+
+def _form(surface_form, subject_id="SUB-people"):
+    return ex.ProposedForm(surface_form, subject_id)
+
+
+_AUTHOR = Actor(name="Author", email="author@example.com")
+
+
+def test_gather_returns_the_paragraphs_the_match_terms_matched(tmp_path):
+    """AC 1: the gathered set is built from the entry's match terms."""
+    entry = Entry(id="SUB-people/robert", match_terms=["Bob"], body="")
+    repository = _gather_repo(
+        tmp_path, ["Bob went to town.", "Nothing relevant here."], [entry]
+    )
+    _memo(
+        repository,
+        "src-000001-p1",
+        placements=[_place("SUB-people/robert", "Bob")],
+    )
+    _memo(repository, "src-000001-p2")
+    ex.derive(repository)
+
+    result = gather(repository, "SUB-people/robert")
+
+    assert [g.anchor for g in result] == ["src-000001-p1"]
+    assert result[0] == GatheredSource(
+        src_id="SRC-000001", anchor="src-000001-p1", pinned=False
+    )
+
+
+def test_adding_a_match_term_extends_the_gathered_set_on_the_next_pass(tmp_path):
+    """AC 2. The entry's own slug ("robert") deliberately does not license
+    "Bob" implicitly, so the extension can only be the added match term."""
+    entry = Entry(id="SUB-people/robert", match_terms=[], body="")
+    repository = _gather_repo(tmp_path, ["Bob went to town."], [entry])
+    _memo(repository, "src-000001-p1", unplaced=[_form("Bob")])
+    ex.derive(repository)
+    assert gather(repository, "SUB-people/robert") == []
+
+    _write_entry(
+        tmp_path, Entry(id="SUB-people/robert", match_terms=["Bob"], body="")
+    )
+    ex.derive(repository)
+
+    assert [g.anchor for g in gather(repository, "SUB-people/robert")] == [
+        "src-000001-p1"
+    ]
+
+
+def test_pin_and_exclude_are_recorded_with_actor_and_timestamp(tmp_path):
+    """AC 3."""
+    entry = Entry(id="SUB-people/bob", match_terms=[], body="")
+    repository = _gather_repo(tmp_path, ["Bob went to town."], [entry])
+
+    pin(repository, "SUB-people/bob", "src-000001-p1", _AUTHOR)
+
+    rows = list_overlay(repository)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.entry_id == "SUB-people/bob"
+    assert row.anchor == "src-000001-p1"
+    assert row.action == "pin"
+    assert row.actor_name == "Author"
+    assert row.actor_email == "author@example.com"
+    # Raises if unparseable - the attribution is a real timestamp, not a
+    # placeholder.
+    datetime.fromisoformat(row.at)
+
+
+def test_excluding_a_source_survives_rebuild(tmp_path):
+    """AC 4: an exclusion is still in force after `memoria rebuild` -
+    survives because `gather_overlay` is a preserved table, not a derived
+    one."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    repository = _gather_repo(tmp_path, ["Bob went to town."], [entry])
+    _memo(repository, "src-000001-p1", placements=[_place("SUB-people/bob", "Bob")])
+    ex.derive(repository)
+    assert [g.anchor for g in gather(repository, "SUB-people/bob")] == [
+        "src-000001-p1"
+    ]
+
+    exclude(repository, "SUB-people/bob", "src-000001-p1", _AUTHOR)
+    assert gather(repository, "SUB-people/bob") == []
+
+    rebuild(repository)
+
+    assert gather(repository, "SUB-people/bob") == []
+
+
+def test_a_pinned_source_stays_in_the_set_even_when_matching_would_not_find_it(
+    tmp_path,
+):
+    """AC 5."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    repository = _gather_repo(
+        tmp_path, ["Bob went to town.", "An unrelated paragraph."], [entry]
+    )
+    _memo(repository, "src-000001-p1", placements=[_place("SUB-people/bob", "Bob")])
+    _memo(repository, "src-000001-p2")
+    ex.derive(repository)
+    assert [g.anchor for g in gather(repository, "SUB-people/bob")] == [
+        "src-000001-p1"
+    ]
+
+    pin(repository, "SUB-people/bob", "src-000001-p2", _AUTHOR)
+
+    result = {g.anchor: g.pinned for g in gather(repository, "SUB-people/bob")}
+    assert result == {"src-000001-p1": False, "src-000001-p2": True}
+
+
+def test_the_gathered_set_carries_no_id():
+    """AC 6: nothing here mints an identifier for the set itself - a
+    `GatheredSource` names only the paragraph and the overlay flag on it."""
+    fields = {f.name for f in dataclasses.fields(GatheredSource)}
+    assert fields == {"src_id", "anchor", "pinned"}
+
+
+def test_validate_fails_a_pin_lacking_attribution(tmp_path):
+    """AC 7. The schema's ``NOT NULL`` only rules out ``NULL`` - an actor
+    with an empty name/email still writes a row, and `validate` is what
+    actually holds the requirement."""
+    from memoria.validate import validate
+
+    entry = Entry(id="SUB-people/bob", match_terms=[], body="")
+    repository = _gather_repo(tmp_path, ["Bob went to town."], [entry])
+    (tmp_path / "raw").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "raw" / "manifest.yaml").write_text("units: []\n")
+    pin(
+        repository,
+        "SUB-people/bob",
+        "src-000001-p1",
+        Actor(name="", email=""),
+    )
+
+    errors = validate(evidence_root=tmp_path, repo_root=tmp_path)
+    assert any("attribution" in error for error in errors)
+
+
+def test_gather_and_validate_do_not_crash_on_an_index_predating_the_overlay_table(
+    tmp_path,
+):
+    """`gather_overlay` did not exist before this issue's index. An index
+    built by an older version of `memoria rebuild` still has every other
+    table, and `list_overlay`/`gather` must create the missing table on the
+    fly (through `connect`, not a bare `sqlite3.connect`) rather than raise
+    `sqlite3.OperationalError: no such table`."""
+    from memoria.validate import validate
+
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    repository = _gather_repo(tmp_path, ["Bob went to town."], [entry])
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.execute("DROP TABLE gather_overlay")
+    con.commit()
+    con.close()
+    (tmp_path / "raw").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "raw" / "manifest.yaml").write_text("units: []\n")
+
+    assert list_overlay(repository) == []
+    assert [g.anchor for g in gather(repository, "SUB-people/bob")] == [
+        "src-000001-p1"
+    ]
+    # `validate` returns rather than raising - it may still report unrelated
+    # findings (e.g. from other validators), but never "no such table".
+    errors = validate(evidence_root=tmp_path, repo_root=tmp_path)
+    assert not any("gather_overlay" in error or "no such table" in error for error in errors)
+
+
+def test_a_theme_gathers_exactly_where_its_match_terms_co_occur(tmp_path):
+    """AC 8: a Theme promoted from a cluster - match terms naming two
+    entries and the relation between them - gathers the paragraph where
+    they co-occur, and nothing else, with no model call in `gather` itself.
+
+    A solo appearance of one of the named entries, without the other, is
+    not co-occurrence and must not be gathered - the entry-shaped match
+    terms are intersected with each other and with the relation, not
+    unioned.
+    """
+    bob = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    carol = Entry(id="SUB-people/carol", match_terms=["Carol"], body="")
+    tension = Entry(
+        id="SUB-themes/tension",
+        match_terms=[
+            "SUB-people/bob",
+            "SUB-people/carol",
+            "SUB-people/bob -> pressures -> SUB-people/carol",
+        ],
+        body="",
+    )
+    repository = _gather_repo(
+        tmp_path,
+        ["Bob pressures Carol.", "Bob walked alone."],
+        [bob, carol, tension],
+    )
+    _memo(
+        repository,
+        "src-000001-p1",
+        placements=[_place("SUB-people/bob", "Bob"), _place("SUB-people/carol", "Carol")],
+        relations=[ex.ProposedRelation("SUB-people/bob", "pressures", "SUB-people/carol")],
+    )
+    _memo(
+        repository,
+        "src-000001-p2",
+        placements=[_place("SUB-people/bob", "Bob")],
+    )
+    ex.derive(repository)
+
+    result = gather(repository, "SUB-themes/tension")
+
+    assert [g.anchor for g in result] == ["src-000001-p1"]
+
+
+def test_re_deriving_does_not_change_a_themes_gathered_set(tmp_path):
+    """AC 9: re-running the extraction (and re-clustering) is a no-op on a
+    promoted Theme's gathered set when placements have not changed."""
+    bob = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    carol = Entry(id="SUB-people/carol", match_terms=["Carol"], body="")
+    tension = Entry(
+        id="SUB-themes/tension",
+        match_terms=["SUB-people/bob -> pressures -> SUB-people/carol"],
+        body="",
+    )
+    repository = _gather_repo(
+        tmp_path, ["Bob pressures Carol."], [bob, carol, tension]
+    )
+    _memo(
+        repository,
+        "src-000001-p1",
+        placements=[_place("SUB-people/bob", "Bob"), _place("SUB-people/carol", "Carol")],
+        relations=[ex.ProposedRelation("SUB-people/bob", "pressures", "SUB-people/carol")],
+    )
+    ex.derive(repository)
+    before = gather(repository, "SUB-themes/tension")
+
+    ex.derive(repository)
+    ex.derive(repository)
+    after = gather(repository, "SUB-themes/tension")
+
+    assert before == after == [
+        GatheredSource(src_id="SRC-000001", anchor="src-000001-p1", pinned=False)
+    ]
+
+
+def test_adding_an_entry_or_relation_match_term_extends_a_themes_gathered_set(
+    tmp_path,
+):
+    """AC 10."""
+    bob = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    carol = Entry(id="SUB-people/carol", match_terms=["Carol"], body="")
+    tension = Entry(id="SUB-themes/tension", match_terms=[], body="")
+    repository = _gather_repo(
+        tmp_path, ["Bob pressures Carol."], [bob, carol, tension]
+    )
+    _memo(
+        repository,
+        "src-000001-p1",
+        placements=[_place("SUB-people/bob", "Bob"), _place("SUB-people/carol", "Carol")],
+        relations=[ex.ProposedRelation("SUB-people/bob", "pressures", "SUB-people/carol")],
+    )
+    ex.derive(repository)
+    assert gather(repository, "SUB-themes/tension") == []
+
+    _write_entry(
+        tmp_path,
+        Entry(
+            id="SUB-themes/tension",
+            match_terms=["SUB-people/bob -> pressures -> SUB-people/carol"],
+            body="",
+        ),
+    )
+    ex.derive(repository)
+
+    assert [g.anchor for g in gather(repository, "SUB-themes/tension")] == [
+        "src-000001-p1"
+    ]
+
+
+# --- appearances, lexical engine only (#19, part 06 §8.11) ------------------
+
+
+def test_compute_appearances_matches_lexically_over_book_source_type_only(tmp_path):
+    """AC 1: appearances are computed over the audit targets - records with
+    ``source_type: book`` - and stored in the index. The same term appearing
+    in a journal (evidence, not an audit target) earns no appearance."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    repository = Repository(root=tmp_path)
+    _write_entry(tmp_path, entry)
+    records = [
+        _record("SRC-000001", ["Bob went to the market."], source_type="journal"),
+        _record(
+            "SRC-000002",
+            ["Bob argued with Carol.", "Nothing relevant here."],
+            source_type="book",
+        ),
+    ]
+    write_normalized_records(records, tmp_path / NORMALIZED_RELATIVE_PATH)
+    build_index(repository, records)
+
+    report = compute_appearances(repository)
+
+    assert [a.anchor for a in list_appearances(repository, "SUB-people/bob")] == [
+        "src-000002-p1"
+    ]
+    assert report.appearances == 1
+
+
+def test_each_appearance_carries_the_passage_and_a_note_on_how(tmp_path):
+    """AC 2: an appearance carries the entry (by construction of the query),
+    the passage, and a short note naming what matched."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Robert"], body="")
+    repository = Repository(root=tmp_path)
+    _write_entry(tmp_path, entry)
+    book = _record("SRC-000001", ["Robert argued with Carol."], source_type="book")
+    write_normalized_records([book], tmp_path / NORMALIZED_RELATIVE_PATH)
+    build_index(repository, [book])
+
+    compute_appearances(repository)
+    (appearance,) = list_appearances(repository, "SUB-people/bob")
+
+    assert appearance.src_id == "SRC-000001"
+    assert appearance.anchor == "src-000001-p1"
+    assert "Robert" in appearance.note
+
+
+def test_appearances_are_unaffected_by_the_gather_overlay_and_vice_versa(tmp_path):
+    """AC 3: the gathered set and appearances are separately queryable and
+    never cross - the overlay that exists only for the gathered set (§8.3)
+    has no reach into the ``appearances`` table, since appearances has no
+    overlay of its own (AC 5) and nothing here reads ``gather_overlay``."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    repository = Repository(root=tmp_path)
+    _write_entry(tmp_path, entry)
+    book = _record("SRC-000001", ["Bob argued with Carol."], source_type="book")
+    write_normalized_records([book], tmp_path / NORMALIZED_RELATIVE_PATH)
+    build_index(repository, [book])
+
+    compute_appearances(repository)
+    appeared_before = list_appearances(repository, "SUB-people/bob")
+    assert [a.anchor for a in appeared_before] == ["src-000001-p1"]
+
+    # An author act against the gathered set - there is no such act against
+    # an appearance at all - must not touch the appearances table.
+    exclude(repository, "SUB-people/bob", "src-000001-p1", _AUTHOR)
+
+    assert list_appearances(repository, "SUB-people/bob") == appeared_before
+    # And the reverse holds by construction: `compute_appearances` never
+    # writes to `gather_overlay`, so the only row there is the exclude just
+    # made.
+    assert [o.action for o in list_overlay(repository)] == ["exclude"]
+
+
+def test_appearances_and_gather_never_return_the_same_anchor(tmp_path):
+    """AC 3, in the criterion's own words: appearances and the gathered set
+    are "separately queryable and never cross". One entry, one ``book``
+    record, no placements - the anchor the lexical pass finds must show up
+    on exactly one of the two sides, never both, since a book paragraph is
+    an audit target (docs/normalized-record-schema.md) and never evidence
+    ``gather`` may cite."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    repository = Repository(root=tmp_path)
+    _write_entry(tmp_path, entry)
+    book = _record("SRC-000001", ["Bob argued with Carol."], source_type="book")
+    write_normalized_records([book], tmp_path / NORMALIZED_RELATIVE_PATH)
+    build_index(repository, [book])
+
+    compute_appearances(repository)
+    appeared = {a.anchor for a in list_appearances(repository, "SUB-people/bob")}
+    gathered = {g.anchor for g in gather(repository, "SUB-people/bob")}
+
+    assert appeared == {"src-000001-p1"}
+    assert gathered.isdisjoint(appeared)
+
+
+def test_computing_appearances_does_not_write_to_the_entry_file(tmp_path):
+    """AC 4: nothing writes an appearance back into an entry."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Some testimony.")
+    repository = Repository(root=tmp_path)
+    _write_entry(tmp_path, entry)
+    book = _record("SRC-000001", ["Bob argued with Carol."], source_type="book")
+    write_normalized_records([book], tmp_path / NORMALIZED_RELATIVE_PATH)
+    build_index(repository, [book])
+    entry_path = tmp_path / "subjects" / "people" / "bob.md"
+    before = entry_path.read_text(encoding="utf-8")
+
+    compute_appearances(repository)
+
+    assert entry_path.read_text(encoding="utf-8") == before
+
+
+def test_appearances_carry_no_pin_or_exclude_overlay():
+    """AC 5: there is no author act against an appearance (§8.11's third
+    property) - no pin/exclude functions for it, and no flag on the row."""
+    import memoria.index as index_module
+
+    assert not hasattr(index_module, "pin_appearance")
+    assert not hasattr(index_module, "exclude_appearance")
+    fields = {f.name for f in dataclasses.fields(Appearance)}
+    assert fields == {"src_id", "anchor", "note"}
+
+
+def test_appearances_are_regenerated_identically_by_rebuild(tmp_path):
+    """AC 6."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    _write_entry(tmp_path, entry)
+    book = _record("SRC-000001", ["Bob argued with Carol."], source_type="book")
+    write_normalized_records([book], tmp_path / NORMALIZED_RELATIVE_PATH)
+    repository = Repository(root=tmp_path)
+
+    report = rebuild(repository)
+    before = list_appearances(repository, "SUB-people/bob")
+    assert [a.anchor for a in before] == ["src-000001-p1"]
+    assert report.appearances.appearances == 1
+
+    report2 = rebuild(repository)
+
+    assert list_appearances(repository, "SUB-people/bob") == before
+    assert report2.appearances == report.appearances
+
+
+def test_appearances_report_names_the_themes_and_arcs_gap(tmp_path):
+    """AC 7: Themes and Arcs produce no appearances yet, and the gap is
+    reported rather than silently folded into zero."""
+    bob = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    tension = Entry(
+        id="SUB-themes/tension", match_terms=["SUB-people/bob"], body=""
+    )
+    repository = Repository(root=tmp_path)
+    _write_entry(tmp_path, bob)
+    _write_entry(tmp_path, tension)
+    book = _record("SRC-000001", ["Bob argued with Carol."], source_type="book")
+    write_normalized_records([book], tmp_path / NORMALIZED_RELATIVE_PATH)
+    build_index(repository, [book])
+
+    report = compute_appearances(repository)
+
+    assert list_appearances(repository, "SUB-themes/tension") == []
+    assert report.entries_skipped == 1
+    assert report.skipped_subjects == ("SUB-themes",)
+    # The lexically-matchable entry alongside it is unaffected by the skip.
+    assert report.entries_computed == 1
+    assert report.appearances == 1

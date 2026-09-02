@@ -9,6 +9,7 @@ from memoria.index import INDEX_RELATIVE_PATH, IndexSchemaError, rebuild
 from memoria.normalize import normalize as run_normalize
 from memoria.records import NORMALIZED_RELATIVE_PATH
 from memoria.repository import NoEvidenceRoot, from_env, require_evidence_root
+from memoria.subjects import write_builtin_subjects
 from memoria.validate import validate
 from memoria.write import Checkpointed, checkpoint
 
@@ -56,6 +57,27 @@ def _report_derived(counts) -> None:
         )
 
 
+def _report_appearances(report) -> None:
+    """Print what the appearances pass produced (#19, part 06 §8.11).
+
+    The seventh acceptance criterion is that Themes and Arcs producing no
+    appearances is a reported gap, not a silent zero - so this always names
+    what was skipped and why, not only what was found.
+    """
+    print(
+        f"rebuild: {report.appearances} appearance(s) over "
+        f"{report.entries_computed} lexically-matchable entr"
+        f"{'y' if report.entries_computed == 1 else 'ies'}"
+    )
+    if report.skipped_subjects:
+        print(
+            f"rebuild: appearances not computed for {report.entries_skipped} "
+            f"entr{'y' if report.entries_skipped == 1 else 'ies'} under "
+            f"{', '.join(report.skipped_subjects)} - the model engine those "
+            "subjects need still waits for the audit at M5 (part 06 §8.11)"
+        )
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="memoria")
     subparsers = parser.add_subparsers(dest="command")
@@ -89,6 +111,13 @@ def main(argv=None):
     subparsers.add_parser(
         "checkpoint",
         help="Commit any outside edits to durable files under one CHG- id",
+    )
+    subparsers.add_parser(
+        "seed-subjects",
+        help=(
+            "Write the five built-in subjects into the repository, skipping "
+            "any that already exist"
+        ),
     )
     normalize_parser = subparsers.add_parser(
         "normalize",
@@ -179,6 +208,7 @@ def main(argv=None):
                 "(see docs/open-problems.md 2.4)"
             )
         _report_derived(report.counts)
+        _report_appearances(report.appearances)
         change_ids = changes.rebuild(repository)
         print(
             f"rebuild: wrote {len(change_ids)} change projection(s) to "
@@ -192,6 +222,18 @@ def main(argv=None):
             print(f"checkpoint: committed {len(result.files)} file(s) as {result.change_id}")
         else:
             print("checkpoint: nothing to checkpoint, tree is clean")
+        return 0
+
+    if args.command == "seed-subjects":
+        written = write_builtin_subjects(repository)
+        if written:
+            for path in written:
+                print(f"seed-subjects: wrote {path}")
+        else:
+            print(
+                "seed-subjects: nothing to write, all five built-in subjects "
+                "already exist"
+            )
         return 0
 
     parser.print_help()

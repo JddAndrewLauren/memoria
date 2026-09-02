@@ -16,15 +16,37 @@ this module, so the reverse direction would be a cycle. Keeping it here also
 puts the rebuild rule (``PRESERVED_TABLES`` / ``DERIVED_TABLES``) beside the
 function that enforces it, where one test can check that every table in the
 file is named by exactly one of the two.
+
+**It also owns the gathered set and its pin/exclude overlay** (#18, part 06
+§8.3): ``gather`` recombines what ``placements``/``relations`` already hold
+with a direct lexical match against an entry's own word-shaped match terms,
+and ``pin``/``exclude`` record the author's attributed overlay in the
+preserved ``gather_overlay`` table - the second thing in this file, beside
+the memo cache, that a rebuild does not throw away.
+
+**And appearances, lexical engine only** (#19, part 06 §8.11): the manuscript
+passages an entry turns out to touch, with a short note on how - kept in the
+derived ``appearances`` table, separate from the gathered set on purpose
+(§8.8's reason: a gathered set is evidence to write from, an appearance is
+prose already written, and merging them would let the book cite itself).
+``compute_appearances`` runs at every ``memoria rebuild`` and is the only
+writer; there is no overlay and no author act against a row, because an
+author act against one passage would be a durable pointer into mutable prose
+(§4.1). Themes and Arcs cannot appear this way - manuscript prose is never
+extracted, so there are no placements over it to intersect - and are skipped
+rather than silently returning nothing (``AppearancesReport``).
 """
 
 from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from memoria.records import NormalizedRecord, real_paragraphs, read_all
 from memoria.repository import Repository
+from memoria.subjects import classify_match_term, load_all_entries, load_entry
+from memoria.write import Actor
 
 INDEX_RELATIVE_PATH = ".memoria/index.db"
 
@@ -46,14 +68,17 @@ INDEX_RELATIVE_PATH = ".memoria/index.db"
 # real failure mode here, someone adding a table and forgetting to say which
 # side of the line it falls on.
 
-# The memo cache and its schema marker. **The only rows in this file a
-# rebuild does not throw away**, and the reason is narrow: everything else
-# here can be recomputed from evidence plus the author's durable acts, and
-# these cannot be recomputed at all without a model. That is the whole
-# predicate - not "paragraph rows versus cluster rows" - which is why one
-# table with a `kind` column carries both (part 06 §8.12's "one cache, two
-# key compositions").
-PRESERVED_TABLES = ("memoria_schema", "memo")
+# The memo cache and its schema marker, and the pin/exclude overlay. **The
+# only rows in this file a rebuild does not throw away**, and the memo
+# cache's reason is narrow: everything else here can be recomputed from
+# evidence plus the author's durable acts, and it cannot be recomputed at
+# all without a model. That is the whole predicate - not "paragraph rows
+# versus cluster rows" - which is why one table with a `kind` column carries
+# both (part 06 §8.12's "one cache, two key compositions"). The overlay is
+# preserved for a different reason (#18, part 06 §8.3): a pin or exclusion
+# is itself an attributed author act, not recomputable evidence, so a
+# rebuild that erased it would silently reverse a decision the author made.
+PRESERVED_TABLES = ("memoria_schema", "memo", "gather_overlay")
 
 # Everything else. Dropped and regenerated on every `memoria rebuild`, which
 # is §42's contract made mechanical.
@@ -72,6 +97,7 @@ DERIVED_TABLES = (
     "cluster_relations",
     "cluster_paragraphs",
     "extraction_meta",
+    "appearances",
 )
 
 # Bumped when the *shape* of a memo row changes in a way that makes an
@@ -98,6 +124,20 @@ _PRESERVED_DDL = (
     "written_at TEXT NOT NULL"
     ")",
     "CREATE INDEX IF NOT EXISTS memo_kind_anchor ON memo(kind, anchor)",
+    # One row per (entry, anchor): the author's most recent pin or exclude of
+    # that source against that entry (#18, part 06 §8.3). `INSERT OR
+    # REPLACE`'d, never appended to - a later act simply supersedes an
+    # earlier one, the same "click-authorized" shape as a settlement (§8.7).
+    # `actor_name`/`actor_email` and `at` are the attribution `memoria
+    # validate` checks for (issue #18's seventh criterion); they are plain
+    # columns rather than a git commit trailer because these rows are never
+    # backed by a file - there is nothing else to attribute them from.
+    "CREATE TABLE IF NOT EXISTS gather_overlay("
+    "entry_id TEXT NOT NULL, anchor TEXT NOT NULL, "
+    "action TEXT NOT NULL CHECK (action IN ('pin', 'exclude')), "
+    "actor_name TEXT NOT NULL, actor_email TEXT NOT NULL, at TEXT NOT NULL, "
+    "PRIMARY KEY (entry_id, anchor)"
+    ")",
 )
 
 _DERIVED_DDL = (
@@ -203,6 +243,17 @@ _DERIVED_DDL = (
     # raw/filtered counts. A surface reporting a candidate list has to be
     # able to say what produced it.
     "CREATE TABLE IF NOT EXISTS extraction_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+    # One row per (entry, passage) an entry's lexical match terms find among
+    # the audit targets (#19, part 06 §8.11). `note` names the term that
+    # matched - the "short note on how it appears" the acceptance criteria
+    # ask for, the same shape as `placements.licensed_by`. Unlike the memo
+    # cache and the gather overlay this is plain derived state: it carries no
+    # author act, so it is dropped and recomputed like everything else here.
+    "CREATE TABLE IF NOT EXISTS appearances("
+    "entry_id TEXT NOT NULL, anchor TEXT NOT NULL, note TEXT NOT NULL, "
+    "PRIMARY KEY (entry_id, anchor)"
+    ")",
+    "CREATE INDEX IF NOT EXISTS appearances_entry ON appearances(entry_id)",
 )
 
 
@@ -281,10 +332,14 @@ class RebuildReport:
     candidate counts be *reported* - so there has to be something to report
     them in. ``counts`` is ``extraction.DerivedCounts``, typed loosely here
     only to keep this module's imports one-way.
+
+    ``appearances`` is ``AppearancesReport`` (#19) - what the appearances
+    pass produced, and what it skipped.
     """
 
     records: list[NormalizedRecord]
     counts: object
+    appearances: AppearancesReport
 
 
 def build_index(
@@ -588,4 +643,421 @@ def rebuild(
         counts = extraction.derive(
             repository, recurrence_threshold=recurrence_threshold
         )
-    return RebuildReport(records=records, counts=counts)
+    appearances_report = compute_appearances(repository)
+    return RebuildReport(records=records, counts=counts, appearances=appearances_report)
+
+
+# --- the gathered set and its pin/exclude overlay (#18, part 06 §8.3) -------
+
+
+@dataclass(frozen=True)
+class GatheredSource:
+    """One paragraph in an entry's gathered set.
+
+    The gathered set itself has no stable ID - it asserts nothing, so
+    nothing outside this function ever needs to name one (§8.3's sixth
+    criterion). ``anchor`` is what is already addressable, and it is enough:
+    a caller that wants to read the evidence reads it through ``read(ref)``.
+    """
+
+    src_id: str
+    anchor: str
+    pinned: bool = False
+
+
+@dataclass(frozen=True)
+class OverlayEntry:
+    """One row of the pin/exclude overlay - the attributed act, not the
+    resulting membership. ``memoria validate`` reads these to check that
+    every row carries attribution."""
+
+    entry_id: str
+    anchor: str
+    action: str
+    actor_name: str
+    actor_email: str
+    at: str
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _record_overlay(
+    repository: Repository, entry_id: str, anchor: str, action: str, actor: Actor
+) -> None:
+    con = connect(repository)
+    try:
+        con.execute(
+            "INSERT INTO gather_overlay "
+            "(entry_id, anchor, action, actor_name, actor_email, at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (entry_id, anchor) DO UPDATE SET "
+            "action = excluded.action, actor_name = excluded.actor_name, "
+            "actor_email = excluded.actor_email, at = excluded.at",
+            (entry_id, anchor, action, actor.name, actor.email, _now()),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def pin(repository: Repository, entry_id: str, anchor: str, actor: Actor) -> None:
+    """Author act: ``anchor`` stays in ``entry_id``'s gathered set regardless
+    of what the matching pass finds (part 06 §8.3's overlay).
+
+    Recorded in the preserved ``gather_overlay`` table, so it survives
+    ``memoria rebuild`` - the same durability class as the memo cache, for
+    the same reason: this is not derivable state.
+
+    Overwrites a prior pin or exclusion of the same source against the same
+    entry, attributed and timestamped to this call - the author's later act
+    supersedes their earlier one rather than stacking a history of them,
+    the same shape as a settlement (§8.7).
+    """
+    _record_overlay(repository, entry_id, anchor, "pin", actor)
+
+
+def exclude(repository: Repository, entry_id: str, anchor: str, actor: Actor) -> None:
+    """Author act: ``anchor`` stays out of ``entry_id``'s gathered set even
+    if the matching pass would otherwise include it. See ``pin``."""
+    _record_overlay(repository, entry_id, anchor, "exclude", actor)
+
+
+def list_overlay(repository: Repository) -> list[OverlayEntry]:
+    """Every pin/exclude row in the repository's index.
+
+    Only ``memoria validate``'s attribution check needs every row at once;
+    ``gather`` reads its own entry's rows directly.
+    """
+    db_path = repository.root / INDEX_RELATIVE_PATH
+    if not db_path.exists():
+        return []
+    con = connect(repository)
+    try:
+        rows = con.execute(
+            "SELECT entry_id, anchor, action, actor_name, actor_email, at "
+            "FROM gather_overlay ORDER BY entry_id, anchor"
+        ).fetchall()
+    finally:
+        con.close()
+    return [OverlayEntry(*row) for row in rows]
+
+
+def _lexical_match(con: sqlite3.Connection, term: str) -> list[str]:
+    """Anchors whose paragraph text contains ``term`` - the deterministic
+    lexical pass part 06 §8.3 says gathering "stays" as, over and above
+    whatever the extraction placed. Quoted as an FTS5 phrase so a term with
+    more than one word, or one that happens to collide with FTS5 query
+    syntax, is still matched literally.
+
+    Scoped away from ``source_type: book`` paragraphs - the inverse of
+    ``_lexical_match_book``'s scoping - because those are audit targets
+    (docs/normalized-record-schema.md: "never evidence to write from"), and
+    §8.11 keeps the gathered set and appearances "separately queryable and
+    never cross": a book paragraph an appearance names must not also surface
+    through gather's own lexical pass."""
+    query = '"' + term.replace('"', '""') + '"'
+    return [
+        row[0]
+        for row in con.execute(
+            "SELECT records.anchor FROM records "
+            "JOIN paragraphs ON paragraphs.anchor = records.anchor "
+            "WHERE records MATCH ? AND paragraphs.source_type != 'book'",
+            (query,),
+        )
+    ]
+
+
+def gather(repository: Repository, entry_id: str) -> list[GatheredSource]:
+    """The gathered set (part 06 §8.3): every paragraph this entry's subject
+    matched, plus the author's pin/exclude overlay.
+
+    No model call, ever: ``memoria.extraction.derive`` already ran whatever
+    reading a model call needed and left its verdict in ``placements`` and
+    ``relations``; this only recombines what is already durable or already
+    in the index, over three sources unioned by anchor:
+
+    - ``placements`` already licensed under ``entry_id`` - built from the
+      entry's *word*-shaped match terms plus its implicit name
+      (``memoria.extraction._licensing_terms``);
+    - a direct lexical match against each of the entry's own word-shaped
+      match terms, the deterministic pass that gathering "stays" as (§8.3) -
+      catching a literal mention the model missed, which is the recall this
+      module's docstring calls the design's central risk. Scoped away from
+      ``source_type: book`` paragraphs (``_lexical_match``): those are audit
+      targets, appearances' side of the §8.11 separation, and must never
+      cross into the gathered set;
+    - for the ``entry``- and ``relation``-shaped match terms together, the
+      **intersection** of what each one names - the placements rows for
+      every named entry and the relations rows for every named relation.
+      This is how a Theme or Arc promoted from a cluster gathers (ADR-0005,
+      2026-09-01 amendment): its match terms are the entries and relations
+      that defined the cluster, and the intersection is what makes the
+      result "exactly the paragraphs where those co-occur" rather than
+      every paragraph any one of them appears in alone. A Theme with only
+      one such match term still gets that term's own anchors, since an
+      intersection of one set is itself. ``extraction.read_placements``
+      deliberately does not consult these two shapes - a Theme is never
+      itself placed - so this function is the only place they are.
+
+    Word-shaped match terms stay unioned in, both with each other and with
+    the entry/relation intersection above: they are a separate recall
+    mitigation (the literal mention above), not a claim about co-occurrence.
+
+    Then the overlay: an excluded anchor is dropped even if matched above,
+    and a pinned one is added even if nothing above found it.
+
+    Ordered by anchor for a stable, reproducible result. A missing index -
+    every fresh clone - returns no results, matching ``search``.
+    """
+    entry = load_entry(repository, *entry_id.split("/", 1))
+
+    db_path = repository.root / INDEX_RELATIVE_PATH
+    if not db_path.exists():
+        return []
+    con = connect(repository)
+    try:
+        anchors: set[str] = {
+            row[0]
+            for row in con.execute(
+                "SELECT anchor FROM placements WHERE entry_id = ?", (entry_id,)
+            )
+        }
+        # Entry/relation-shaped match terms are intersected with each other
+        # (co-occurrence), then unioned into `anchors` alongside the
+        # word-shaped terms' lexical matches - see the docstring.
+        cooccurrence: set[str] | None = None
+        for term in entry.match_terms:
+            kind = classify_match_term(term)
+            if kind == "word":
+                anchors.update(_lexical_match(con, term))
+            elif kind == "entry":
+                term_anchors = {
+                    row[0]
+                    for row in con.execute(
+                        "SELECT anchor FROM placements WHERE entry_id = ?", (term,)
+                    )
+                }
+                cooccurrence = (
+                    term_anchors
+                    if cooccurrence is None
+                    else cooccurrence & term_anchors
+                )
+            else:  # "relation"
+                left, verb, right = (part.strip() for part in term.split(" -> "))
+                term_anchors = {
+                    row[0]
+                    for row in con.execute(
+                        "SELECT anchor FROM relations "
+                        "WHERE from_ref = ? AND verb = ? AND to_ref = ?",
+                        (left, verb, right),
+                    )
+                }
+                cooccurrence = (
+                    term_anchors
+                    if cooccurrence is None
+                    else cooccurrence & term_anchors
+                )
+        if cooccurrence:
+            anchors.update(cooccurrence)
+
+        overlay = dict(
+            con.execute(
+                "SELECT anchor, action FROM gather_overlay WHERE entry_id = ?",
+                (entry_id,),
+            ).fetchall()
+        )
+        for anchor, action in overlay.items():
+            if action == "exclude":
+                anchors.discard(anchor)
+            else:
+                anchors.add(anchor)
+
+        if not anchors:
+            return []
+        placeholders = ",".join("?" for _ in anchors)
+        rows = con.execute(
+            f"SELECT anchor, src_id FROM paragraphs WHERE anchor IN ({placeholders})",
+            tuple(anchors),
+        ).fetchall()
+    finally:
+        con.close()
+
+    pinned = {anchor for anchor, action in overlay.items() if action == "pin"}
+    return sorted(
+        (
+            GatheredSource(src_id=src_id, anchor=anchor, pinned=anchor in pinned)
+            for anchor, src_id in rows
+        ),
+        key=lambda gathered: gathered.anchor,
+    )
+
+
+# --- appearances, lexical engine only (#19, part 06 §8.11) ------------------
+
+
+@dataclass(frozen=True)
+class Appearance:
+    """One manuscript passage an entry turns out to touch, with a short note
+    on how (part 06 §8.11). ``note`` names the match term that found it -
+    ``placements.licensed_by``'s shape, not a model judgement: there is no
+    model in this engine.
+
+    Carries no pin/exclude flag - unlike ``GatheredSource`` - because
+    appearances take no overlay at all (§8.11's third property: an author act
+    against one passage would be a durable pointer into mutable prose)."""
+
+    src_id: str
+    anchor: str
+    note: str
+
+
+@dataclass(frozen=True)
+class AppearancesReport:
+    """What one ``compute_appearances`` pass produced, and what it could not.
+
+    Themes and Arcs cannot appear yet (§8.11: manuscript prose is never
+    extracted, so there is nothing to intersect their entry/relation match
+    terms against), and #19's seventh acceptance criterion is that this gap
+    is *reported*, not folded silently into an empty result - a caller adds
+    ``entries_skipped`` and ``skipped_subjects`` to a candidate list report
+    the same way ``DerivedCounts`` already reports the recurrence filter's
+    cost.
+    """
+
+    appearances: int
+    entries_computed: int
+    entries_skipped: int
+    skipped_subjects: tuple[str, ...]
+
+
+def _appearance_note(term: str) -> str:
+    return f'matched "{term}"'
+
+
+def _lexical_match_book(con: sqlite3.Connection, term: str) -> list[str]:
+    """Anchors among the audit targets (``source_type: book``) whose
+    paragraph text contains ``term`` verbatim - ``_lexical_match``'s FTS5
+    phrase query, scoped to book paragraphs the way ``paragraphs.source_type``
+    already lets ``search`` scope by kind (docs/normalized-record-schema.md:
+    ``book`` marks an audit target)."""
+    query = '"' + term.replace('"', '""') + '"'
+    return [
+        row[0]
+        for row in con.execute(
+            "SELECT records.anchor FROM records "
+            "JOIN paragraphs ON paragraphs.anchor = records.anchor "
+            "WHERE records MATCH ? AND paragraphs.source_type = 'book'",
+            (query,),
+        )
+    ]
+
+
+def compute_appearances(repository: Repository) -> AppearancesReport:
+    """Recompute the ``appearances`` table: every audit-target passage a
+    lexically-matchable entry's word-shaped match terms - or its own
+    implicit name - find, stored with a note naming the term.
+
+    This is the lexical engine part 06 §8.11 says appearances share with the
+    gathered set - "an appearance is a match... using the same lexical
+    machinery" - but it cannot reuse ``gather``'s ``placements``/``relations``
+    union, because the extraction never reads audit targets (only evidence
+    records), so those tables carry no rows for a book paragraph to begin
+    with. What is left is the deterministic lexical pass alone, run directly
+    against book paragraphs.
+
+    Entries under ``memoria.extraction.CO_OCCURRENCE_SUBJECTS`` (Themes,
+    Arcs) are skipped rather than matched on nothing: their match terms name
+    entries and relations, and appearances has no placements over the
+    manuscript to intersect those against (the same reason ``gather``'s
+    co-occurrence branch cannot run here either). The skip is counted and
+    named in the returned report - #19's seventh acceptance criterion - not
+    silently absorbed into zero appearances.
+
+    Stored in the ``appearances`` table and never merged into the gathered
+    set (§8.11): the two stay separately queryable by construction, since
+    nothing here writes to ``placements``, ``relations`` or
+    ``gather_overlay``, and ``gather`` never reads this table. Nothing here
+    writes to an entry file either - appearances are read-only about the
+    manuscript, never fed back into it.
+
+    Regenerated identically on every call: existing rows are dropped and
+    recomputed from the entries and audit-target paragraphs currently on
+    disk, the same throwaway contract every other derived table in this file
+    keeps (§42).
+    """
+    # Imported here, not at module scope, for the same reason `rebuild` does
+    # it: `memoria.extraction` imports this module, so the reverse import
+    # must stay local to avoid a cycle.
+    from memoria.extraction import CO_OCCURRENCE_SUBJECTS, implicit_name_term
+
+    entries = load_all_entries(repository)
+    con = connect(repository)
+    try:
+        con.execute("DELETE FROM appearances")
+        computed = 0
+        skipped = 0
+        skipped_subjects: set[str] = set()
+        for entry_id, entry in sorted(entries.items()):
+            subject_id = entry_id.split("/", 1)[0]
+            if subject_id in CO_OCCURRENCE_SUBJECTS:
+                skipped += 1
+                skipped_subjects.add(subject_id)
+                continue
+
+            terms = {implicit_name_term(entry_id)}
+            for term in entry.match_terms:
+                if classify_match_term(term) == "word":
+                    terms.add(term)
+
+            # Each anchor gets one note, from the first (alphabetically) term
+            # that matched it - deterministic, and enough to say how it was
+            # found without a row per matching term.
+            matched: dict[str, str] = {}
+            for term in sorted(terms):
+                for anchor in _lexical_match_book(con, term):
+                    matched.setdefault(anchor, term)
+
+            for anchor, term in matched.items():
+                con.execute(
+                    "INSERT INTO appearances (entry_id, anchor, note) "
+                    "VALUES (?, ?, ?)",
+                    (entry_id, anchor, _appearance_note(term)),
+                )
+                computed += 1
+        con.commit()
+    finally:
+        con.close()
+
+    return AppearancesReport(
+        appearances=computed,
+        entries_computed=len(entries) - skipped,
+        entries_skipped=skipped,
+        skipped_subjects=tuple(sorted(skipped_subjects)),
+    )
+
+
+def list_appearances(repository: Repository, entry_id: str) -> list[Appearance]:
+    """One entry's appearances, read back from the ``appearances`` table -
+    the query side of ``compute_appearances``. Ordered by anchor, matching
+    ``gather``'s ordering.
+
+    A missing index - every fresh clone - returns no results, matching
+    ``gather`` and ``search``."""
+    db_path = repository.root / INDEX_RELATIVE_PATH
+    if not db_path.exists():
+        return []
+    con = connect(repository)
+    try:
+        rows = con.execute(
+            "SELECT paragraphs.src_id, appearances.anchor, appearances.note "
+            "FROM appearances JOIN paragraphs "
+            "ON paragraphs.anchor = appearances.anchor "
+            "WHERE appearances.entry_id = ? "
+            "ORDER BY appearances.anchor",
+            (entry_id,),
+        ).fetchall()
+    finally:
+        con.close()
+    return [Appearance(src_id=src_id, anchor=anchor, note=note) for src_id, anchor, note in rows]
