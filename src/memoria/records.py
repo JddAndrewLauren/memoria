@@ -21,6 +21,8 @@ contract a future one must satisfy, specified in
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path, PurePosixPath
@@ -672,6 +674,46 @@ def read_raw_source(repository: Repository, record_id: str) -> RawSource:
             "encoding, and read_raw_source serves UTF-8 text only"
         ) from exc
     return RawSource(text=text, original_locator=record.original_locator)
+
+
+def reveal_original_source(repository: Repository, record_id: str) -> Path:
+    """Launch ``record_id``'s un-normalized file in the host's editor or
+    file manager - "Reveal in editor" (#65), the local convenience
+    ``docs/adr/0002-ui-is-a-react-client.md`` split off from
+    ``read_raw_source``'s primary job. Resolves and confines the path
+    exactly as ``read_raw_source`` does - the same ``ReadError`` for an
+    unknown record or a missing file, the same ``NoEvidenceRoot`` for no
+    evidence corpus configured - but never reads the bytes: launching is a
+    side effect on the host machine, not a read.
+
+    Whether this should be attempted at all - is the caller on this machine
+    - is an HTTP-request fact this module has no request to inspect, and
+    stays the web layer's job (``web.routes``'s locality check, gating
+    ``POST /sources/{id}/reveal`` before this is ever called).
+    """
+    record = load(repository, record_id)
+    evidence_root = require_evidence_root(repository)
+    path = _confined_to(evidence_root, PurePosixPath(record.original_file))
+    if not path.is_file():
+        raise ReadError(f"no such original file: {record.original_file}")
+    _launch(path)
+    return path
+
+
+def _launch(path: Path) -> None:
+    """Hand ``path`` to the host OS's default opener.
+
+    The one part of ``reveal_original_source`` that differs per platform,
+    isolated here so a test can monkeypatch it rather than actually
+    spawning a GUI editor or file manager. ``Popen``, not ``run`` - this
+    never waits on the child, so the request it backs returns immediately.
+    """
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+    elif sys.platform == "win32":
+        subprocess.Popen(["explorer", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path)])
 
 
 @dataclass(frozen=True)

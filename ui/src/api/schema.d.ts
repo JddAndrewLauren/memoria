@@ -65,6 +65,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/locality": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Locality
+         * @description Whether this connection is local - the one fact "Reveal in editor"
+         *     (#65) needs to decide whether to exist on this client at all. General
+         *     on purpose: any future locality-gated action reads this same fact
+         *     rather than each route re-deriving it (ADR-0002: no other surface may
+         *     acquire a client-locality condition of its own).
+         */
+        get: operations["locality_api_locality_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sources/{record_id}/reveal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reveal Source
+         * @description "Reveal in editor" (#65): launch the un-normalized file this record
+         *     was normalized from in the host's editor or file manager.
+         *
+         *     Refused for a non-local request even if the UI never should have shown
+         *     the button that reached this - the server never trusts the client's
+         *     own idea of whether it is local, only the same peer-address check
+         *     ``/locality`` reports. This is what keeps the action purely additive
+         *     (ADR-0002): a hosted client gets a plain 403, never a launch on a
+         *     machine it is not sitting at.
+         */
+        post: operations["reveal_source_api_sources__record_id__reveal_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/read": {
         parameters: {
             query?: never;
@@ -247,6 +299,20 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
+         * LocalityOut
+         * @description Whether this connection's client is on the same machine as the
+         *     server.
+         *
+         *     "Reveal in editor" (#65)'s one locality fact - general on purpose, per
+         *     ``docs/adr/0002-ui-is-a-react-client.md``'s "no other surface may
+         *     acquire a client-locality condition" of its own: any future
+         *     locality-gated action reads this same field rather than deriving one.
+         */
+        LocalityOut: {
+            /** Is Local */
+            is_local: boolean;
+        };
+        /**
          * Paragraph
          * @description One paragraph, carrying the stable anchor ``read(ref)`` accepts.
          *
@@ -287,6 +353,17 @@ export interface components {
             exclusions: string[];
             /** Citing Settlements */
             citing_settlements: string[];
+        };
+        /**
+         * RevealSourceResponse
+         * @description Confirms "Reveal in editor" (#65) launched.
+         *
+         *     Carries no other state - the editor or file manager runs on the host,
+         *     outside this response.
+         */
+        RevealSourceResponse: {
+            /** Opened */
+            opened: boolean;
         };
         /** SearchResponse */
         SearchResponse: {
@@ -526,6 +603,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RawSourceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    locality_api_locality_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalityOut"];
+                };
+            };
+        };
+    };
+    reveal_source_api_sources__record_id__reveal_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                record_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevealSourceResponse"];
                 };
             };
             /** @description Validation Error */
