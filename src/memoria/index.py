@@ -153,7 +153,8 @@ _DERIVED_DDL = (
     # exists to avoid.
     "CREATE TABLE IF NOT EXISTS paragraphs("
     "anchor TEXT PRIMARY KEY, src_id TEXT, source_type TEXT, "
-    "event_date TEXT, recorded_date TEXT, contemporaneous INTEGER"
+    "event_date TEXT, recorded_date TEXT, contemporaneous INTEGER, "
+    "email_from TEXT, email_to TEXT"
     ")",
     # A placement the entry's match terms license (part 06 §8.4). `licensed_by`
     # names *which* term did it, so "adding a match term changed placements"
@@ -306,20 +307,31 @@ _SNIPPET_TEXT_COLUMN = 3
 
 @dataclass
 class SearchFilters:
-    """The §25 filters #12 ships, over the plain ``paragraphs`` table.
+    """The §25 filters #12 ships, plus #111's two header filters, over the
+    plain ``paragraphs`` table.
 
-    All four compose (ANDed together) and are all optional. ``event_date``
+    All six compose (ANDed together) and are all optional. ``event_date``
     and ``recorded_date`` match the verbatim frontmatter string exactly - the
     schema gives dates no sortable value (``date_confidence`` runs from
     ``exact`` to ``unresolved``), so a range filter has nothing ordered to
     compare against; exact match is what the field actually supports
     (docs/tool-surface.md records the choice).
+
+    ``from_`` and ``to`` are a case-insensitive substring match against the
+    record's verbatim ``from`` / ``to`` frontmatter string (#111) - metadata
+    retrieval, not entity resolution. `docs/corpora/enron.md` finding 3: half
+    the correspondents in a real export are bare display names in mixed
+    order, so this matches strings and resolves no person; that stays entry
+    match-term work. ``from_`` rather than ``from``, which is a reserved
+    word.
     """
 
     event_date: str | None = None
     recorded_date: str | None = None
     source_type: str | None = None
     contemporaneous: bool | None = None
+    from_: str | None = None
+    to: str | None = None
 
 
 @dataclass(frozen=True)
@@ -408,7 +420,8 @@ def build_index(
                 con.execute(
                     "INSERT INTO paragraphs "
                     "(anchor, src_id, source_type, event_date, recorded_date, "
-                    "contemporaneous) VALUES (?, ?, ?, ?, ?, ?)",
+                    "contemporaneous, email_from, email_to) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         anchor,
                         record.id,
@@ -416,6 +429,8 @@ def build_index(
                         record.event_date,
                         record.recorded_date,
                         1 if record.contemporaneous else 0,
+                        record.email_from,
+                        record.email_to,
                     ),
                 )
         con.commit()
@@ -512,6 +527,12 @@ def filter_predicate(filters: SearchFilters | None) -> tuple[str, list]:
     if filters.contemporaneous is not None:
         clauses.append("paragraphs.contemporaneous = ?")
         params.append(1 if filters.contemporaneous else 0)
+    if filters.from_ is not None:
+        clauses.append("INSTR(LOWER(paragraphs.email_from), LOWER(?)) > 0")
+        params.append(filters.from_)
+    if filters.to is not None:
+        clauses.append("INSTR(LOWER(paragraphs.email_to), LOWER(?)) > 0")
+        params.append(filters.to)
     return " AND ".join(clauses), params
 
 
@@ -529,11 +550,12 @@ def search(
     (ADR-0004), rather than a bare ``db_path`` - #74 and #81 inherit this
     shape.
 
-    ``filters`` narrows by event date, recorded date, source type and
-    contemporaneous/retrospective (``SearchFilters``); all compose. Applied
-    in the core so the same filters reach every caller - the MCP tool (#12),
-    the web API (#64) and cross-layer search (#24) - without a second,
-    divergent copy in any of them (§40.1).
+    ``filters`` narrows by event date, recorded date, source type,
+    contemporaneous/retrospective and the ``from``/``to`` header strings
+    (``SearchFilters``); all compose. Applied in the core so the same filters
+    reach every caller - the MCP tool (#12), the web API (#64) and
+    cross-layer search (#24) - without a second, divergent copy in any of
+    them (§40.1).
 
     ``snippet`` is opt-in and off by default, so a hit carries identifiers
     and nothing else unless a caller asks otherwise (#95). It is a match

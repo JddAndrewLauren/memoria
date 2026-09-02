@@ -38,6 +38,8 @@ def _record(
     event_date="Oct. 22.",
     recorded_date="Oct. 22.",
     contemporaneous=True,
+    email_from=None,
+    email_to=None,
 ):
     return NormalizedRecord(
         id=record_id,
@@ -49,6 +51,8 @@ def _record(
         original_file="raw/vol-01/text.txt",
         original_locator="Journal I, entry dated Oct. 22.",
         paragraphs=paragraphs,
+        email_from=email_from,
+        email_to=email_to,
     )
 
 
@@ -247,6 +251,114 @@ def test_search_filters_compose(tmp_path):
     assert [r.src_id for r in results] == ["SRC-000009"]
 
 
+def test_build_index_writes_the_header_strings_into_paragraphs(tmp_path):
+    """#111: `from`/`to` are written into the plain `paragraphs` table so the
+    predicate needs no join into the FTS5 table and no record file read."""
+    records = [
+        _record(
+            "SRC-000012",
+            ["A message about a heron."],
+            email_from="Dave Perrino <dperrino@example.com>",
+            email_to="Diana Scholtes",
+        )
+    ]
+    repository = _index(tmp_path, records)
+
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    row = con.execute(
+        "SELECT email_from, email_to FROM paragraphs WHERE anchor = ?",
+        ("src-000012-p1",),
+    ).fetchone()
+    con.close()
+
+    assert row == ("Dave Perrino <dperrino@example.com>", "Diana Scholtes")
+
+
+def test_search_filters_by_from_case_insensitive_substring(tmp_path):
+    records = [
+        _record(
+            "SRC-000015",
+            ["A message about a heron."],
+            email_from="Dave Perrino <dperrino@example.com>",
+        ),
+        _record(
+            "SRC-000016",
+            ["Another message about a heron."],
+            email_from="Diana Scholtes <dscholtes@example.com>",
+        ),
+    ]
+    repository = _index(tmp_path, records)
+
+    results = search(repository, "heron", SearchFilters(from_="perrino"))
+
+    assert [r.src_id for r in results] == ["SRC-000015"]
+
+
+def test_search_filters_by_to_case_insensitive_substring(tmp_path):
+    records = [
+        _record(
+            "SRC-000017",
+            ["A message about a heron."],
+            email_to="Diana Scholtes <dscholtes@example.com>",
+        ),
+        _record(
+            "SRC-000018",
+            ["Another message about a heron."],
+            email_to="Sean Crandall <scrandall@example.com>",
+        ),
+    ]
+    repository = _index(tmp_path, records)
+
+    results = search(repository, "heron", SearchFilters(to="scholtes"))
+
+    assert [r.src_id for r in results] == ["SRC-000017"]
+
+
+def test_search_from_and_to_filters_compose_with_each_other(tmp_path):
+    """The shape the M1 gate walk (#15) observed: "messages from X to Y" -
+    built from three email records, a query that matches every body, and
+    both header filters - gets exactly the one record's anchors back."""
+    records = [
+        _record(
+            "SRC-000019",
+            ["Perrino wrote to Scholtes about the pond."],
+            email_from="Dave Perrino <dperrino@example.com>",
+            email_to="Diana Scholtes <dscholtes@example.com>",
+        ),
+        _record(
+            "SRC-000020",
+            ["Perrino wrote to Crandall about the pond."],
+            email_from="Dave Perrino <dperrino@example.com>",
+            email_to="Sean Crandall <scrandall@example.com>",
+        ),
+        _record(
+            "SRC-000021",
+            ["Semperger wrote to Scholtes about the pond."],
+            email_from="Cara Semperger <csemperger@example.com>",
+            email_to="Diana Scholtes <dscholtes@example.com>",
+        ),
+    ]
+    repository = _index(tmp_path, records)
+
+    results = search(
+        repository, "pond", SearchFilters(from_="perrino", to="scholtes")
+    )
+
+    assert [r.src_id for r in results] == ["SRC-000019"]
+    assert [r.anchor for r in results] == ["src-000019-p1"]
+
+
+def test_a_non_email_record_does_not_match_a_from_or_to_filter(tmp_path):
+    """`email_from`/`email_to` are `None` on a non-email record - `INSTR`
+    over a `NULL` column is `NULL`, so the row is excluded rather than
+    matching every filter value."""
+    records = [_record("SRC-000022", ["A fox by the pond, no email header."])]
+    repository = _index(tmp_path, records)
+
+    assert search(repository, "fox", SearchFilters(from_="perrino")) == []
+    assert search(repository, "fox", SearchFilters(to="scholtes")) == []
+
+
 def test_filter_predicate_is_reusable_by_a_query_that_is_not_fts5(tmp_path):
     """#74 joins cluster membership, #81 joins a vector search - neither is
     an FTS5 query. The same predicate builder must serve a plain SELECT
@@ -324,13 +436,20 @@ def test_rebuild_reports_no_records_when_none_exist(tmp_path):
 
 def test_search_over_the_full_corpus_returns_well_under_a_second(tmp_path):
     records = [
-        _record(f"SRC-{n:06d}", [f"Paragraph {n} mentions a heron by the pond."])
+        _record(
+            f"SRC-{n:06d}",
+            [f"Paragraph {n} mentions a heron by the pond."],
+            email_from="Dave Perrino <dperrino@example.com>",
+            email_to="Diana Scholtes <dscholtes@example.com>",
+        )
         for n in range(1, 2001)
     ]
     repository = _index(tmp_path, records)
 
     start = time.monotonic()
-    results = search(repository, "heron")
+    results = search(
+        repository, "heron", SearchFilters(from_="perrino", to="scholtes")
+    )
     elapsed = time.monotonic() - start
 
     assert results

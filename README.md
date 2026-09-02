@@ -242,5 +242,8 @@ it takes the frozen `Repository` value, like every other core read (ADR-0004).
 Pass `SearchFilters(contemporaneous=True)` to search evidence records only,
 excluding retrospective editorial commentary; `SearchFilters.source_type` is
 an exact match with no negation, so narrowing to one type (not "everything
-except editorial") is what a `source_type` filter alone can express. See
+except editorial") is what a `source_type` filter alone can express.
+`SearchFilters.from_`/`.to` narrow by a case-insensitive substring match
+against the record's verbatim `from`/`to` header string — a string filter,
+not a resolved correspondent (docs/corpora/enron.md finding 3). See
 `docs/tool-surface.md`'s `search_text` section for the full filter set.

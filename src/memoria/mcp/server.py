@@ -19,9 +19,10 @@ stop being a router and become a wall, and people would go around it.
 
 `search_text(query, filters)` is the retrieval half (#12). The four §25
 filters - event date, recorded date, source type, contemporaneous/
-retrospective - are implemented in ``memoria.index.search``, not here: the
-tool shapes results, the core computes them, so the same filters reach #64's
-web layer without a second, divergent copy.
+retrospective - plus #111's `from`/`to` header filters, are implemented in
+``memoria.index.search``, not here: the tool shapes results, the core
+computes them, so the same filters reach #64's web layer without a second,
+divergent copy.
 
 The ``extraction_*`` tools (#17) are a second class on the same server, and
 they are here because there is nowhere else: no model-driving service
@@ -206,10 +207,12 @@ def search_text(query: str, filters: SearchFilters | None = None) -> str:
     straight into `read(ref)` with no reconstruction. Carries no text of its
     own: evidence is read, not summarized.
 
-    `filters` narrows by `event_date`, `recorded_date`, `source_type` and
-    `contemporaneous` (true excludes retrospective editorial commentary);
-    all compose. Dates match the record's verbatim frontmatter string
-    exactly.
+    `filters` narrows by `event_date`, `recorded_date`, `source_type`,
+    `contemporaneous` (true excludes retrospective editorial commentary),
+    and `from_`/`to` (case-insensitive substring match against the record's
+    verbatim `from`/`to` header string - a string filter, not entity
+    resolution: it does not resolve a name to a person); all compose. Dates
+    match the record's verbatim frontmatter string exactly.
 
     Returns "No results." rather than an empty string when nothing matches.
     An unbuilt corpus (no `.memoria/index.db` yet) is the same as an empty
