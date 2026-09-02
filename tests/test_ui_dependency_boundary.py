@@ -28,6 +28,7 @@ DENYLIST_EXACT = {
     "replicate",
     "groq-sdk",
     "mistralai",
+    "@mistralai/mistralai",
     "together-ai",
     "ollama",
     "ai",  # the Vercel AI SDK - a model-calling client, despite the generic name
@@ -35,6 +36,8 @@ DENYLIST_EXACT = {
     "llamaindex",
     "@huggingface/inference",
     "@google/generative-ai",
+    "@google/genai",
+    "@azure/openai",
 }
 DENYLIST_PREFIXES = (
     "@anthropic-ai/",

@@ -138,14 +138,30 @@ directly.
 .venv/bin/python -m uvicorn memoria.web.app:create_app --factory --reload
 ```
 
-Six reads exist today: list sources (`GET /api/sources`, filterable by
-`source_type`, `date_confidence` and `contemporaneous`, paginated), read one
-source (`GET /api/sources/{id}`), the raw un-normalized file behind one
-(`GET /api/sources/{id}/raw`), search (`GET /api/search`, wrapping
+The reads are: list sources (`GET /api/sources`, filterable by `source_type`,
+`date_confidence` and `contemporaneous`, paginated), read one source
+(`GET /api/sources/{id}`), the raw un-normalized file behind one
+(`GET /api/sources/{id}/raw`), resolve one reference to a citation
+(`GET /api/read?ref=…`, #25), search (`GET /api/search`, wrapping
 `memoria.index.search`), list subjects with their entry counts
 (`GET /api/subjects`, #24), and one subject's entries
 (`GET /api/subjects/{id}/entries`, #24). See `docs/tool-surface.md` for what
 each filter means and `src/memoria/web/schemas.py` for the response shapes.
+
+`GET /api/read` is the MCP server's `read(ref)` over HTTP, the same composed
+core: a `SRC-` paragraph anchor — a search hit's, or a paragraph's own —
+serves the cited text with its record and its curated-overlay backlinks (#20),
+and a `SUB-x/y` entry reference, which is what those backlinks are, serves
+that entry's own raw text. So the slide-over citation panel follows a link in
+either direction without a second read shape.
+
+Not everything served is a read. `GET /api/locality` reports one connection
+fact — whether the client is on this machine, decided by the peer address and
+never by anything the client claims — and `POST /api/sources/{id}/reveal` is
+an action: it launches the un-normalized file behind a record in the host's
+editor or file manager (#65). Reveal makes the same locality check itself and
+refuses a non-local request with a 403 whatever the UI showed, which is what
+keeps it purely additive (`docs/adr/0002-ui-is-a-react-client.md`).
 
 No auth, HTTPS or remote-access code exists — localhost, one machine
 (`docs/poc-plan.md` §5).
