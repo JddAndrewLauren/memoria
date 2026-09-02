@@ -417,6 +417,81 @@ def test_search_text_filters_compose(tmp_path):
     assert "SRC-000002" not in rendered
 
 
+def test_search_text_answers_messages_from_x_to_y_with_the_header_filters_alone(
+    tmp_path,
+):
+    """#111: the M1 gate walk on #15 - "how many messages did Dave Perrino
+    send to Diana Scholtes" - fell back to Bash because `search_text` could
+    not see the `from`/`to` header fields at all. This is the same shape
+    answered by `search_text` alone: three email records, a query that
+    matches every body, both header filters, and exactly the one record's
+    anchor comes back."""
+    from memoria.index import SearchFilters
+
+    repository = _index(
+        tmp_path,
+        [
+            _record(
+                id="SRC-000003",
+                paragraphs=["Perrino wrote to Scholtes about the pond."],
+                email_from="Dave Perrino <dperrino@example.com>",
+                email_to="Diana Scholtes <dscholtes@example.com>",
+            ),
+            _record(
+                id="SRC-000004",
+                paragraphs=["Perrino wrote to Crandall about the pond."],
+                email_from="Dave Perrino <dperrino@example.com>",
+                email_to="Sean Crandall <scrandall@example.com>",
+            ),
+            _record(
+                id="SRC-000005",
+                paragraphs=["Semperger wrote to Scholtes about the pond."],
+                email_from="Cara Semperger <csemperger@example.com>",
+                email_to="Diana Scholtes <dscholtes@example.com>",
+            ),
+        ],
+    )
+    server._repository = repository
+
+    rendered = server.search_text(
+        "pond", SearchFilters(from_="perrino", to="scholtes")
+    )
+
+    assert "SRC-000003" in rendered
+    assert "SRC-000004" not in rendered
+    assert "SRC-000005" not in rendered
+
+
+def test_search_text_ledgers_the_header_filters_exactly_as_the_existing_four(
+    tmp_path,
+):
+    from memoria.index import SearchFilters
+    from memoria.ledger import event_path
+
+    repository = _index(
+        tmp_path,
+        [
+            _record(
+                id="SRC-000006",
+                paragraphs=["Perrino wrote to Scholtes about the pond."],
+                email_from="Dave Perrino <dperrino@example.com>",
+                email_to="Diana Scholtes <dscholtes@example.com>",
+            )
+        ],
+    )
+    server._repository = repository
+    server._session_id = "SES-test"
+
+    server.search_text("pond", SearchFilters(from_="perrino", to="scholtes"))
+
+    (line,) = (
+        event_path(repository, "SES-test").read_text(encoding="utf-8").splitlines()
+    )
+    event = json.loads(line)
+    assert event["filters"]["from_"] == "perrino"
+    assert event["filters"]["to"] == "scholtes"
+
+
 # --- the ledger (#13) -------------------------------------------------------
 
 
