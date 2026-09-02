@@ -277,6 +277,14 @@ def _process_email_containers(
 
     for container in others:
         if container.deleted or Path(container.path).suffix not in _EMAIL_CONTAINER_SUFFIXES:
+            # A container this pass does not read (deleted, or no longer an
+            # export) still owns message IDs from a prior run. Carry them
+            # forward as deleted, the same rule `sync` applies to a raw file
+            # that vanished - otherwise they fall out of `combined` below and
+            # their numbers get reissued.
+            for key, prior in prior_messages.items():
+                if key[0] == container.path:
+                    new_entries[prior.id] = replace(prior, deleted=True)
             continue
         messages = _read_container_messages(evidence_root / container.path)
 

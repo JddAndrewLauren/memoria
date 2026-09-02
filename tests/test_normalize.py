@@ -4,7 +4,7 @@ import mailbox
 from email.message import EmailMessage
 
 from memoria.index import build_index, search
-from memoria.manifest import DEFAULT_MANIFEST_RELATIVE_PATH
+from memoria.manifest import DEFAULT_MANIFEST_RELATIVE_PATH, load_manifest
 from memoria.normalize import CONVERTERS, EMAIL_CONVERTER_VERSION, normalize
 from memoria.records import NORMALIZED_RELATIVE_PATH, record_to_markdown, read_all
 from memoria.repository import Repository
@@ -454,3 +454,49 @@ def test_a_standalone_eml_file_converts_to_one_record(tmp_path):
     assert record.paragraphs == ["Standalone message body."]
     assert record.in_reply_to == ""
     assert record.thread_id == "standalone@x"
+
+
+def test_deleting_an_mbox_marks_its_message_ids_deleted_instead_of_dropping_them(tmp_path):
+    """Regression: `_process_email_containers` skipped a deleted container
+    outright, so its message sub-entries (told apart only by
+    `email_message_index`, sharing the container's own `path`) fell out of
+    `combined` entirely instead of being carried forward as `deleted` - the
+    rule ADR-0006 and manifest.py's docstring require ("Nothing is reused").
+    Reissuing their numbers would silently repoint any existing citation
+    into that ID range at different evidence."""
+    evidence_root = tmp_path / "evidence"
+    _write_mbox(
+        evidence_root,
+        "thread.mbox",
+        [
+            _email_message(
+                from_="alice@example.com", to="bob@example.com",
+                date="Mon, 17 Oct 2011 09:00:00 -0500", message_id="<m1@x>",
+                body="Kickoff message.",
+            ),
+            _email_message(
+                from_="bob@example.com", to="alice@example.com",
+                date="Mon, 17 Oct 2011 10:00:00 -0500", message_id="<m2@x>",
+                in_reply_to="<m1@x>", body="First reply.",
+            ),
+        ],
+    )
+    repository = Repository(root=tmp_path / "repo")
+    normalize(repository, evidence_root)
+    manifest_path = evidence_root / DEFAULT_MANIFEST_RELATIVE_PATH
+    message_ids = sorted(
+        e.id for e in load_manifest(manifest_path) if "email_message_index" in e.extra
+    )
+    assert len(message_ids) == 2
+
+    (evidence_root / "raw" / "thread.mbox").unlink()
+    normalize(repository, evidence_root)
+
+    entries_by_id = {e.id: e for e in load_manifest(manifest_path)}
+    for message_id in message_ids:
+        assert entries_by_id[message_id].deleted is True
+
+    _write_raw_file(evidence_root, "new.txt", "A brand new unit.")
+    report = normalize(repository, evidence_root)
+
+    assert report.added_units == ["SRC-000004"]  # not a reissued SRC-000003
