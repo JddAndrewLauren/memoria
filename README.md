@@ -12,10 +12,10 @@ and issue #1 for what it cost.
 Practically, this means:
 
 - `memoria normalize` produces normalized records from any raw unit whose suffix
-  has a registered converter — plain text today, with docx and PDF owed by #77
-  and email by #78. What was removed with that corpus is the rest of its
-  ingestion layer: editorial segregation, year resolution, cross-reference
-  extraction and the benchmark answer key.
+  has a registered converter — plain text, docx and pdf today, with email owed
+  by #78. What was removed with that corpus is the rest of its ingestion
+  layer: editorial segregation, year resolution, cross-reference extraction
+  and the benchmark answer key.
 - `docs/normalized-record-schema.md` survives as the **contract** a future
   normalizer must satisfy. It is what `memoria.index` and `memoria validate`
   already read, and it is what to build against.
@@ -31,9 +31,10 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 ```
 
-`[dev]` pulls in the `[mcp]` and `[web]` extras, so the MCP server and the
-FastAPI app below are both importable and their tests run. `pip install
-memoria` on its own installs the core and the CLI only — the core's own
+`[dev]` pulls in the `[mcp]`, `[web]` and `[convert]` extras, so the MCP
+server, the FastAPI app below and the docx/pdf converters are all importable
+and their tests run. `pip install memoria` on its own installs the core and
+the CLI only — the core's own
 runtime dependency is PyYAML alone.
 
 ## Running the tests

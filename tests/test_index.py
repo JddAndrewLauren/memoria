@@ -69,6 +69,38 @@ def test_search_returns_the_specific_paragraph_anchor_that_matched(tmp_path):
     assert results[0].anchor == "src-000002-p2"
 
 
+def test_build_index_skips_page_markers(tmp_path):
+    """A pdf page marker earns no index row and shifts no anchor
+    (docs/normalized-record-schema.md, "pdf page markers are not
+    paragraphs") - the marker between the two real paragraphs here must not
+    become a phantom p2 that pushes the second real paragraph to p3."""
+    records = [
+        _record(
+            "SRC-000003",
+            ["Page one paragraph.", "<!-- page 2 -->", "Page two paragraph."],
+        )
+    ]
+    repository = _index(tmp_path, records)
+
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    rows = con.execute("SELECT anchor, text FROM records ORDER BY anchor").fetchall()
+    con.close()
+
+    assert rows == [
+        ("src-000003-p1", "Page one paragraph."),
+        ("src-000003-p2", "Page two paragraph."),
+    ]
+
+
+def test_search_does_not_match_a_page_marker(tmp_path):
+    records = [
+        _record("SRC-000004", ["Real text.", "<!-- page 2 -->", "More real text."])
+    ]
+    repository = _index(tmp_path, records)
+
+    assert search(repository, "page") == []
+
+
 def test_search_over_a_missing_index_returns_no_results_rather_than_raising(tmp_path):
     """A fresh clone has no `.memoria/index.db` - `.memoria/` is gitignored.
 

@@ -77,6 +77,10 @@ class NormalizedRecord:
     in_reply_to: str | None = None
     quoted_excised: bool | None = None
     attachments: list[dict] | None = None
+    # docx-specific: embedded images by name, not embedded in the body
+    # (part 05 §5.4). None for records that are not docx; always a list
+    # (possibly empty) for docx records.
+    images: list[str] | None = None
 
     def anchor_id(self, paragraph_number: int) -> str:
         """The stable anchor id for this record's Nth paragraph (1-based).
@@ -107,8 +111,17 @@ def record_to_markdown(record: NormalizedRecord) -> str:
     every citation index after it is silently wrong. Refusing to write it is
     the only place that ambiguity can be caught with certainty, because by
     read time the two cases are the same bytes.
+
+    **A pdf page marker earns no anchor** and is written between paragraphs
+    verbatim, unnumbered (docs/normalized-record-schema.md, "pdf page
+    markers are not paragraphs") - anchor numbers count real paragraphs
+    only, so a marker inserted or removed shifts no anchor.
     """
-    for number, paragraph in enumerate(record.paragraphs, start=1):
+    number = 0
+    for paragraph in record.paragraphs:
+        if is_page_marker(paragraph):
+            continue
+        number += 1
         if _ANCHOR_TAG.search(paragraph):
             raise ValueError(
                 f"{record.id} ¶{number} contains a paragraph anchor, which the "
@@ -154,12 +167,20 @@ def record_to_markdown(record: NormalizedRecord) -> str:
         frontmatter["quoted_excised"] = record.quoted_excised
     if record.attachments is not None:
         frontmatter["attachments"] = record.attachments
+    if record.images is not None:
+        frontmatter["images"] = record.images
     # Paragraph anchors (part 05 §5.3): stable across re-runs because they
-    # are positional within a record whose own ID is itself stable.
-    body = "\n\n".join(
-        f'<a id="{record.anchor_id(i)}"></a>\n\n{paragraph}'
-        for i, paragraph in enumerate(record.paragraphs, start=1)
-    )
+    # are positional within a record whose own ID is itself stable. A page
+    # marker is written in place but is not itself anchored.
+    blocks = []
+    number = 0
+    for paragraph in record.paragraphs:
+        if is_page_marker(paragraph):
+            blocks.append(paragraph)
+            continue
+        number += 1
+        blocks.append(f'<a id="{record.anchor_id(number)}"></a>\n\n{paragraph}')
+    body = "\n\n".join(blocks)
     return "---\n" + yaml.safe_dump(frontmatter, sort_keys=False) + "---\n\n" + body + "\n"
 
 
@@ -197,6 +218,46 @@ def write_normalized_records(
 # policy in docs/normalized-record-schema.md).
 _ANCHOR_TAG = re.compile(r'<a id="(?P<anchor>[^"]+)"></a>')
 
+# A pdf page marker, written between pages by the pdf converter
+# (docs/normalized-record-schema.md, "pdf page markers are not paragraphs").
+_PAGE_MARKER = re.compile(r"^<!-- page \d+ -->$")
+
+# Blank-line paragraph boundaries - the same rule that splits a converter's
+# raw text into paragraphs (memoria.normalize) - used only to split a
+# leading run of page markers, before the first anchor, from one another.
+# It is never applied to a real paragraph's own text: a paragraph may
+# contain its own internal blank line (AWKWARD in test_read_ref.py), so
+# splitting on it there would corrupt evidence rather than recover a marker.
+_BLANK_LINE = re.compile(r"\n[ \t]*\n+")
+
+# A page marker recovered from the *end* of an anchor's segment only -
+# where record_to_markdown always places one relative to the paragraph it
+# follows - never by splitting the segment's own text.
+_TRAILING_MARKER = re.compile(r"\n\n(<!-- page \d+ -->)$")
+
+
+def is_page_marker(paragraph: str) -> bool:
+    """Whether ``paragraph`` is a pdf page marker rather than a real one.
+
+    A marker earns no anchor, no index row and no extraction read
+    (docs/normalized-record-schema.md, "pdf page markers are not
+    paragraphs"). Shared by the serializer, the parser and
+    ``index.build_index`` so the rule is enforced identically everywhere a
+    record's ``paragraphs`` list is walked.
+    """
+    return bool(_PAGE_MARKER.match(paragraph))
+
+
+def real_paragraphs(record: NormalizedRecord) -> list[str]:
+    """``record.paragraphs`` with page markers left out.
+
+    What every anchor number, index row and extraction read is actually
+    counted against - ``record.paragraphs`` itself is positional storage for
+    ``record_to_markdown``, which needs the markers' original places.
+    """
+    return [p for p in record.paragraphs if not is_page_marker(p)]
+
+
 _REQUIRED_FIELDS = (
     "id",
     "source_type",
@@ -211,7 +272,7 @@ _REQUIRED_FIELDS = (
 )
 _OPTIONAL_FIELDS = (
     "recipient", "dateline", "salutation", "work", "chapter",
-    "thread_id", "in_reply_to",
+    "thread_id", "in_reply_to", "images",
 )
 # Frontmatter keys whose attribute name differs (#78's email fields): `from`
 # is a reserved word and cannot be a dataclass field / constructor kwarg.
@@ -302,8 +363,10 @@ def parse_record(text: str, *, source: str = "<string>") -> NormalizedRecord:
         attachments = _as_attachments(attachments, source)
 
     body = text[end + len("\n---\n") :]
+    images = _as_string_list(fields.pop("images"), source) if "images" in fields else None
     record = NormalizedRecord(
         contemporaneous=_as_bool(fields.pop("contemporaneous"), source),
+        images=images,
         paragraphs=_parse_paragraphs(body, source),
         quoted_excised=quoted_excised,
         attachments=attachments,
@@ -376,8 +439,28 @@ def _as_attachments(value: object, source: str) -> list[dict]:
     return value
 
 
+def _as_string_list(value: object, source: str) -> list[str]:
+    """``images`` as a real list of strings.
+
+    A YAML scalar there would be a single name written without the list
+    form the schema declares (docs/normalized-record-schema.md, "images").
+    """
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise ReadError(f"{source}: 'images' must be a list of strings")
+    return value
+
+
 def _parse_paragraphs(body: str, source: str) -> list[str]:
-    """Split an anchored body back into its paragraphs, byte for byte."""
+    """Split an anchored body back into its paragraphs, byte for byte.
+
+    A pdf page marker sits between two anchors (or before the first one)
+    with no anchor of its own, so it is not found by scanning for anchors.
+    It is peeled off the *end* of the segment that trails it instead of
+    recovered by blank-line splitting the segment - a real paragraph may
+    contain its own internal blank line (AWKWARD in test_read_ref.py), and
+    blank-line splitting it would corrupt evidence rather than recover a
+    marker.
+    """
     anchors = list(_ANCHOR_TAG.finditer(body))
     if not anchors:
         # A record with no paragraphs serializes to an empty body. Not an
@@ -387,6 +470,12 @@ def _parse_paragraphs(body: str, source: str) -> list[str]:
         return []
 
     paragraphs = []
+    leading = body[: anchors[0].start()].strip("\n")
+    if leading:
+        # Nothing but page markers ever renders before the first real
+        # paragraph, so splitting this run on blank lines is safe.
+        paragraphs.extend(_BLANK_LINE.split(leading))
+
     for position, match in enumerate(anchors):
         start = match.end()
         is_last = position + 1 == len(anchors)
@@ -400,7 +489,13 @@ def _parse_paragraphs(body: str, source: str) -> list[str]:
                 segment = segment[:-1]
         elif segment.endswith("\n\n"):
             segment = segment[:-2]
+
+        markers = []
+        while (trailing := _TRAILING_MARKER.search(segment)) is not None:
+            markers.insert(0, trailing.group(1))
+            segment = segment[: trailing.start()]
         paragraphs.append(segment)
+        paragraphs.extend(markers)
     return paragraphs
 
 
@@ -415,7 +510,7 @@ def _check_anchors(body: str, record: NormalizedRecord, source: str) -> None:
     sit in a frontmatter value cannot be mistaken for one.
     """
     found = [match.group("anchor") for match in _ANCHOR_TAG.finditer(body)]
-    expected = [record.anchor_id(n) for n in range(1, len(record.paragraphs) + 1)]
+    expected = [record.anchor_id(n) for n in range(1, len(real_paragraphs(record)) + 1)]
     if found != expected:
         raise ReadError(
             f"{source}: paragraph anchors do not match the record's ID - "
@@ -684,15 +779,19 @@ def read(repository: Repository, ref: str) -> Read:
             record=record,
         )
 
-    if not 1 <= reference.paragraph <= len(record.paragraphs):
+    # Page markers earn no extraction read - a paragraph number counts real
+    # paragraphs only (docs/normalized-record-schema.md, "pdf page markers
+    # are not paragraphs").
+    reals = real_paragraphs(record)
+    if not 1 <= reference.paragraph <= len(reals):
         raise ReadError(
-            f"{reference.record_id} has {len(record.paragraphs)} paragraphs; "
+            f"{reference.record_id} has {len(reals)} paragraphs; "
             f"there is no ¶{reference.paragraph}"
         )
     return Read(
         ref=ref,
         citation=citation,
-        text=record.paragraphs[reference.paragraph - 1],
+        text=reals[reference.paragraph - 1],
         record=record,
         paragraph=reference.paragraph,
     )

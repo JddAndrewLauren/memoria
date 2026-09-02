@@ -18,6 +18,7 @@ from memoria.records import NormalizedRecord, ReadError
 from memoria.records import list_sources as list_sources_core
 from memoria.records import load as load_source
 from memoria.records import read_raw_source as read_raw_source_core
+from memoria.records import real_paragraphs
 from memoria.repository import NoEvidenceRoot, Repository
 from memoria.web.dependencies import get_repository
 from memoria.web.schemas import (
@@ -51,7 +52,7 @@ def _to_detail(record: NormalizedRecord) -> SourceDetail:
         **_to_summary(record).model_dump(),
         paragraphs=[
             Paragraph(anchor=record.anchor_id(number), text=text)
-            for number, text in enumerate(record.paragraphs, start=1)
+            for number, text in enumerate(real_paragraphs(record), start=1)
         ],
         # No editorial record is ever linked to the one it annotates today -
         # see SourceDetail.apparatus's docstring.
