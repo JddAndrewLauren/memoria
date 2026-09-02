@@ -46,9 +46,12 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from dataclasses import dataclass, replace as dataclass_replace
+from dataclasses import asdict, dataclass, replace as dataclass_replace
 from datetime import datetime, timezone
 
+import sqlite_vec
+
+from memoria.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL_NAME, EmbedFn
 from memoria.records import NormalizedRecord, real_paragraphs, read_all
 from memoria.repository import Repository
 from memoria.subjects import (
@@ -94,6 +97,19 @@ INDEX_RELATIVE_PATH = ".memoria/index.db"
 # (`memoria.subjects.OverlayAct`), because "preserved by a rebuild" is not
 # the same guarantee as "survives `.memoria/` being deleted outright", which
 # is what part 04 §42 actually demands of an attributed author act.
+#
+# `memoria.audit` (#37) adds two more kinds to the same table: `engagement`
+# and `audit_verdict`, the manuscript's own memoized judgements - the *other*
+# half of §8.12's "one cache, two key compositions" (the extraction's
+# paragraph/cluster_summary split is the first). Unlike the extraction's
+# rows, `memoria.audit` *does* look a judgement up by `anchor` - not to
+# decide a cache hit (the composed `key` still does that alone), but to find
+# the most recent prior judgement at a manuscript position when a key misses,
+# which is how it tells "never audited" apart from "edited since" (there is
+# nothing durable to join against otherwise: §4.1 forbids a stable pointer
+# into a passage, so the anchor there is a paragraph's position within its
+# section's `draft.md`, recomputed fresh on every call rather than stored
+# anywhere else - an aid to diagnosis, not a citation).
 PRESERVED_TABLES = ("memoria_schema", "memo")
 
 # Everything else. Dropped and regenerated on every `memoria rebuild`, which
@@ -114,6 +130,7 @@ DERIVED_TABLES = (
     "cluster_paragraphs",
     "extraction_meta",
     "appearances",
+    "paragraph_vectors",
 )
 
 # Bumped when the *shape* of a memo row changes in a way that makes an
@@ -121,6 +138,18 @@ DERIVED_TABLES = (
 # prompt change moves every key instead (memoria.extraction), which is a
 # miss rather than a corruption, and the old rows sit inert.
 MEMO_SCHEMA_VERSION = "1"
+
+# The column list `memo` is created with, and the one `_widen_memo_kinds`
+# rewrites a pre-#37 table into - one definition, so they cannot drift.
+_MEMO_COLUMNS = (
+    "key TEXT PRIMARY KEY, "
+    "kind TEXT NOT NULL CHECK (kind IN ("
+    "'paragraph', 'cluster_summary', 'engagement', 'audit_verdict'"
+    ")), "
+    "anchor TEXT NOT NULL DEFAULT '', "
+    "value TEXT NOT NULL, "
+    "written_at TEXT NOT NULL"
+)
 
 _PRESERVED_DDL = (
     "CREATE TABLE IF NOT EXISTS memoria_schema("
@@ -132,13 +161,7 @@ _PRESERVED_DDL = (
     # membership, and what makes an orphaned row (a paragraph that was
     # renormalized out from under it) inert rather than wrong - nothing ever
     # looks a row up by `anchor`.
-    "CREATE TABLE IF NOT EXISTS memo("
-    "key TEXT PRIMARY KEY, "
-    "kind TEXT NOT NULL CHECK (kind IN ('paragraph', 'cluster_summary')), "
-    "anchor TEXT NOT NULL DEFAULT '', "
-    "value TEXT NOT NULL, "
-    "written_at TEXT NOT NULL"
-    ")",
+    "CREATE TABLE IF NOT EXISTS memo(" + _MEMO_COLUMNS + ")",
     "CREATE INDEX IF NOT EXISTS memo_kind_anchor ON memo(kind, anchor)",
 )
 
@@ -257,6 +280,19 @@ _DERIVED_DDL = (
     "PRIMARY KEY (entry_id, anchor)"
     ")",
     "CREATE INDEX IF NOT EXISTS appearances_entry ON appearances(entry_id)",
+    # The semantic index (#81, ADR-0007): one row per real paragraph, same
+    # key (`anchor`) as `paragraphs` and `records`, in this same database
+    # file - no second store. `embedding` is fixed-width at
+    # `EMBEDDING_DIMENSIONS` because `EMBEDDING_MODEL_NAME` is the one
+    # embedder this build ships (`memoria.embeddings`); a future model with a
+    # different width would need a new table, not a wider column. Always
+    # created, whether or not `build_index` is ever asked to populate it
+    # (`embed_fn=None` is the default) - an empty vector table is the same
+    # "not built yet" state `search_semantic` already has to handle for a
+    # missing `.memoria/index.db` entirely.
+    "CREATE VIRTUAL TABLE IF NOT EXISTS paragraph_vectors USING vec0("
+    f"anchor TEXT PRIMARY KEY, embedding FLOAT[{EMBEDDING_DIMENSIONS}]"
+    ")",
 )
 
 
@@ -362,6 +398,13 @@ class RebuildReport:
     ``appearances`` is ``AppearancesReport`` (#19) - what the appearances
     pass produced, and what it skipped.
 
+    ``staleness`` is ``memoria.audit.StalenessMap`` (#37) - the whole
+    manuscript's not-current judgements, recomputed against whatever the rest
+    of this rebuild just regenerated. Typed loosely, like ``counts``, to keep
+    this module's imports one-way: ``memoria.audit`` imports this module for
+    ``connect``/``gather``, so the reverse import has to stay inside
+    ``rebuild`` rather than at module scope.
+
     ``elapsed_seconds`` is wall-clock time over the whole function (#21's
     "reports what it regenerated and how long it took"), timed with
     ``time.monotonic`` rather than ``time.time`` so a clock adjustment
@@ -371,6 +414,7 @@ class RebuildReport:
     records: list[NormalizedRecord]
     counts: object
     appearances: AppearancesReport
+    staleness: object
     elapsed_seconds: float
 
 
@@ -379,8 +423,21 @@ def build_index(
     records: list[NormalizedRecord],
     *,
     reset_cache: bool = False,
+    embed_fn: EmbedFn | None = None,
 ) -> None:
     """(Re)build the derived tables in ``repository``'s index from ``records``.
+
+    ``embed_fn`` populates the semantic index (#81, ADR-0007) - one call over
+    every real paragraph's text, batched rather than per-paragraph, since a
+    local model still costs more per call than a wider one. Left ``None``
+    (the default), the ``paragraph_vectors`` table is still created but stays
+    empty, the same "not built yet" state a fresh clone's whole index is in.
+    **This default is deliberate, not an oversight**: part 08 §12.1's
+    "nothing that needs a model runs unasked" is what keeps this a plain
+    parameter a caller supplies rather than this function reaching for
+    ``memoria.embeddings.default_embed_fn`` itself - the CLI's ``memoria
+    rebuild`` is the one caller that does, so the every-`build_index`-call
+    test suite this repository already has never triggers a real model load.
 
     Takes the frozen ``Repository`` value, like ``search`` and every other
     core function that names a location (ADR-0004): the index path is a fact
@@ -419,11 +476,17 @@ def build_index(
 
     con = sqlite3.connect(db_path)
     try:
+        _load_vec_extension(con)
         _ensure_preserved(con)
         for table in DERIVED_TABLES:
             con.execute(f"DROP TABLE IF EXISTS {table}")
         for statement in _DERIVED_DDL:
             con.execute(statement)
+        # Collected alongside the insert loop rather than re-read afterwards
+        # - every real paragraph's anchor and text are already in hand here,
+        # and a second pass over `records` would just recompute
+        # `real_paragraphs` for nothing.
+        to_embed: list[tuple[str, str]] = []
         for record in records:
             # A pdf page marker earns no index row (docs/
             # normalized-record-schema.md, "pdf page markers are not
@@ -453,9 +516,35 @@ def build_index(
                         record.email_to,
                     ),
                 )
+                if embed_fn is not None:
+                    to_embed.append((anchor, paragraph))
+        if to_embed:
+            vectors = embed_fn([text for _, text in to_embed])
+            for (anchor, _text), vector in zip(to_embed, vectors):
+                con.execute(
+                    "INSERT INTO paragraph_vectors (anchor, embedding) "
+                    "VALUES (?, ?)",
+                    (anchor, sqlite_vec.serialize_float32(list(vector))),
+                )
         con.commit()
     finally:
         con.close()
+
+
+def _load_vec_extension(con: sqlite3.Connection) -> None:
+    """Register ``sqlite-vec``'s ``vec0`` module on ``con``.
+
+    Needed before *any* statement that names ``paragraph_vectors`` -
+    including the ``CREATE VIRTUAL TABLE IF NOT EXISTS`` in ``_DERIVED_DDL``
+    and the ``DROP TABLE`` that precedes it - so every function that runs
+    those (``build_index``, ``connect``) calls this first. Loading costs a
+    few milliseconds and no network; it is not the same event as
+    ``memoria.embeddings.default_embed_fn``'s model load, which is the one
+    that reaches the network.
+    """
+    con.enable_load_extension(True)
+    sqlite_vec.load(con)
+    con.enable_load_extension(False)
 
 
 def _ensure_preserved(con: sqlite3.Connection) -> None:
@@ -471,6 +560,7 @@ def _ensure_preserved(con: sqlite3.Connection) -> None:
     """
     for statement in _PRESERVED_DDL:
         con.execute(statement)
+    _widen_memo_kinds(con)
     row = con.execute(
         "SELECT value FROM memoria_schema WHERE key = 'memo_version'"
     ).fetchone()
@@ -488,6 +578,36 @@ def _ensure_preserved(con: sqlite3.Connection) -> None:
             "automatically - rebuild with --reset-cache to throw it away and "
             "re-run the extraction, or use a build that reads this version."
         )
+
+
+def _widen_memo_kinds(con: sqlite3.Connection) -> None:
+    """Rewrite a ``memo`` table built before #37 so it accepts the two
+    judgement kinds, keeping every row.
+
+    ``memo`` is preserved, so ``rebuild`` never drops it, and ``CREATE TABLE
+    IF NOT EXISTS`` leaves an existing table exactly as it is - which means
+    the old two-kind CHECK constraint would otherwise survive forever and
+    the first ``memoria.audit`` write would fail with a bare
+    ``sqlite3.IntegrityError``. The rows are model output the author paid
+    for, so this is not a ``MEMO_SCHEMA_VERSION`` bump (that forces
+    ``--reset-cache``): it is a lossless copy into the current DDL. SQLite
+    cannot alter a CHECK in place, hence create-copy-drop-rename.
+    """
+    row = con.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memo'"
+    ).fetchone()
+    if row is None or "'engagement'" in row[0]:
+        return
+    con.execute("DROP TABLE IF EXISTS memo_widened")
+    con.execute("CREATE TABLE memo_widened(" + _MEMO_COLUMNS + ")")
+    con.execute(
+        "INSERT INTO memo_widened (key, kind, anchor, value, written_at) "
+        "SELECT key, kind, anchor, value, written_at FROM memo"
+    )
+    con.execute("DROP TABLE memo")
+    con.execute("ALTER TABLE memo_widened RENAME TO memo")
+    con.execute("CREATE INDEX IF NOT EXISTS memo_kind_anchor ON memo(kind, anchor)")
+    con.commit()
 
 
 def _check_paragraphs_shape(con: sqlite3.Connection) -> None:
@@ -533,6 +653,7 @@ def connect(repository: Repository) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(db_path)
     try:
+        _load_vec_extension(con)
         _ensure_preserved(con)
         for statement in _DERIVED_DDL:
             con.execute(statement)
@@ -548,9 +669,12 @@ def filter_predicate(filters: SearchFilters | None) -> tuple[str, list]:
     """One predicate builder, turning a ``SearchFilters`` into a SQL ``WHERE``
     fragment and its params against the plain ``paragraphs`` table.
 
-    Reusable by any query joined to that table, FTS5 or not: ``search()``
-    joins FTS5 hits to it, and #81/#74 are expected to join a vector search
-    and cluster membership to it the same way.
+    Reusable by any query that can reach ``paragraphs``, FTS5 or not:
+    ``search()`` joins FTS5 hits to it directly, ``extraction.search_global``
+    joins cluster membership to it the same way, and ``search_semantic``
+    (#81) applies this same fragment as a subquery instead of a join -
+    ``sqlite-vec``'s KNN operator refuses to run at all once its query is
+    joined to another table.
 
     Returns ``("", [])`` when no filter is set, so a caller can always append
     ``f"AND {sql}"`` when ``sql`` is truthy rather than branching itself.
@@ -671,11 +795,171 @@ def search(
     ]
 
 
+# --- search_semantic (#81, ADR-0007) -----------------------------------------
+
+# vec0's KNN operator refuses a query with no bound on how many rows it may
+# return (`sqlite-vec` raises rather than scanning the whole table), unlike
+# FTS5's `MATCH`, which already narrows to the rows that matched. A plain
+# constant here, not a caller argument - `search_semantic(query, filters)` is
+# the forced signature (docs/tool-surface.md) and takes no `limit`.
+SEMANTIC_SEARCH_LIMIT = 20
+
+
+@dataclass(frozen=True)
+class SemanticSearchResult:
+    """What one ``search_semantic`` call returns: ranked hits, and the
+    §33-style scope line naming what was embedded and what was searched
+    (part 11 §25, §33.1) - see ``_semantic_scope_line``.
+
+    ``results`` is ``SearchResult``, the same triple ``search`` and
+    ``search_global`` return - no second result type, and no score field on
+    it either (docs/tool-surface.md's "Key interfaces"): a caller reads
+    nearer-first ordering from the list itself, the way ``search``'s FTS5
+    ``rank`` ordering already works with no score exposed.
+    """
+
+    results: tuple[SearchResult, ...]
+    scope: str
+
+
+def _semantic_filters_clause(filters: SearchFilters | None) -> str:
+    """A compact, deterministic naming of which filters constrained one call
+    - #81's own acceptance criteria ask the scope line to *name* the filters
+    applied, not just count hits. ``"none"`` rather than an absent clause
+    when nothing was set, the same "printed, not omitted" discipline
+    ``render_overlay`` (#20) already keeps for an empty overlay. ``level``
+    is skipped - ``search_semantic`` never consults it, the same way
+    ``filter_predicate`` itself does not (``SearchFilters``'s own
+    docstring).
+    """
+    if filters is None:
+        return "none"
+    active = {
+        field: value
+        for field, value in asdict(filters).items()
+        if field != "level" and value is not None
+    }
+    if not active:
+        return "none"
+    return ", ".join(f"{field}={value}" for field, value in sorted(active.items()))
+
+
+def _semantic_scope_line(
+    embedded: int, matched: int, filters: SearchFilters | None
+) -> str:
+    """§33.1: "an index reports nothing about its own recall" - the one
+    place a session can say what the semantic index actually covered, since
+    nothing else about a vector hit says so. Named the same way even when
+    both counts are zero (no index built yet, or nothing matched under the
+    filters), rather than falling silent - the same discipline
+    ``index._scope_line`` and ``extraction.search_global`` already keep for
+    the cluster tool's own scope line.
+    """
+    paragraph_word = "paragraph" if embedded == 1 else "paragraphs"
+    hit_word = "hit" if matched == 1 else "hits"
+    return (
+        f"embedded {embedded} {paragraph_word} with {EMBEDDING_MODEL_NAME}; "
+        f"filters: {_semantic_filters_clause(filters)}; "
+        f"{matched} semantic {hit_word}"
+    )
+
+
+def search_semantic(
+    repository: Repository,
+    query: str,
+    filters: SearchFilters | None = None,
+    *,
+    embed_fn: EmbedFn,
+) -> SemanticSearchResult:
+    """Nearest-neighbour search over the semantic index, ranked nearest
+    first.
+
+    Takes the frozen ``Repository`` value and the §25 ``SearchFilters``
+    exactly as ``search`` does (docs/tool-surface.md's "Key interfaces": the
+    filter representation is #12's, not a new one), reusing
+    ``filter_predicate`` against the same ``paragraphs`` table - a hit must
+    also satisfy every filter ``search_text`` would apply to it, checked as a
+    subquery over ``paragraphs`` rather than a join, since ``sqlite-vec``'s
+    KNN operator only accepts a plain ``LIMIT``/``k`` constraint on a query
+    against the vector table directly (a join defeats its query-planner
+    detection and it refuses to run at all).
+
+    ``embed_fn`` is required, not defaulted to ``memoria.embeddings.
+    default_embed_fn`` here - the same "no model runs unasked" reasoning
+    ``build_index`` documents, and it also keeps every call site naming its
+    embedder explicitly rather than one hidden inside this module a test
+    would have to know to monkeypatch. The MCP tool (``search_semantic``)
+    supplies the real one; a core test supplies a deterministic fake.
+
+    A missing index, or one with nothing embedded yet (``build_index`` ran
+    with no ``embed_fn``), returns no results without calling ``embed_fn`` at
+    all - there is nothing to compare a query vector against, so nothing
+    pays for computing one. This is the same "not built yet" answer
+    ``search`` gives for a missing ``.memoria/index.db`` (§7's "the corpus is
+    not built is an answer, not a driver exception"), just also covering the
+    narrower case where the index exists but the vector table does not.
+    """
+    db_path = repository.root / INDEX_RELATIVE_PATH
+    if not db_path.exists():
+        return SemanticSearchResult(
+            results=(), scope=_semantic_scope_line(0, 0, filters)
+        )
+    con = sqlite3.connect(db_path)
+    try:
+        _load_vec_extension(con)
+        _check_paragraphs_shape(con)
+        embedded = con.execute("SELECT COUNT(*) FROM paragraph_vectors").fetchone()[0]
+        if not embedded:
+            return SemanticSearchResult(
+                results=(), scope=_semantic_scope_line(0, 0, filters)
+            )
+        [query_vector] = embed_fn([query])
+        predicate, predicate_params = filter_predicate(filters)
+        sql = (
+            "SELECT anchor FROM paragraph_vectors WHERE embedding MATCH ?"
+        )
+        params: list = [sqlite_vec.serialize_float32(list(query_vector))]
+        if predicate:
+            sql += f" AND anchor IN (SELECT anchor FROM paragraphs WHERE {predicate})"
+            params.extend(predicate_params)
+        sql += " ORDER BY distance LIMIT ?"
+        params.append(SEMANTIC_SEARCH_LIMIT)
+        anchors = [row[0] for row in con.execute(sql, params).fetchall()]
+        if not anchors:
+            return SemanticSearchResult(
+                results=(), scope=_semantic_scope_line(embedded, 0, filters)
+            )
+        placeholders = ",".join("?" for _ in anchors)
+        by_anchor = {
+            row[0]: (row[1], row[2])
+            for row in con.execute(
+                "SELECT anchor, src_id, source_type FROM paragraphs "
+                f"WHERE anchor IN ({placeholders})",
+                anchors,
+            )
+        }
+    finally:
+        con.close()
+    # Ordered by nearest-first, per `anchors` - `by_anchor` is an unordered
+    # lookup, so the KNN order (already the return value's contract) has to
+    # be re-applied here rather than trusted to survive the second query.
+    results = tuple(
+        SearchResult(src_id=by_anchor[anchor][0], anchor=anchor, source_type=by_anchor[anchor][1])
+        for anchor in anchors
+        if anchor in by_anchor
+    )
+    return SemanticSearchResult(
+        results=results,
+        scope=_semantic_scope_line(embedded, len(results), filters),
+    )
+
+
 def rebuild(
     repository: Repository,
     *,
     recurrence_threshold: int | None = None,
     reset_cache: bool = False,
+    embed_fn: EmbedFn | None = None,
 ) -> RebuildReport:
     """Delete and regenerate all derived state from evidence, losing nothing.
 
@@ -706,10 +990,16 @@ def rebuild(
     (``extraction.finish_pass``), never to a command whose contract is that
     everything it touches is disposable. This function never names
     ``auto_promote``, and a test holds that.
+
+    ``embed_fn`` passes straight through to ``build_index`` - see its
+    docstring for why this stays ``None`` (skip the semantic index) by
+    default rather than reaching for ``memoria.embeddings.default_embed_fn``
+    itself. The CLI's ``memoria rebuild`` command is the caller that supplies
+    it.
     """
     started = time.monotonic()
     records = read_all(repository)
-    build_index(repository, records, reset_cache=reset_cache)
+    build_index(repository, records, reset_cache=reset_cache, embed_fn=embed_fn)
     # Imported here rather than at module scope: `memoria.extraction` imports
     # this module for the schema and the connection, so the module-level
     # direction has to stay one-way. Nothing else is fetched from it - an
@@ -723,10 +1013,20 @@ def rebuild(
             repository, recurrence_threshold=recurrence_threshold
         )
     appearances_report = compute_appearances(repository)
+    # Imported here for the same reason as `extraction` above: `memoria.audit`
+    # imports this module (`connect`, `gather`), so the reverse direction
+    # stays confined to this function rather than module scope. The map
+    # itself needs nothing this function produced above other than a fresh
+    # index to read `gather` from - it is a hash comparison over whatever is
+    # now on disk, not a consumer of `counts` or `appearances_report`.
+    from memoria import audit
+
+    staleness_map = audit.compute_staleness_map(repository)
     return RebuildReport(
         records=records,
         counts=counts,
         appearances=appearances_report,
+        staleness=staleness_map,
         elapsed_seconds=time.monotonic() - started,
     )
 
@@ -1266,3 +1566,22 @@ def list_appearances(repository: Repository, entry_id: str) -> list[Appearance]:
     finally:
         con.close()
     return [Appearance(src_id=src_id, anchor=anchor, note=note) for src_id, anchor, note in rows]
+
+
+def appeared_entry_ids(repository: Repository) -> frozenset[str]:
+    """Every entry with at least one row in the ``appearances`` table -
+    ``list_appearances``'s query collapsed to entry identity alone, for a
+    caller (drift detection, #41) that needs to know which entries the
+    manuscript prose touches at all, not the passages themselves.
+
+    A missing index - every fresh clone - returns no results, matching
+    ``list_appearances``."""
+    db_path = repository.root / INDEX_RELATIVE_PATH
+    if not db_path.exists():
+        return frozenset()
+    con = connect(repository)
+    try:
+        rows = con.execute("SELECT DISTINCT entry_id FROM appearances").fetchall()
+    finally:
+        con.close()
+    return frozenset(row[0] for row in rows)

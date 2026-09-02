@@ -328,7 +328,7 @@ def checkpoint(repository: Repository) -> CheckpointResult:
     it commits under this process's own git identity rather than one a
     caller supplies - the same identity an ordinary `git commit` would use.
     """
-    dirty = _dirty_durable_paths(repository)
+    dirty = dirty_tracked_paths(repository, DURABLE_PATHS)
     if not dirty:
         return NoChanges()
     env = dict(os.environ)
@@ -339,14 +339,25 @@ def checkpoint(repository: Repository) -> CheckpointResult:
     return Checkpointed(change_id=change_id, files=tuple(dirty))
 
 
-def _dirty_durable_paths(repository: Repository) -> list[str]:
-    """Tracked files under a durable state class that carry uncommitted
-    modifications - staged or not. Scoped to `DURABLE_PATHS` as pathspecs,
-    so Evidence, Interaction record and Derived state never appear in the
-    result no matter how dirty they are; `??` (untracked) lines are dropped
-    explicitly, since a checkpoint never adds a new file."""
+def dirty_tracked_paths(
+    repository: Repository, paths: tuple[str, ...] = ()
+) -> list[str]:
+    """Tracked files with uncommitted modifications - staged or not -
+    scoped to `paths` (pathspecs) when given, or the whole repository
+    otherwise. `??` (untracked) lines are dropped either way: the
+    dirty-tree rule is about work in progress on files git already tracks,
+    not about scratch files nobody has staged.
+
+    Shared by `checkpoint` - scoped to `DURABLE_PATHS`, so Evidence,
+    Interaction record and Derived state never appear in its result no
+    matter how dirty they are - and the record extractor's own per-write
+    guard (#30, part 08 §14.2), which is deliberately unscoped: "the
+    extractor never runs against a repository with uncommitted human
+    modifications" names the whole repository, not just the classes this
+    module writes.
+    """
     result = subprocess.run(
-        ["git", "status", "--porcelain", "--", *DURABLE_PATHS],
+        ["git", "status", "--porcelain", *(["--", *paths] if paths else [])],
         cwd=repository.root,
         capture_output=True,
         text=True,
@@ -356,15 +367,15 @@ def _dirty_durable_paths(repository: Repository) -> list[str]:
             part.strip() for part in (result.stdout, result.stderr) if part.strip()
         )
         raise WriteError(f"git status failed: {reason}")
-    paths = []
+    found = []
     for line in result.stdout.splitlines():
         if not line or line.startswith("??"):
             continue
         path = line[3:]
         if " -> " in path:
             path = path.split(" -> ", 1)[1]
-        paths.append(path)
-    return paths
+        found.append(path)
+    return found
 
 
 def _git(

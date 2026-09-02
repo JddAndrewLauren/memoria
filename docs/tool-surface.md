@@ -14,7 +14,7 @@ a gap nobody noticed.
 | `read(ref)` | **Forced** — issue #11, below |
 | `search_text(query, filters)` | **Forced** — issue #12, below |
 | `search_global(query, filters, summarize)` | **Forced** — issue #74, below |
-| `search_semantic(query, filters)` | Open — issue #81, scheduled for M2 (ADR-0007): a `sqlite-vec` table in the index file, a local CPU model at rebuild |
+| `search_semantic(query, filters)` | **Forced** — issue #81, below |
 | `expand`, `timeline`, `grep_repo`, `trace`, `backlinks`, `list` | Open; §25 does not commit to shipping them |
 
 ## Maintainer-class tools (ADR-0005, issue #17)
@@ -192,6 +192,10 @@ enumeration of kinds, and had already drifted.
 | `CHP-0001` | that chapter's brief, verbatim | part 04 §2.1 / #35 |
 | `SEC-0001` | that section's brief, verbatim | part 04 §2.1 / #35 |
 | `CHG-20261014-003` | the §11 projection of that human-authored commit | part 04 §4 / ADR-0008 |
+| `SES-20260912-1432` | that session's whole transcript, verbatim, plus its context manifest | part 04 §4 / #28, #29 |
+| `SES-20260912-1432#T017` | that transcript turn's text alone | part 04 §4 / #28 |
+| `DEC-0088` | that decision's `decisions.md` block, verbatim | part 04 §4 / #30 |
+| `RES-20261018-003` | that research memo, verbatim | part 04 §4 / #30 |
 
 The bare anchor is accepted deliberately. `SearchResult` carries
 `(src_id, anchor, source_type)`, so a search hit feeds straight back into
@@ -300,6 +304,20 @@ reason a full-source `SRC-` read is (issue #16). An entry read resolves by
 its frontmatter `id` rather than by filename, so a renamed entry file still
 answers to the `SUB-x/y` it was created with.
 
+**A bare `SES-` read carries the whole `transcript.md`, verbatim** (#28),
+**plus its context manifest** (#29) — a second `---`-delimited block
+appended after the text, the same convention the curated overlay (#20)
+established for a `SRC-` paragraph. Built live from `events.jsonl`, not from
+a prior derivation of `context-manifest.json` having run: which records were
+loaded, which entries were resolved, which searches ran and which of their
+hits were also read, and a token count per item (ADR-0001) — never rendered
+by this tool as an author-facing figure, because the model reading its own
+session is not one of the surfaces part 14 §40 bans them from. **A
+`SES-...#T017` read returns just that turn's text** — the same "a paragraph
+read gives back the paragraph, not the record" split a `SRC-` paragraph
+reference makes, and carries no manifest: a turn cites what was said, not
+what was supplied.
+
 **`raw=True` serves the least-processed version of what it is given** — one
 parameter, two shapes, dispatched on whether the `SRC-` reference names a
 paragraph:
@@ -339,11 +357,11 @@ gives.
 ### What it refuses, and how
 
 Reference kinds part 04 §4 defines but this build does not resolve —
-`SES-` (with or without a `#T` turn), `CLM-`, `RES-`, `DEC-` — return an
-error **naming the kind**, never a silent empty result. A kind that is not
-part of the scheme at all is named too, and distinguished from one that is
-merely unbuilt. `SUB-x` and `SUB-x/y` were on this list until issue #16, and
-`CHG-` until ADR-0008.
+`CLM-` — return an error **naming the kind**, never a silent
+empty result. A kind that is not part of the scheme at all is named too, and
+distinguished from one that is merely unbuilt. `SUB-x` and `SUB-x/y` were on
+this list until issue #16, `CHG-` until ADR-0008, `SES-` (with or without a
+`#T` turn) until #28, and `RES-`/`DEC-` until #30.
 
 Errors reach the model as `ToolError`, which is the SDK's anticipated-failure
 type: the call comes back `is_error` with the message intact. Any other
@@ -371,8 +389,8 @@ FTS5 index (`memoria.index`), the other half of what §7's superset-of-grep
 constraint needs alongside `read`.
 
 **FTS5 and nothing else.** ADR-0007 admitted embeddings by choice, but
-`search_semantic` (#81) is a separate tool over a separate `sqlite-vec`
-table, scheduled for M2; ADR-0005's extraction is a candidate engine, not a
+`search_semantic` (#81, below) is a separate tool over a separate
+`sqlite-vec` table; ADR-0005's extraction is a candidate engine, not a
 search index (`docs/open-problems.md` §2.2: "`search_text` stays FTS5").
 This tool's result set is FTS5 hits, and cluster summaries are never served
 here as evidence.
@@ -501,6 +519,117 @@ answers "the corpus is not built" rather than raising
 Search over the full corpus returns in well under a second — a test asserts
 it against a synthetic multi-thousand-paragraph index.
 
+## `search_semantic(query, filters)` — forced 2026-09-02, issue #81
+
+```
+search_semantic(query: str, filters: SearchFilters | None = None) -> str
+```
+
+The nearest-neighbour half of retrieval (ADR-0007), beside `search_text`'s
+lexical one: a paragraph whose wording differs from the query but whose
+meaning is close to it is unreachable by FTS5's `MATCH`, and this is what
+reaches it. `docs/adr/0007-embeddings-enter-by-choice.md` settles the
+mechanism and is the contract this section serializes.
+
+### One store, populated at rebuild
+
+A `sqlite-vec` `vec0` virtual table, `paragraph_vectors(anchor, embedding)`,
+beside the FTS5 `records` table in the same `.memoria/index.db` file — no
+second store, no vector database, no additional process. `memoria.index.
+build_index` creates it unconditionally (empty tables cost nothing) and
+populates it only when given an embedder (`embed_fn`); `memoria rebuild` —
+the actual "at rebuild" moment the ADR names — is the one caller that
+supplies the real one (`memoria.embeddings.default_embed_fn`), so deleting
+`.memoria/index.db` removes the vector table exactly as it removes the FTS5
+one, with no separate CLI verb or lifecycle (§42).
+
+`build_index`'s own default is `embed_fn=None` — skip — not the real
+embedder, and this is a deliberate reading of part 08 §12.1's "nothing that
+needs a model runs unasked", not an oversight: `build_index` is called
+directly by most of this repository's own test suite, over fixture records,
+and none of those calls should pay for or need a model. `search_semantic`'s
+`embed_fn` is required outright, with no default at all, for the same
+reason — every call site (the MCP tool, a core test, `tests/
+test_labelled_queries.py`) names its embedder explicitly rather than one
+hidden inside `memoria.index` a test would have to know to monkeypatch.
+
+### The embedder: a seam with exactly one implementation
+
+`bge-small-en-v1.5` through `fastembed`, run on CPU through `onnxruntime` —
+no `torch`, no GPU, matching ADR-0007's "production has no GPU". Nothing
+here is user-configurable; `memoria.embeddings.default_embed_fn` is the one
+production implementation, pinned by name (`EMBEDDING_MODEL_NAME`) and, in
+`pyproject.toml`, by exact version — `sqlite-vec` is pinned the same way,
+being pre-1.0. What the module offers a caller instead of a choice of model
+is the substitution point itself: every function that needs an embedder
+takes one as a plain callable (`EmbedFn`) rather than reaching for this
+module directly, so `tests/test_index.py` and `tests/test_mcp_server.py`
+hand it a deterministic fake — fixed basis vectors, never `fastembed` — and
+the full test suite runs with no network and no GPU. Only
+`default_embed_fn` itself reaches the network, the first time anything
+calls it: `fastembed`'s `TextEmbedding` downloads the model's ONNX weights
+from the Hugging Face Hub on first use, which is why nothing in this
+package's own test suite calls it.
+
+### The filters are #12's, not a new representation
+
+Reuses `SearchFilters` and `memoria.index.filter_predicate` exactly as
+`search_text` does (above), applied as a subquery — `anchor IN (SELECT
+anchor FROM paragraphs WHERE {predicate})` — rather than a join, because
+`sqlite-vec`'s KNN operator only accepts a plain `LIMIT`/`k` constraint on a
+query against the vector table directly; joining it to `paragraphs` defeats
+the library's query-planner detection and it refuses to run at all.
+Reachable without the MCP server, exercised directly by `tests/
+test_index.py`, the same shape `search_text`'s core function has.
+
+### What it returns
+
+The same `SearchResult` triple `search_text` and `search_global` return —
+no second result type, and no score field added to the shared one either,
+since `search_text`'s FTS5 path does not have one. Ranked nearest first;
+`SEMANTIC_SEARCH_LIMIT` (20) bounds how many come back, because `sqlite-vec`'s
+KNN operator requires a bound and, unlike FTS5's `MATCH`, always returns its
+`k` nearest rows regardless of how distant the furthest of them actually is
+— there is no "no match" state below the limit, only fewer embedded
+paragraphs than it.
+
+Cluster summaries are never embedded, and cannot be: `build_index`'s
+embedding loop walks each `NormalizedRecord`'s real paragraphs only, the
+same collection point that feeds the FTS5 `records` table, and never queries
+the `memo` cache at all — a test plants a decoy cluster-summary memo row and
+asserts it never reaches the embedder.
+
+### The scope line names what was embedded and what was searched
+
+Every reply ends with a line in the §33 style — *"embedded 1,842 paragraphs
+with bge-small-en-v1.5; filters: source_type=journal; 20 semantic hits"* —
+because §33.1 is explicit that an index reports nothing about its own recall
+on its own: this is the one place a session can say what the semantic index
+actually covered, the same discipline `search_global`'s scope line already
+keeps for the cluster tool. The filters clause is printed as `none` rather
+than omitted when nothing was set — the same "printed, not omitted"
+discipline `render_overlay` (#20) keeps for an empty overlay — because #81's
+own acceptance criteria ask the line to *name* the filters applied, not
+merely let a reader infer them from the hit count. Named the same way with
+an empty or unbuilt index (`0` and `0`) rather than falling silent.
+
+### Reachable without the MCP server
+
+`memoria.index.search_semantic` is a plain core function over
+`memoria.index.connect`'s `sqlite-vec` extension loading and `memoria.index.
+filter_predicate`, exercised directly by `tests/test_index.py` — the same
+shape `search_text` and `search_global`'s core functions have.
+
+### The labelled query set
+
+`tests/fixtures/labelled_queries.yaml` carries a documented shape and ships
+empty, checked by `tests/test_labelled_queries.py` — part 15 §43.14's
+successor harness, the instrument this ADR chose in place of a pre-registered
+benchmark number. Populating it with real entries is out of scope for #81
+and starts the day a real evidence archive exists to draw queries from
+(`docs/open-problems.md` §2.2); until then the check passes vacuously, by
+construction rather than by a skip.
+
 ## `search_global(query, filters, summarize)` — forced 2026-09-01, issue #74
 
 ```
@@ -613,9 +742,14 @@ alongside this, deliberately appends nothing — author reads are out of scope,
 below.) Each line carries the
 reference or query, the filters, the records served (by `SRC-` ID or
 paragraph anchor — the same identifier `read(ref)` accepts verbatim), a
-timestamp, and the session it belongs to. The file is opened in append mode
-and written one line at a time; nothing here ever reads it back to rewrite
-it.
+timestamp, and the session it belongs to. A `read` line also carries
+`tokens` (#29) — measured from the text actually served, at the moment it
+is served, rather than re-derived later from whatever the evidence looks
+like by then — the development instrument behind `poc-plan.md` §6 risk 1's
+budget-capping experiment (ADR-0001); a `search_text`/`search_global` line
+carries none, since a search serves references, not evidence text. The
+file is opened in append mode and written one line at a time; nothing here
+ever reads it back to rewrite it.
 
 **The path nests by year and month, matching part 04 §2's tree exactly:**
 `sessions/<YYYY>/<MM>/<session_id>/events.jsonl` — the directory #29's

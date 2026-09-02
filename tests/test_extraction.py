@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 
 import pytest
+import sqlite_vec
 
 from memoria import extraction as ex
 from memoria.index import (
@@ -84,6 +85,9 @@ def _memo(repository, anchor, **kwargs):
 
 def _rows(repository, table):
     con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.enable_load_extension(True)
+    sqlite_vec.load(con)
+    con.enable_load_extension(False)
     try:
         return con.execute(f"SELECT * FROM {table}").fetchall()
     finally:

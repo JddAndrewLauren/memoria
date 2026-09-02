@@ -1,0 +1,41 @@
+# The labelled query set (#81; docs/adr/0007-embeddings-enter-by-choice.md;
+# docs/plan/15-validation-and-health.md §43.14; docs/open-problems.md §2.2).
+#
+# The successor retrieval-recall instrument: whether search finds evidence
+# "when the wording diverges" is unobservable from a miss alone (part 11
+# §33.1 - "an index reports nothing about its own recall"), so the only way
+# to turn a semantic-search failure into a number is to grow a set of real
+# queries with known-good answers and check `search_semantic` against them.
+#
+# Checked by tests/test_labelled_queries.py.
+#
+# Empty until a real evidence archive exists to draw entries from
+# (docs/open-problems.md §2.4/§2.2) - populating it is explicitly out of
+# scope for #81 and starts the day that archive arrives. An empty list is
+# the expected state, not a placeholder for a TODO; the check passes over it
+# vacuously (part 16 M2: "search_semantic built against fixtures").
+#
+# Shape - a YAML list, one entry per query:
+#
+#   id: a short, stable label for the query, so a regression names what
+#     broke rather than pointing at a line number
+#   query: the text sent to search_semantic
+#   filters: optional - a mapping of SearchFilters fields (event_date,
+#     recorded_date, source_type, contemporaneous, from_, to); omitted
+#     fields default to None, same as SearchFilters itself
+#   expected_anchors: paragraph anchors search_semantic must recall at
+#     least one of, among its SEMANTIC_SEARCH_LIMIT nearest hits, for this
+#     query to count as a hit - the ground truth
+#
+# Example (not live data - this file ships empty):
+#
+#   - id: heron-sighting
+#     query: a wading bird seen low over the water
+#     expected_anchors: [src-000184-p3]
+#   - id: acquisition-mentioned-by-a-third-party
+#     query: word going around that the company might be bought
+#     filters:
+#       contemporaneous: true
+#     expected_anchors: [src-000512-p9, src-000513-p2]
+
+[]

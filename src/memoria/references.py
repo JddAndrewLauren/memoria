@@ -45,6 +45,48 @@ _BARE_SECTION_ID = re.compile(rf"^(?P<id>{_SECTION_ID})$", re.IGNORECASE)
 _CHANGE_ID = r"CHG-\d{8}-\d{3}"
 _BARE_CHANGE_ID = re.compile(rf"^(?P<id>{_CHANGE_ID})$", re.IGNORECASE)
 
+# An author decision (#30, part 04 §4): a flat four-digit sequence, the same
+# style `CHP-`/`SEC-` already use - `DEC-0088` - rather than `RES-`'s
+# per-day one. Decisions live inside one running `decisions.md`, not one
+# file each, so unlike `RES-` there is no natural per-day bucket to count
+# within.
+_DECISION_ID = r"DEC-\d{4}"
+_BARE_DECISION_ID = re.compile(rf"^(?P<id>{_DECISION_ID})$", re.IGNORECASE)
+
+# A research memo (#30, part 04 §4): `RES-YYYYMMDD-NNN`, the same per-day
+# sequence `CHG-` was given to match (part 04 §4's own note: the `CHG-` form
+# was chosen "as a `RES-` ID already uses").
+_RESEARCH_MEMO_ID = r"RES-\d{8}-\d{3}"
+_BARE_RESEARCH_MEMO_ID = re.compile(rf"^(?P<id>{_RESEARCH_MEMO_ID})$", re.IGNORECASE)
+
+# A derived session record (#28, part 04 §4): `SES-YYYYMMDD-HHMM`, plus the
+# optional random suffix `memoria.ledger` mints to keep two servers spawned
+# in the same minute from colliding. The date and time are canonicalised to
+# upper case like every other kind here (they are digits, so that only ever
+# touches the `SES` keyword); the suffix is kept in its own group and never
+# case-folded, because it is lower-case hex as generated
+# (`secrets.token_hex`) and upper-casing it would send a lookup after a
+# directory that does not exist.
+_SESSION_ID = (
+    r"SES-(?P<ses_date>\d{8})-(?P<ses_time>\d{4})(?:-(?P<ses_suffix>[0-9a-fA-F]+))?"
+)
+_BARE_SESSION_ID = re.compile(rf"^{_SESSION_ID}$", re.IGNORECASE)
+# The turn fragment. Case-insensitive on both letters: `#T017` is part 04
+# §4's citation form, `#t017` is the lower-case anchor-tag form its own
+# markdown-link example uses (the same split `_ANCHOR`/anchor id already
+# makes for `SRC-000184 P17` vs `src-000184-p17`).
+_SESSION_TURN = re.compile(rf"^{_SESSION_ID}#T(?P<turn>\d+)$", re.IGNORECASE)
+
+
+def _canonical_session_id(match: re.Match) -> str:
+    """The session id a session match carries, upper-cased except for its
+    suffix (see ``_SESSION_ID`` above)."""
+    canonical = f"SES-{match.group('ses_date')}-{match.group('ses_time')}"
+    suffix = match.group("ses_suffix")
+    if suffix:
+        canonical = f"{canonical}-{suffix}"
+    return canonical
+
 # The prose citation form. The pilcrow is what part 04 §4 writes; `P` is
 # accepted alongside it because a model retyping a citation drops a non-ASCII
 # character often enough to matter. A bare number ("SRC-000184 17") is not
@@ -71,10 +113,11 @@ _ID_SHAPED = re.compile(r"^(?P<kind>[A-Z]{2,5})-")
 
 # Kinds part 04 §4 defines that nothing implements yet. Used only to tell
 # "not built yet" from "never heard of it" in the message; the mechanism that
-# rejects them is the shape rule above, not this list. `CHG` and `SUB` are not
-# here: they are implemented, below, and need their own malformed-reference
-# messages rather than the generic "not resolvable in this build yet" one.
-NOT_YET_IMPLEMENTED_KINDS = ("SES", "CLM", "RES", "DEC")
+# rejects them is the shape rule above, not this list. `CHG`, `SUB`, `SES`,
+# `RES` and `DEC` are not here: they are implemented, below, and need their
+# own malformed-reference messages rather than the generic "not resolvable
+# in this build yet" one.
+NOT_YET_IMPLEMENTED_KINDS = ("CLM",)
 
 # A subject or entry slug: lowercase, directory-name shaped (part 04 §2's
 # `subjects/people/bob.md`). Uppercase is refused rather than folded, the
@@ -126,6 +169,34 @@ class ChangeReference:
 
 
 @dataclass(frozen=True)
+class SessionReference:
+    """A derived session record, addressed by its ``SES-`` id (#28), and
+    optionally one transcript turn of it.
+
+    ``turn`` is ``None`` for a bare session reference, which resolves to the
+    whole ``transcript.md``; otherwise it is the 1-based turn number a
+    ``#T017`` fragment names.
+    """
+
+    session_id: str
+    turn: int | None = None
+
+
+@dataclass(frozen=True)
+class DecisionReference:
+    """An author decision, addressed by its stable ``DEC-`` id (#30)."""
+
+    decision_id: str
+
+
+@dataclass(frozen=True)
+class ResearchMemoReference:
+    """A durable research memo, addressed by its stable ``RES-`` id (#30)."""
+
+    memo_id: str
+
+
+@dataclass(frozen=True)
 class SubjectReference:
     """A subject, or one entry under it (part 04 §4's ``SUB-x`` / ``SUB-x/y``).
 
@@ -156,6 +227,9 @@ Reference = (
     | ChapterReference
     | SectionReference
     | ChangeReference
+    | SessionReference
+    | DecisionReference
+    | ResearchMemoReference
     | UnknownReference
 )
 
@@ -227,6 +301,22 @@ def parse(ref: str) -> Reference:
     if match:
         return ChangeReference(match.group("id").upper())
 
+    match = _BARE_DECISION_ID.match(ref)
+    if match:
+        return DecisionReference(match.group("id").upper())
+
+    match = _BARE_RESEARCH_MEMO_ID.match(ref)
+    if match:
+        return ResearchMemoReference(match.group("id").upper())
+
+    match = _SESSION_TURN.match(ref)
+    if match:
+        return SessionReference(_canonical_session_id(match), int(match.group("turn")))
+
+    match = _BARE_SESSION_ID.match(ref)
+    if match:
+        return SessionReference(_canonical_session_id(match))
+
     match = _ID_PARAGRAPH.match(ref)
     if match:
         return SourceReference(match.group("id").upper(), int(match.group("n")))
@@ -281,6 +371,22 @@ def parse(ref: str) -> Reference:
             raise BadReference(
                 f"malformed change reference: {ref!r} - expected a "
                 "CHG-YYYYMMDD-NNN ID like CHG-20261014-003"
+            )
+        if kind.upper() == "DEC":
+            raise BadReference(
+                f"malformed decision reference: {ref!r} - expected a "
+                "four-digit ID like DEC-0088"
+            )
+        if kind.upper() == "RES":
+            raise BadReference(
+                f"malformed research memo reference: {ref!r} - expected a "
+                "RES-YYYYMMDD-NNN ID like RES-20261018-003"
+            )
+        if kind.upper() == "SES":
+            raise BadReference(
+                f"malformed session reference: {ref!r} - expected a "
+                "SES-YYYYMMDD-HHMM ID like SES-20260912-1432, optionally "
+                "with a turn (SES-20260912-1432#T017)"
             )
         if kind.upper() == "SUB":
             # Same call as SRC above: this is a subject reference, and it is
@@ -351,4 +457,12 @@ def format_citation(reference: Reference) -> str:
         return reference.section_id
     if isinstance(reference, ChangeReference):
         return reference.change_id
+    if isinstance(reference, DecisionReference):
+        return reference.decision_id
+    if isinstance(reference, ResearchMemoReference):
+        return reference.memo_id
+    if isinstance(reference, SessionReference):
+        if reference.turn is None:
+            return reference.session_id
+        return f"{reference.session_id}#T{reference.turn:03d}"
     return f"{reference.kind}-"

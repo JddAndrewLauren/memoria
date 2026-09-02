@@ -14,8 +14,11 @@ from memoria.references import (
     BadReference,
     ChangeReference,
     ChapterReference,
+    DecisionReference,
     PathReference,
+    ResearchMemoReference,
     SectionReference,
+    SessionReference,
     SourceReference,
     SubjectReference,
     UnknownReference,
@@ -77,6 +80,93 @@ def test_format_citation_for_a_change_reference():
     assert references.format_citation(ChangeReference("CHG-20261014-003")) == "CHG-20261014-003"
 
 
+# --- SES- session ids and #T turns (#28) -------------------------------------
+
+
+def test_parse_resolves_a_bare_session_id():
+    assert references.parse("SES-20260912-1432") == SessionReference("SES-20260912-1432")
+
+
+def test_parse_resolves_a_session_turn():
+    assert references.parse("SES-20260912-1432#T017") == SessionReference(
+        "SES-20260912-1432", 17
+    )
+
+
+def test_parse_accepts_the_lower_case_anchor_form_of_a_turn():
+    """Part 04 §4's own markdown-link example writes the fragment lower case
+    (`#t017`), the same split `src-000184-p17` already makes from `P17`."""
+    assert references.parse("SES-20260912-1432#t017") == SessionReference(
+        "SES-20260912-1432", 17
+    )
+
+
+def test_parse_is_case_insensitive_for_the_ses_keyword_but_not_the_suffix():
+    """The date/time is case-insensitive like every other kind here, but a
+    generated session id's random suffix is lower-case hex
+    (`secrets.token_hex`) and case-sensitive on disk - upper-casing it would
+    send a lookup after a directory that does not exist."""
+    assert references.parse("ses-20260912-1432-abcdef") == SessionReference(
+        "SES-20260912-1432-abcdef"
+    )
+
+
+def test_a_malformed_session_id_says_so_rather_than_claiming_the_kind_is_unknown():
+    with pytest.raises(BadReference, match="malformed session reference"):
+        references.parse("SES-2026")
+
+
+def test_format_citation_for_a_bare_session_reference():
+    assert references.format_citation(SessionReference("SES-20260912-1432")) == (
+        "SES-20260912-1432"
+    )
+
+
+def test_format_citation_for_a_session_turn():
+    assert references.format_citation(SessionReference("SES-20260912-1432", 17)) == (
+        "SES-20260912-1432#T017"
+    )
+
+
+# --- DEC- decision ids and RES- research memo ids (#30) ----------------------
+
+
+def test_parse_resolves_a_bare_decision_id():
+    assert references.parse("DEC-0088") == DecisionReference("DEC-0088")
+
+
+def test_parse_is_case_insensitive_for_decision_ids():
+    assert references.parse("dec-0088") == DecisionReference("DEC-0088")
+
+
+def test_a_malformed_decision_id_says_so_rather_than_claiming_the_kind_is_unknown():
+    with pytest.raises(BadReference, match="four-digit"):
+        references.parse("DEC-1")
+
+
+def test_format_citation_for_a_decision_reference():
+    assert references.format_citation(DecisionReference("DEC-0088")) == "DEC-0088"
+
+
+def test_parse_resolves_a_bare_research_memo_id():
+    assert references.parse("RES-20261018-003") == ResearchMemoReference("RES-20261018-003")
+
+
+def test_parse_is_case_insensitive_for_research_memo_ids():
+    assert references.parse("res-20261018-003") == ResearchMemoReference("RES-20261018-003")
+
+
+def test_a_malformed_research_memo_id_says_so_rather_than_claiming_the_kind_is_unknown():
+    with pytest.raises(BadReference, match="RES-YYYYMMDD-NNN"):
+        references.parse("RES-20261018-3")
+
+
+def test_format_citation_for_a_research_memo_reference():
+    assert references.format_citation(
+        ResearchMemoReference("RES-20261018-003")
+    ) == "RES-20261018-003"
+
+
 @pytest.mark.parametrize(
     "ref",
     [
@@ -105,11 +195,7 @@ def test_parse_resolves_a_repository_path():
 @pytest.mark.parametrize(
     ("ref", "kind"),
     [
-        ("SES-20260912-1432", "SES"),
-        ("SES-20260912-1432#T017", "SES"),
         ("CLM-0041", "CLM"),
-        ("RES-20261018-003", "RES"),
-        ("DEC-0088", "DEC"),
     ],
 )
 def test_a_kind_the_archive_defines_but_this_build_lacks_is_a_value_not_a_path(

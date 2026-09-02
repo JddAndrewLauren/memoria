@@ -2,13 +2,17 @@
 
 import argparse
 import sys
+from pathlib import Path
 
 from memoria import changes
+from memoria.context_manifest import derive_context_manifest
+from memoria.embeddings import default_embed_fn
 from memoria.extraction import RECURRENCE_THRESHOLD_DEFAULT
 from memoria.index import INDEX_RELATIVE_PATH, IndexSchemaError, rebuild
 from memoria.normalize import normalize as run_normalize
 from memoria.records import NORMALIZED_RELATIVE_PATH
 from memoria.repository import NoEvidenceRoot, from_env, require_evidence_root
+from memoria.sessions import SessionError, derive_session
 from memoria.subjects import write_builtin_subjects
 from memoria.validate import validate
 from memoria.write import Checkpointed, checkpoint
@@ -55,6 +59,25 @@ def _report_derived(counts) -> None:
             "rebuild: no clusters - install the `graph` extra "
             "(`pip install -e '.[graph]'`) to cluster the co-occurrence graph"
         )
+
+
+def _report_staleness(staleness_map) -> None:
+    """Print the staleness map's top-line count and its causes (#37).
+
+    Model-free and derived fresh every rebuild (part 06 §8.12); a zero count
+    is not printed specially - there is nothing to warn about and the line
+    just does not appear, matching ``_report_derived``'s "only print what is
+    actionable" shape.
+    """
+    if not staleness_map.not_current:
+        return
+    causes = ", ".join(
+        f"{count} {cause}" for cause, count in sorted(staleness_map.count_by_cause().items())
+    )
+    print(
+        f"rebuild: {staleness_map.paragraphs_not_current} paragraph(s) not "
+        f"current ({causes})"
+    )
 
 
 def _report_appearances(report) -> None:
@@ -128,6 +151,25 @@ def main(argv=None):
         action="store_true",
         help="Reconvert every unit, not only those whose hash or converter changed",
     )
+    derive_session_parser = subparsers.add_parser(
+        "derive-session",
+        help=(
+            "Derive transcript.md and metadata.yaml for a session from "
+            "Claude Code's own per-session JSONL (#28)"
+        ),
+    )
+    derive_session_parser.add_argument("session_id", help="This session's SES- id")
+    derive_session_parser.add_argument(
+        "jsonl_path", help="Path to the Claude Code session's own JSONL file"
+    )
+    derive_manifest_parser = subparsers.add_parser(
+        "derive-context-manifest",
+        help=(
+            "Write context-manifest.json for a session from its own "
+            "events.jsonl (#29)"
+        ),
+    )
+    derive_manifest_parser.add_argument("session_id", help="This session's SES- id")
 
     args = parser.parse_args(argv)
 
@@ -196,6 +238,12 @@ def main(argv=None):
                 repository,
                 recurrence_threshold=args.recurrence_threshold,
                 reset_cache=args.reset_cache,
+                # The one caller that opts into the semantic index (#81):
+                # `rebuild`'s own default is `None` (skip) so that every
+                # other caller - the test suite included - never triggers a
+                # real model load. `memoria rebuild` is the actual "at
+                # rebuild" moment ADR-0007 names.
+                embed_fn=default_embed_fn,
             )
         except IndexSchemaError as exc:
             print(f"rebuild: {exc}", file=sys.stderr)
@@ -213,12 +261,40 @@ def main(argv=None):
             )
         _report_derived(report.counts)
         _report_appearances(report.appearances)
+        _report_staleness(report.staleness)
         change_ids = changes.rebuild(repository)
         print(
             f"rebuild: wrote {len(change_ids)} change projection(s) to "
             f"{repository.root / changes.CHANGES_RELATIVE_PATH}"
         )
         print(f"rebuild: completed in {report.elapsed_seconds:.2f}s")
+        return 0
+
+    if args.command == "derive-session":
+        try:
+            result = derive_session(repository, args.session_id, Path(args.jsonl_path))
+        except SessionError as exc:
+            print(f"derive-session: {exc}", file=sys.stderr)
+            return 1
+        if result.changed:
+            print(
+                f"derive-session: derived {result.turns} turn(s) to "
+                f"{result.transcript_path}"
+            )
+        else:
+            print(f"derive-session: {args.session_id} already derived, unchanged")
+        return 0
+
+    if args.command == "derive-context-manifest":
+        try:
+            result = derive_context_manifest(repository, args.session_id)
+        except SessionError as exc:
+            print(f"derive-context-manifest: {exc}", file=sys.stderr)
+            return 1
+        if result.changed:
+            print(f"derive-context-manifest: wrote {result.manifest_path}")
+        else:
+            print(f"derive-context-manifest: {args.session_id} already derived, unchanged")
         return 0
 
     if args.command == "checkpoint":

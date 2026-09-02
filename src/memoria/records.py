@@ -30,7 +30,15 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from memoria import changes, manuscript, references, subjects
+from memoria import (
+    changes,
+    context_manifest,
+    manuscript,
+    record_extractor,
+    references,
+    sessions,
+    subjects,
+)
 from memoria.repository import Repository, require_evidence_root
 
 if TYPE_CHECKING:
@@ -730,6 +738,15 @@ class Read:
     (#20) - ``None`` for every other reference shape, and for a paragraph
     read with ``raw=True``. A new field with a default, so the return shape
     changes additively rather than forcing #11's signature open again.
+
+    ``context_manifest`` (#29) is a bare session read's own manifest -
+    ``None`` for every other reference shape, and for a ``#T`` turn of a
+    session, which cites what was said rather than what was supplied. Built
+    live from ``events.jsonl`` rather than requiring a prior derivation to
+    have run; ``None`` too if that build fails, the same best-effort
+    degradation ``overlay`` already gives a paragraph read whose index
+    cannot be read right now - the transcript is the payload and is not
+    conditioned on it.
     """
 
     ref: str
@@ -738,6 +755,7 @@ class Read:
     record: NormalizedRecord | None = None
     paragraph: int | None = None
     overlay: "ReadOverlay | None" = None
+    context_manifest: dict | None = None
 
 
 def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
@@ -780,10 +798,17 @@ def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
     decoration and the verbatim text is not conditioned on it: a degraded
     index still returns the paragraph, undecorated, rather than failing the
     read. It resolves no reference kind but ``SRC-``, ``SUB-``, ``CHP-``,
-    ``SEC-``, ``CHG-`` and repository paths - the rest exist as a named
-    error, not as silence. Ledgering the served read is the caller's job
-    (``memoria.ledger``, #13): this function has no session to ledger
-    against.
+    ``SEC-``, ``CHG-``, ``SES-`` (whole or one ``#T`` turn, #28), ``DEC-``
+    and ``RES-`` (#30), and repository paths - the rest exist as a named
+    error, not as silence.
+    Ledgering the served read is the caller's job (``memoria.ledger``, #13):
+    this function has no session to ledger against.
+
+    A bare ``SES-`` read carries its own context manifest (#29) on
+    ``Read.context_manifest`` - the same appended-after-the-text convention
+    as ``overlay``, and ``None`` for the same best-effort reason: a session
+    that has served nothing yet, or whose ledger could not be built, still
+    returns the transcript.
     """
     try:
         reference = references.parse(ref)
@@ -852,6 +877,38 @@ def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
         except changes.ChangesError as exc:
             raise ReadError(str(exc)) from exc
         return Read(ref=ref, citation=citation, text=changes.render(commit))
+
+    if isinstance(reference, references.SessionReference):
+        try:
+            text = sessions.read_session(repository, reference.session_id, reference.turn)
+        except sessions.SessionError as exc:
+            raise ReadError(str(exc)) from exc
+        manifest = None
+        if reference.turn is None:
+            # A bare session reference surfaces its manifest too (#29); a
+            # `#T` turn cites what was said, not what was supplied, so it
+            # carries none.
+            try:
+                manifest = context_manifest.build_context_manifest(
+                    repository, reference.session_id
+                )
+            except sessions.SessionError:
+                manifest = None
+        return Read(ref=ref, citation=citation, text=text, context_manifest=manifest)
+
+    if isinstance(reference, references.DecisionReference):
+        try:
+            text = record_extractor.read_decision(repository, reference.decision_id)
+        except record_extractor.RecordExtractorError as exc:
+            raise ReadError(str(exc)) from exc
+        return Read(ref=ref, citation=citation, text=text)
+
+    if isinstance(reference, references.ResearchMemoReference):
+        try:
+            text = record_extractor.read_research_memo(repository, reference.memo_id)
+        except record_extractor.RecordExtractorError as exc:
+            raise ReadError(str(exc)) from exc
+        return Read(ref=ref, citation=citation, text=text)
 
     if isinstance(reference, references.SubjectReference):
         # Bare, undecorated, exactly what's on disk - the same full-source
