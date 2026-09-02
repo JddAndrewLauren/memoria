@@ -732,10 +732,15 @@ def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
     (``memoria.index.overlay_for_anchor``), on ``Read.overlay`` - appended
     after the text, never folded into it, so ``Read.text`` stays
     byte-identical between a decorated and an undecorated read of the same
-    paragraph. It resolves no reference kind but ``SRC-``, ``SUB-``,
-    ``CHP-``, ``SEC-``, ``CHG-`` and repository paths - the rest exist as a
-    named error, not as silence. Ledgering the served read is the caller's
-    job (``memoria.ledger``, #13): this function has no session to ledger
+    paragraph. ``Read.overlay`` is also ``None`` when the index exists but
+    cannot be read right now - a schema older than this build, or a
+    concurrent writer holding it locked - because the overlay is best-effort
+    decoration and the verbatim text is not conditioned on it: a degraded
+    index still returns the paragraph, undecorated, rather than failing the
+    read. It resolves no reference kind but ``SRC-``, ``SUB-``, ``CHP-``,
+    ``SEC-``, ``CHG-`` and repository paths - the rest exist as a named
+    error, not as silence. Ledgering the served read is the caller's job
+    (``memoria.ledger``, #13): this function has no session to ledger
     against.
     """
     try:

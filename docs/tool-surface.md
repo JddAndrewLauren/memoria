@@ -262,19 +262,34 @@ Two properties of that header are contracts, not styling:
 
 **A non-raw paragraph read carries the curated overlay** (#20, part 06 §8.3),
 a second `---`-delimited block after the text: `entry links` (every entry
-this anchor is currently linked to — a `placements` row, a pin, or both,
-minus anything excluded), `exclusions` (every entry that has excluded this
-anchor, whether or not it was otherwise placed), and `citing settlements`
-(always `none` in this build — settlements are an M4 concept with no durable
-storage yet, part 16). Every field is printed even when empty — `none`
-rather than an absent line — so a paragraph with no overlay comes back the
-same shape as one with one. `Read.text` stays byte-identical between a
-decorated and an undecorated read of the same paragraph: the overlay is a
-sibling field (`memoria.records.Read.overlay`), never folded into `text`.
-Entry links reuse `placements` and the pin/exclude overlay directly rather
-than reproducing `gather`'s lexical/co-occurrence recall — that machinery
-mitigates placement recall for an entry; a read reports what is already
-attributed fact for this one paragraph.
+whose `gather` result — the same word-, entry- and relation-shaped recall,
+and the same pin/exclude overlay, `gather` applies for a placement's own
+entry — currently includes this anchor, read backwards from the anchor
+rather than forward from one entry: the gathered-set-inverse, not a
+placements-only narrowing of it), `exclusions` (every entry that has
+excluded this anchor, whether or not it was otherwise gathered), and
+`citing settlements` (always `none` in this build — settlements are an M4
+concept with no durable storage yet, part 16). Both `entry links` and
+`exclusions` are scoped to entries `load_all_entries` finds on disk, so a
+deleted or renamed entry a stale index still names never surfaces. Every
+field is printed even when empty — `none` rather than an absent line — so a
+paragraph with no overlay comes back the same shape as one with one.
+`Read.text` stays byte-identical between a decorated and an undecorated read
+of the same paragraph: the overlay is a sibling field
+(`memoria.records.Read.overlay`), never folded into `text`.
+
+A degraded index — a schema older than this build, or a concurrent writer
+holding it locked — drops the overlay (`Read.overlay` is `None`, the same as
+a `raw=True` read) rather than failing the read: the verbatim text is never
+conditioned on the overlay being computable, so the constraint this section
+opens with does not weaken.
+
+`render_overlay`'s own output never contains a bare `---` line — every field
+it prints is an entry id or the literal `none` — so the *last* `---` in a
+decorated paragraph's rendering is always the true text/overlay boundary,
+even when the paragraph's own text happens to contain one; a caller splits
+from the end for that boundary, and from the start for the header/text one
+(the header is equally `---`-free by construction).
 
 `original_locator` is printed and never parsed. It is a pointer a person
 follows, not an offset — issue #25 depends on that staying true.

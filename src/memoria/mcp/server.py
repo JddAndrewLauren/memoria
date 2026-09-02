@@ -148,10 +148,18 @@ def render(result: Read) -> str:
     never wrapped, re-indented or escaped - and there is exactly one
     delimiter convention. **The curated overlay (#20) reuses it**, appending
     a second ``---``-delimited block after the text rather than interleaving
-    with it - so the text stays contiguous and a caller can always tell text
-    from decoration. A ``raw=True`` paragraph read carries no ``overlay``
-    (``memoria.records.read``), so it stays a bare header-plus-text pair,
-    the same shape a plain read had before this issue.
+    with it. ``render_overlay``'s own output never contains a bare ``---``
+    line - every field it prints is an entry id or the literal ``none`` -
+    so the *last* ``\\n---\\n`` in a decorated paragraph's rendering is
+    always the true text/overlay boundary, even if the paragraph's own
+    verbatim text happens to contain one: split from the end, not the
+    start, the way ``tests/test_read_ref.py`` and ``tests/test_mcp_server.py``
+    do. (The header, symmetrically, never contains one either, so the
+    *first* ``\\n---\\n`` is always the header/text boundary.) A
+    ``raw=True`` paragraph read, or one whose index could not be read,
+    carries no ``overlay`` (``memoria.records.read``), so it stays a bare
+    header-plus-text pair, the same shape a plain read had before this
+    issue.
 
     ``original_locator`` is printed and never parsed: it is a pointer a person
     follows, not an offset (#25).
@@ -192,7 +200,10 @@ def read(ref: str, raw: bool = False) -> str:
 
     A paragraph read also carries the curated overlay: which entries it is
     linked to, which have excluded it, and which settlements cite it - a
-    second `---`-delimited block after the text, never mixed into it.
+    second `---`-delimited block after the text, never mixed into it. A
+    degraded index (stale schema, or locked by a concurrent rebuild) drops
+    only the overlay; the paragraph itself still comes back undecorated
+    rather than failing.
 
     `raw=True` serves the least-processed version of what it is given,
     refused for anything but a SRC- reference: for a bare record ID, the

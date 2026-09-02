@@ -7,11 +7,13 @@ checkable rather than merely asserted, so they compare bytes rather than
 substrings.
 """
 
+import sqlite3
+
 import pytest
 import yaml
 
 from memoria import extraction as ex
-from memoria.index import ReadOverlay, build_index, exclude, pin
+from memoria.index import INDEX_RELATIVE_PATH, ReadOverlay, build_index, exclude, pin
 from memoria.manuscript import create_chapter, create_section
 from memoria.records import (
     NORMALIZED_RELATIVE_PATH,
@@ -851,13 +853,45 @@ def test_a_paragraph_with_no_overlay_gets_an_explicit_empty_one(tmp_path):
     )
 
 
+def test_entry_links_reflect_lexical_recall_not_just_placements(tmp_path):
+    """Retry item 2 / AC 1: entry links are the gathered-set-inverse, not a
+    placements-only narrowing of it - a paragraph an entry gathers purely
+    through its word-shaped match terms' lexical recall (no extraction
+    placement, no `ex.derive` at all) still names the entry, matching
+    `gather`'s own membership exactly."""
+    entry = Entry(id="SUB-people/bob", match_terms=["heron"], body="")
+    repository = _overlay_repo(tmp_path, [entry])
+
+    result = read(repository, "SRC-000184 P1")
+
+    assert result.overlay.entry_links == ["SUB-people/bob"]
+
+
 def test_a_pin_adds_an_entry_link_with_no_placement_behind_it(tmp_path):
-    repository = _overlay_repo(tmp_path)
+    entry = Entry(id="SUB-people/bob", match_terms=[], body="")
+    repository = _overlay_repo(tmp_path, [entry])
     pin(repository, "SUB-people/bob", "src-000184-p1", _AUTHOR)
 
     result = read(repository, "SRC-000184 P1")
 
     assert result.overlay.entry_links == ["SUB-people/bob"]
+    assert result.overlay.exclusions == []
+
+
+def test_a_pin_or_exclusion_against_an_entry_no_longer_on_disk_is_dropped(tmp_path):
+    """Retry item 3: a stale index must not name an entry that has been
+    deleted or renamed since - `entry_links`/`exclusions` are scoped to
+    `load_all_entries`, not to whatever the index rows still say."""
+    entry = Entry(id="SUB-people/bob", match_terms=[], body="")
+    repository = _overlay_repo(tmp_path, [entry])
+    pin(repository, "SUB-people/bob", "src-000184-p1", _AUTHOR)
+    exclude(repository, "SUB-people/carol", "src-000184-p1", _AUTHOR)
+    # "carol" never existed on disk; "bob" is removed after being pinned.
+    (tmp_path / "subjects" / "people" / "bob.md").unlink()
+
+    result = read(repository, "SRC-000184 P1")
+
+    assert result.overlay.entry_links == []
     assert result.overlay.exclusions == []
 
 
@@ -912,6 +946,49 @@ def test_a_decorated_read_is_rendered_with_the_overlay_delimited_from_text(tmp_p
     rendered = render(read(repository, "SRC-000184 P1"))
 
     header, _, rest = rendered.partition("\n---\n")
-    payload, _, overlay_block = rest.partition("\n---\n")
+    payload, _, overlay_block = rest.rpartition("\n---\n")
     assert payload == AWKWARD[0]
     assert "entry links: SUB-people/bob" in overlay_block
+
+
+def test_a_stale_index_schema_degrades_the_overlay_rather_than_failing_the_read(
+    tmp_path,
+):
+    """Retry item 1 (BLOCKER): an index predating #111's `email_from`/
+    `email_to` columns must not turn a paragraph read that used to succeed
+    into an `IndexSchemaError` - decoration is best-effort, and the
+    verbatim text is never conditioned on it (poc-plan.md §7)."""
+    entry = Entry(id="SUB-people/bob", match_terms=["heron"], body="")
+    repository = _overlay_repo(tmp_path, [entry])
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.execute("DROP TABLE paragraphs")
+    con.execute(
+        "CREATE TABLE paragraphs("
+        "anchor TEXT PRIMARY KEY, src_id TEXT, source_type TEXT, "
+        "event_date TEXT, recorded_date TEXT, contemporaneous INTEGER"
+        ")"
+    )
+    con.commit()
+    con.close()
+
+    result = read(repository, "SRC-000184 P1")
+
+    assert result.text == AWKWARD[0]
+    assert result.overlay is None
+
+
+def test_an_unreadable_index_file_degrades_the_overlay_rather_than_failing_the_read(
+    tmp_path,
+):
+    """The same guarantee against a corrupted or mid-write index file, not
+    just a stale schema - a `sqlite3.Error` of any kind degrades the
+    overlay rather than the read, the same as a locked one held by a
+    concurrent `memoria rebuild`."""
+    entry = Entry(id="SUB-people/bob", match_terms=["heron"], body="")
+    repository = _overlay_repo(tmp_path, [entry])
+    (repository.root / INDEX_RELATIVE_PATH).write_bytes(b"not a sqlite file")
+
+    result = read(repository, "SRC-000184 P1")
+
+    assert result.text == AWKWARD[0]
+    assert result.overlay is None

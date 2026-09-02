@@ -211,22 +211,71 @@ def test_no_read_writes_anything_under_either_root_but_the_ledger(tmp_path):
     assert after == before, "a read changed a file's bytes"
 
 
+def test_no_read_writes_the_index_either_when_one_already_exists(tmp_path):
+    """Retry item 3: the test above's repo has no index at all, so it never
+    exercises `overlay_for_anchor`'s `connect()` (mkdir + DDL + commit) path
+    the curated overlay (#20) added. This one pre-builds an index and
+    asserts a decorated read leaves it byte-identical."""
+    from memoria.index import build_index
+
+    repo_root = tmp_path / "repo"
+    record = _record()
+    write_normalized_records([record], repo_root / NORMALIZED_RELATIVE_PATH)
+    repository = Repository(root=repo_root)
+    build_index(repository, [record])
+    server._repository = repository
+
+    before = _snapshot(repo_root)
+    server.read("SRC-000184 P1")
+    after = {
+        path: content
+        for path, content in _snapshot(repo_root).items()
+        if repo_root / "sessions" not in path.parents
+    }
+
+    assert set(after) == set(before), "a read created or removed a file outside sessions/"
+    assert after == before, "a read changed a file's bytes"
+
+
 # --- what the model sees ----------------------------------------------------
 
 
 def test_the_envelope_carries_the_verbatim_text_contiguously(tmp_path):
     """The header may grow, and the overlay (#20) now follows the payload
     behind its own delimiter - but the payload itself may not be touched,
-    and must appear contiguously between the two."""
+    and must appear contiguously between the two. Split from the end for
+    the text/overlay boundary and from the start for the header/text one -
+    `render`'s own docstring names why."""
     repository = _repo(tmp_path)
     result = read(repository, "SRC-000184 P2")
 
     rendered = server.render(result)
 
     header, _, rest = rendered.partition("\n---\n")
-    payload, _, overlay = rest.partition("\n---\n")
+    payload, _, overlay = rest.rpartition("\n---\n")
     assert payload == result.text
     assert "original_locator: Journal I, entry dated Oct. 22." in header
+    assert overlay == server.render_overlay(result.overlay)
+
+
+def test_a_paragraph_containing_its_own_delimiter_line_still_splits_correctly(
+    tmp_path,
+):
+    """AC 4: `render_overlay`'s output never contains a bare `---` line, so
+    the *last* delimiter is always the true text/overlay boundary - even
+    when the paragraph text has its own `---` line in the middle, the exact
+    shape that made a naive first-delimiter split ambiguous."""
+    write_normalized_records(
+        [_record(paragraphs=["Above.\n---\nBelow.", "Unrelated."])],
+        tmp_path / NORMALIZED_RELATIVE_PATH,
+    )
+    result = read(Repository(root=tmp_path), "SRC-000184 P1")
+
+    rendered = server.render(result)
+
+    header, _, rest = rendered.partition("\n---\n")
+    payload, _, overlay = rest.rpartition("\n---\n")
+    assert payload == result.text == "Above.\n---\nBelow."
     assert overlay == server.render_overlay(result.overlay)
 
 
@@ -263,6 +312,37 @@ def test_a_path_read_is_rendered_bare(tmp_path):
     rendered = server.render(read(Repository(root=tmp_path), "docs/note.md"))
 
     assert rendered == "# note\n"
+
+
+def test_a_stale_index_does_not_surface_as_a_stripped_tool_error(tmp_path):
+    """Retry item 1: this server's `read` tool catches only `(ReadError,
+    NoEvidenceRoot)` - if `IndexSchemaError`/`sqlite3.Error` ever escaped
+    `records.read`, the model would see "Error executing tool read" with
+    the reason stripped, the silent-failure shape #11 forbids. They don't:
+    `memoria.index.overlay_for_anchor` degrades to `None` instead, so the
+    tool call succeeds and still serves the paragraph."""
+    import sqlite3
+
+    from memoria.index import INDEX_RELATIVE_PATH, build_index
+
+    repository = _repo(tmp_path)
+    build_index(repository, [_record()])
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.execute("DROP TABLE paragraphs")
+    con.execute(
+        "CREATE TABLE paragraphs("
+        "anchor TEXT PRIMARY KEY, src_id TEXT, source_type TEXT, "
+        "event_date TEXT, recorded_date TEXT, contemporaneous INTEGER"
+        ")"
+    )
+    con.commit()
+    con.close()
+    server._repository = repository
+
+    rendered = server.read("SRC-000184 P1")
+
+    assert "A blue heron flew over." in rendered
+    assert "entry links" not in rendered
 
 
 def test_the_tool_maps_a_core_error_onto_one_the_model_can_read(tmp_path):
