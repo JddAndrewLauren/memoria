@@ -28,6 +28,7 @@ message's ``ConversionDraft``.
 
 from __future__ import annotations
 
+import base64
 import email
 import hashlib
 import io
@@ -80,6 +81,7 @@ class ConversionDraft:
     original_locator: str
     paragraphs: list[str]
     thread_id: str | None = None
+    subject: str | None = None
     email_from: str | None = None
     email_to: str | None = None
     email_cc: str | None = None
@@ -258,7 +260,11 @@ CONVERTERS: dict[str, tuple[Converter, _Pin]] = {
 # Bumped 1 -> 2 on the M1 gate walk (#15, #108): the header repair and the
 # footer cut below change the paragraphs of most Enron records, and the
 # drift report is how that cost is shown before the extraction re-reads them.
-EMAIL_CONVERTER_VERSION = "email 2"
+# Bumped 2 -> 3 (#115): Thread-Index threading, the `subject` field, and the
+# `-----Original Message-----` marker no longer surviving the quoted-reply
+# cut all change frontmatter or paragraphs, so one pin bump shows the whole
+# cost at once.
+EMAIL_CONVERTER_VERSION = "email 3"
 
 # Suffixes `_process_email_containers` treats as an "export": a file holding
 # one or more raw email-message units. `.eml` holds exactly one - handling
@@ -402,6 +408,7 @@ def normalize(
             converter=pinned_version,
             paragraphs=draft.paragraphs,
             thread_id=draft.thread_id,
+            subject=draft.subject,
             email_from=draft.email_from,
             email_to=draft.email_to,
             email_cc=draft.email_cc,
@@ -561,6 +568,7 @@ def _process_email_containers(
         # Pass 3: threading - needs every sibling's ID from pass 1.
         message_ids = [_clean_message_id(m.get("Message-ID")) for m in messages]
         id_index_by_message_id = {mid: i for i, mid in enumerate(message_ids) if mid}
+        thread_indexes = [_thread_index_bytes(m.get("Thread-Index")) for m in messages]
         parent_index: list[int | None] = []
         for message in messages:
             in_reply_to_mid = _clean_message_id(message.get("In-Reply-To"))
@@ -576,11 +584,44 @@ def _process_email_containers(
             visited.add(i)
             return _root_index(parent, visited)
 
+        def _thread_index_parent(i: int) -> int | None:
+            """The sibling whose ``Thread-Index`` is the longest proper
+            prefix of message ``i``'s own (finding 2) - ``None`` when no
+            such sibling is in the export."""
+            own = thread_indexes[i]
+            best: int | None = None
+            best_len = -1
+            for j, other in enumerate(thread_indexes):
+                if j == i or other is None or len(other) >= len(own):
+                    continue
+                if own.startswith(other) and len(other) > best_len:
+                    best, best_len = j, len(other)
+            return best
+
         for index, message in enumerate(messages):
-            parent_idx = parent_index[index]
-            in_reply_to_value = entry_id_by_index[parent_idx] if parent_idx is not None else ""
-            root = _root_index(index)
-            thread_id_value = message_ids[root] or entry_id_by_index[root]
+            in_reply_to_mid = _clean_message_id(message.get("In-Reply-To"))
+            own_thread_index = thread_indexes[index]
+            if (
+                in_reply_to_mid is None
+                and own_thread_index is not None
+                and len(own_thread_index) >= _THREAD_INDEX_ROOT_LEN
+            ):
+                # In-Reply-To absent, Thread-Index present (#115): the
+                # deterministic substitute - thread_id from the 22-byte
+                # root, in_reply_to from the longest sibling prefix present
+                # in the export.
+                parent_idx = _thread_index_parent(index)
+                in_reply_to_value = (
+                    entry_id_by_index[parent_idx] if parent_idx is not None else ""
+                )
+                thread_id_value = own_thread_index[:_THREAD_INDEX_ROOT_LEN].hex()
+            else:
+                parent_idx = parent_index[index]
+                in_reply_to_value = (
+                    entry_id_by_index[parent_idx] if parent_idx is not None else ""
+                )
+                root = _root_index(index)
+                thread_id_value = message_ids[root] or entry_id_by_index[root]
             draft = _convert_email_message(
                 message,
                 message_index=index,
@@ -641,10 +682,38 @@ def _clean_message_id(value: str | None) -> str | None:
     return value.strip().strip("<>") or None
 
 
+# Outlook's `Thread-Index` header (#115, docs/corpora/enron.md finding 2):
+# the first 22 bytes identify the conversation and each reply appends
+# exactly five more, making a reply's own bytes minus its last five its
+# parent's - the substitute used when `In-Reply-To` is absent.
+_THREAD_INDEX_ROOT_LEN = 22
+
+
+def _thread_index_bytes(value: str | None) -> bytes | None:
+    """``Thread-Index``, base64-decoded, or ``None`` when absent or not
+    valid base64 - a message without one gets no substitute threading."""
+    if not value:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    try:
+        return base64.b64decode(stripped + "=" * (-len(stripped) % 4))
+    except ValueError:
+        return None
+
+
 # "On ... wrote:" - the top-posting quote marker (part 05 §5.4). Matched
 # whole-line: it introduces a solid quoted block, not more of the sender's
 # own words, so everything from here on is cut.
 _ON_WROTE_RE = re.compile(r"^On .+ wrote:\s*$")
+
+# Outlook's own "-----Original Message-----" marker, prepended to the
+# forwarded/replied "From:\nSent:\n..." header block it introduces (#115,
+# `outlook-original-message` fixture). The block after it is already cut by
+# `_is_outlook_header_start`; this line precedes that block and, left
+# unmatched, survives as a paragraph of its own that says nothing.
+_ORIGINAL_MESSAGE_RE = re.compile(r"^-+\s*Original Message\s*-+\s*$", re.IGNORECASE)
 
 
 def _is_outlook_header_start(lines: list[str], i: int) -> bool:
@@ -664,9 +733,10 @@ def _split_quoted_reply(body: str) -> tuple[str, bool]:
     A `>`-prefixed line is dropped wherever it occurs, which is what makes
     an interleaved reply - the sender's own unprefixed lines running between
     quoted ones - come out with the quoted lines gone and its own lines kept
-    in order. An "On ... wrote:" line or an Outlook header block instead
-    introduces a solid quoted block appended to the message, so everything
-    from there on is cut rather than filtered line by line.
+    in order. An "On ... wrote:" line, a "-----Original Message-----" line,
+    or an Outlook header block instead introduces a solid quoted block
+    appended to the message, so everything from there on is cut rather than
+    filtered line by line.
     """
     lines = body.split("\n")
     kept = []
@@ -674,7 +744,11 @@ def _split_quoted_reply(body: str) -> tuple[str, bool]:
     i = 0
     while i < len(lines):
         line = lines[i]
-        if _ON_WROTE_RE.match(line.strip()) or _is_outlook_header_start(lines, i):
+        if (
+            _ON_WROTE_RE.match(line.strip())
+            or _ORIGINAL_MESSAGE_RE.match(line.strip())
+            or _is_outlook_header_start(lines, i)
+        ):
             excised = True
             break
         if line.startswith(">"):
@@ -790,6 +864,7 @@ def _convert_email_message(
         original_locator=f"message {message_index + 1} of {message_count}",
         paragraphs=paragraphs,
         thread_id=thread_id,
+        subject=message.get("Subject", ""),
         email_from=message.get("From", ""),
         email_to=message.get("To", ""),
         email_cc=message.get("Cc", ""),

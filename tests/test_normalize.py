@@ -36,17 +36,31 @@ def _write_raw_file(evidence_root, rel_path, content):
 
 
 def _email_message(
-    *, from_, to, date, message_id, body, cc=None, in_reply_to=None, attachment=None
+    *,
+    from_,
+    to,
+    date,
+    message_id,
+    body,
+    cc=None,
+    in_reply_to=None,
+    thread_index=None,
+    subject=None,
+    attachment=None,
 ):
     message = EmailMessage()
     message["From"] = from_
     message["To"] = to
     if cc:
         message["Cc"] = cc
+    if subject is not None:
+        message["Subject"] = subject
     message["Date"] = date
     message["Message-ID"] = message_id
     if in_reply_to:
         message["In-Reply-To"] = in_reply_to
+    if thread_index:
+        message["Thread-Index"] = thread_index
     message.set_content(body)
     if attachment is not None:
         filename, content_bytes = attachment
@@ -521,6 +535,55 @@ def test_mbox_thread_yields_three_records_with_a_shared_thread_and_a_reply_chain
     assert by_body["Second reply."].in_reply_to == by_body["First reply."].id
 
 
+def test_thread_index_threads_a_chain_with_no_in_reply_to_at_all(tmp_path):
+    """docs/corpora/enron.md finding 2: Enron's export carries `Thread-Index`
+    rather than `In-Reply-To` on roughly a third of messages. The
+    thread-parent/thread-child fixtures are this shape - each reply's own
+    bytes are its parent's plus five."""
+    root = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFg=="  # 22 bytes
+    child = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFgEAAAAA"  # root + 5 bytes
+    grandchild = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFgEAAAAAAgAAAAA="  # child + 5 bytes
+    evidence_root = tmp_path / "evidence"
+    _write_mbox(
+        evidence_root,
+        "thread.mbox",
+        [
+            _email_message(
+                from_="alice@example.com", to="bob@example.com",
+                date="Mon, 17 Oct 2011 09:00:00 -0500", message_id="<m1@x>",
+                thread_index=root, body="Scheduling for the western desk.",
+            ),
+            _email_message(
+                from_="bob@example.com", to="alice@example.com",
+                date="Mon, 17 Oct 2011 10:00:00 -0500", message_id="<m2@x>",
+                thread_index=child, body="Forwarding for the desk.",
+            ),
+            _email_message(
+                from_="alice@example.com", to="bob@example.com",
+                date="Mon, 17 Oct 2011 11:00:00 -0500", message_id="<m3@x>",
+                thread_index=grandchild, body="Understood, moving it too.",
+            ),
+        ],
+    )
+    repository = Repository(root=tmp_path / "repo")
+
+    normalize(repository, evidence_root)
+
+    records = read_all(repository)
+    assert len(records) == 3
+    assert len({r.thread_id for r in records}) == 1
+    by_body = {r.paragraphs[0]: r for r in records}
+    assert by_body["Scheduling for the western desk."].in_reply_to == ""
+    assert (
+        by_body["Forwarding for the desk."].in_reply_to
+        == by_body["Scheduling for the western desk."].id
+    )
+    assert (
+        by_body["Understood, moving it too."].in_reply_to
+        == by_body["Forwarding for the desk."].id
+    )
+
+
 def test_a_reply_quoting_its_parent_drops_the_quote_and_search_hits_the_parent_only(tmp_path):
     evidence_root = tmp_path / "evidence"
     _write_mbox(
@@ -628,7 +691,7 @@ def test_email_headers_are_in_frontmatter_and_never_in_the_body(tmp_path):
             _email_message(
                 from_="alice@example.com", to="bob@example.com", cc="carol@example.com",
                 date="Mon, 17 Oct 2011 09:00:00 -0500", message_id="<m1@x>",
-                body="Body text only.",
+                subject="Zonal congestion report", body="Body text only.",
             ),
         ],
     )
@@ -640,12 +703,47 @@ def test_email_headers_are_in_frontmatter_and_never_in_the_body(tmp_path):
     assert record.email_from == "alice@example.com"
     assert record.email_to == "bob@example.com"
     assert record.email_cc == "carol@example.com"
+    assert record.subject == "Zonal congestion report"
     assert record.paragraphs == ["Body text only."]
 
     markdown = record_to_markdown(record)
     assert "from: alice@example.com" in markdown
+    assert "subject: Zonal congestion report" in markdown
     for header_value in ("alice@example.com", "bob@example.com", "carol@example.com"):
         assert header_value not in "\n".join(record.paragraphs)
+
+
+def test_bumping_the_email_converter_version_reconverts_existing_records(tmp_path, monkeypatch):
+    """#115: the pin bump from `email 2` to `email 3` reconverts every
+    existing email record and reports it, the same mechanism
+    ``test_a_changed_converter_version_reconverts_the_unit`` proves for
+    ``.txt`` - so the drift report shows the whole cost of the bump at once."""
+    from memoria import normalize as normalize_module
+
+    evidence_root = tmp_path / "evidence"
+    _write_mbox(
+        evidence_root,
+        "thread.mbox",
+        [
+            _email_message(
+                from_="alice@example.com", to="bob@example.com",
+                date="Mon, 17 Oct 2011 09:00:00 -0500", message_id="<m1@x>",
+                body="Body text.",
+            ),
+        ],
+    )
+    repository = Repository(root=tmp_path / "repo")
+    monkeypatch.setattr(normalize_module, "EMAIL_CONVERTER_VERSION", "email 2")
+    normalize(repository, evidence_root)
+    (record,) = read_all(repository)
+    assert record.converter == "email 2"
+
+    monkeypatch.setattr(normalize_module, "EMAIL_CONVERTER_VERSION", "email 3")
+    report = normalize(repository, evidence_root)
+
+    assert report.converted == [record.id]
+    (reconverted,) = read_all(repository)
+    assert reconverted.converter == "email 3"
 
 
 def test_converting_the_same_mbox_fixture_twice_is_byte_identical(tmp_path):
@@ -726,6 +824,24 @@ def test_the_enron_fixture_converts_with_its_headers_and_without_the_footer(tmp_
     assert "Microsoft Mail Internet Headers" not in body
     assert "EDRM Enron Email Data Set" not in body
     assert "*****" not in body
+
+
+def test_the_original_message_marker_does_not_survive_as_its_own_paragraph(tmp_path):
+    """#115: the `-----Original Message-----` line introduces the Outlook
+    `From:`/`Sent:` block the same way the block itself does, so it must be
+    cut with it rather than kept as a paragraph that says nothing."""
+    from pathlib import Path as _Path
+
+    fixture = _Path(__file__).parent / "fixtures" / "enron" / "outlook-original-message.eml"
+    evidence_root = tmp_path / "evidence"
+    _write_raw_binary_file(evidence_root, "outlook.eml", fixture.read_bytes())
+    repository = Repository(root=tmp_path / "repo")
+
+    normalize(repository, evidence_root)
+
+    (record,) = [r for r in read_all(repository) if r.source_type == "email"]
+    assert record.paragraphs == ["Confirmed for the 22nd."]
+    assert record.quoted_excised is True
 
 
 def test_a_body_carrying_the_footer_twice_loses_both(tmp_path):

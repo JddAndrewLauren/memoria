@@ -158,7 +158,9 @@ a third of messages. That is a deterministic substitute rather than a heuristic:
 the first 22 bytes identify the conversation and each reply appends exactly
 five, so a message's parent is the one whose `Thread-Index` is its own less the
 final five bytes. `thread_id` comes from the 22-byte root; `in_reply_to` from
-the longest proper prefix present in the export.
+the longest proper prefix present in the export. **The substitute is now
+implemented** (#115): `_process_email_containers` falls back to it whenever
+`In-Reply-To` is absent and `Thread-Index` is present.
 
 This is a genuine amendment owed to §5.4 and the schema, not a shortcoming of
 the slice. The schema's rule that `in_reply_to` is "empty when the headers are
