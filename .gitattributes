@@ -2,3 +2,9 @@
 # made every normalized record unreadable, and the failure looked like missing
 # frontmatter rather than like line endings.
 * text=auto eol=lf
+
+# The Enron fixtures are byte-exact copies of an export's wire format, CRLF
+# included - tests/test_enron_fixtures.py asserts it, because the converter
+# (#78) has to strip it. Normalizing them to LF would erase the property they
+# exist to hold. `-text` turns every conversion off for these files.
+tests/fixtures/enron/*.eml -text
