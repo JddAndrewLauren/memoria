@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from memoria import changes
+from memoria.context_manifest import derive_context_manifest
 from memoria.embeddings import default_embed_fn
 from memoria.extraction import RECURRENCE_THRESHOLD_DEFAULT
 from memoria.index import INDEX_RELATIVE_PATH, IndexSchemaError, rebuild
@@ -142,6 +143,14 @@ def main(argv=None):
     derive_session_parser.add_argument(
         "jsonl_path", help="Path to the Claude Code session's own JSONL file"
     )
+    derive_manifest_parser = subparsers.add_parser(
+        "derive-context-manifest",
+        help=(
+            "Write context-manifest.json for a session from its own "
+            "events.jsonl (#29)"
+        ),
+    )
+    derive_manifest_parser.add_argument("session_id", help="This session's SES- id")
 
     args = parser.parse_args(argv)
 
@@ -254,6 +263,18 @@ def main(argv=None):
             )
         else:
             print(f"derive-session: {args.session_id} already derived, unchanged")
+        return 0
+
+    if args.command == "derive-context-manifest":
+        try:
+            result = derive_context_manifest(repository, args.session_id)
+        except SessionError as exc:
+            print(f"derive-context-manifest: {exc}", file=sys.stderr)
+            return 1
+        if result.changed:
+            print(f"derive-context-manifest: wrote {result.manifest_path}")
+        else:
+            print(f"derive-context-manifest: {args.session_id} already derived, unchanged")
         return 0
 
     if args.command == "checkpoint":

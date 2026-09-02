@@ -495,6 +495,7 @@ ALLOWED_WRITERS = {
     "normalize.py",
     "subjects.py",
     "sessions.py",
+    "context_manifest.py",
 }
 FILE_WRITING_CALLS = {
     "write_text", "write_bytes",

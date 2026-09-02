@@ -21,6 +21,7 @@ from memoria.mcp import server
 from memoria.records import (
     NORMALIZED_RELATIVE_PATH,
     NormalizedRecord,
+    Read,
     ReadError,
     read,
     write_normalized_records,
@@ -36,6 +37,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 ALLOWED_IMPORTS = {
     "__future__",
     "argparse",
+    "json",  # #29: rendering a session's context manifest
     "sys",
     "mcp",
     "memoria.mcp",       # the package's own modules
@@ -313,6 +315,31 @@ def test_a_path_read_is_rendered_bare(tmp_path):
     rendered = server.render(read(Repository(root=tmp_path), "docs/note.md"))
 
     assert rendered == "# note\n"
+
+
+def test_a_session_reads_context_manifest_is_appended_after_the_transcript(tmp_path):
+    """#29: a session's manifest rides the same appended-after-the-text
+    convention as the curated overlay (#20), a third `---`-delimited
+    block, never mixed into `text` itself."""
+    manifest = {"session_id": "SES-test", "records_loaded": [{"ref": "SRC-000184", "tokens": 6}]}
+    result = Read(
+        ref="SES-test",
+        citation="SES-test",
+        text="## T001 — Author\n\nHello?\n",
+        context_manifest=manifest,
+    )
+
+    rendered = server.render(result)
+
+    text_part, _, manifest_part = rendered.partition("\n---\n")
+    assert text_part == result.text
+    assert json.loads(manifest_part) == manifest
+
+
+def test_a_turn_read_with_no_manifest_is_rendered_bare(tmp_path):
+    result = Read(ref="SES-test#T001", citation="SES-test#T001", text="Hello?")
+
+    assert server.render(result) == "Hello?"
 
 
 def test_a_stale_index_does_not_surface_as_a_stripped_tool_error(tmp_path):
