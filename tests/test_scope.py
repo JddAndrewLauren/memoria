@@ -176,46 +176,89 @@ def test_resolve_scope_returns_a_scope_resolution(tmp_path):
 
 # --- the resolver is the one seam (#36) --------------------------------------
 
-_RESOLVER_FUNCTIONS = {"resolve_scope"}
+# A guard keyed on the function name alone only catches a reimplementation
+# literally called `resolve_scope`; a future assembly.py naming its copy
+# `_entries_in_scope` or `_resolve_brief_entries` would pass it silently
+# while still being the divergence bug #36 exists to prevent. So this is
+# keyed on the combination that *is* the resolution instead - a module
+# naming `Brief`, reading its `.text`, and calling the same entry-scanning
+# functions `resolve_scope` uses to build what it scans for
+# (`load_all_entries`, `implicit_name_term`, `classify_match_term`) - the
+# same content-based shape as `test_manuscript.py`'s `_BRIEF_WRITERS` guard.
+_ENTRY_SCAN_FUNCTIONS = {"load_all_entries", "implicit_name_term", "classify_match_term"}
+
+# Modules allowed to call the entry-scanning functions for their own,
+# pre-existing purposes unrelated to resolving a Brief's scope: index.py's
+# appearance computation and extraction.py's own candidate matching (and
+# extraction.py's own, unrelated `Brief` dataclass). Neither reads a
+# `manuscript.Brief`'s `.text`.
+_SCOPE_RESOLUTION_ALLOWLIST = ("index.py", "extraction.py")
 
 
-def _function_names_in(path: Path) -> set[str]:
+def _names_in(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    return {
-        node.name
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.add(node.attr)
+        elif isinstance(node, ast.alias):
+            names.add(node.name.split(".")[-1])
+    return names
 
 
 def _package_sources() -> list[Path]:
     sources = sorted(SRC_ROOT.rglob("*.py"))
     assert sources, "no memoria package sources found - has the package moved?"
-    return [path for path in sources if path.name != "scope.py"]
+    return [
+        path
+        for path in sources
+        if path.name != "scope.py" and path.name not in _SCOPE_RESOLUTION_ALLOWLIST
+    ]
 
 
-def test_no_module_but_scope_defines_the_resolver():
-    """`resolve_scope` is defined in exactly one place. Assembly, the
-    audit's bounding and drift detection (#38, #40, #41) do not exist yet -
-    this issue is built before all three precisely so none of them grows its
-    own copy - so today this only fails for a future module that
-    reimplements the resolution instead of importing this one."""
+def test_no_module_but_scope_resolves_a_briefs_text_against_the_entries():
+    """No module outside `scope.py` both names `Brief`, reads a `.text` off
+    one, and calls the functions `resolve_scope` calls to build the terms it
+    scans for. That combination is the resolution itself, under whatever
+    name a reimplementation gave its function - the divergence bug #36
+    exists to rule out. Assembly, the audit's bounding and drift detection
+    (#38, #40, #41) do not exist yet, so today this only fails for a future
+    module that rebuilds the resolution instead of importing this one."""
     for path in _package_sources():
-        found = _function_names_in(path) & _RESOLVER_FUNCTIONS
+        names = _names_in(path)
+        if "Brief" not in names or "text" not in names:
+            continue
+        found = names & _ENTRY_SCAN_FUNCTIONS
         assert not found, (
-            f"{path.name} defines {sorted(found)} - the scope resolver lives "
-            "in scope.py alone; a second definition is the divergence bug "
-            "#36 exists to rule out"
+            f"{path.name} names Brief, reads .text, and calls {sorted(found)} - "
+            "that combination is the scope resolution itself; call "
+            "scope.resolve_scope instead of rebuilding it"
         )
 
 
-def test_the_isolation_test_would_catch_a_second_resolver(tmp_path):
-    """The test above is only worth having if it fails for the thing it
-    guards against."""
+def test_the_content_based_guard_would_catch_a_differently_named_resolver(tmp_path):
+    """The guard above is only worth having if it catches the exact case a
+    name-based guard would miss: a reimplementation under a name that is not
+    `resolve_scope`."""
     offender = tmp_path / "assembly.py"
     offender.write_text(
-        "def resolve_scope(repository, brief):\n"
-        "    return None\n",
+        "from memoria.extraction import implicit_name_term\n"
+        "from memoria.manuscript import Brief\n"
+        "from memoria.subjects import classify_match_term, load_all_entries\n"
+        "\n"
+        "def _entries_in_scope(repository, brief: Brief):\n"
+        "    found = []\n"
+        "    for entry_id, entry in load_all_entries(repository).items():\n"
+        "        implicit_name_term(entry_id)\n"
+        "        for term in entry.match_terms:\n"
+        "            classify_match_term(term)\n"
+        "            if term in brief.text:\n"
+        "                found.append(entry_id)\n"
+        "    return found\n",
         encoding="utf-8",
     )
-    assert _function_names_in(offender) & _RESOLVER_FUNCTIONS
+    names = _names_in(offender)
+    assert "Brief" in names and "text" in names
+    assert names & _ENTRY_SCAN_FUNCTIONS
