@@ -6,10 +6,13 @@ import time
 from datetime import datetime
 
 import pytest
+import sqlite_vec
 
 from memoria import extraction as ex
+from memoria.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL_NAME
 from memoria.index import (
     INDEX_RELATIVE_PATH,
+    SEMANTIC_SEARCH_LIMIT,
     SNIPPET_ELLIPSIS,
     SNIPPET_MATCH_END,
     SNIPPET_MATCH_START,
@@ -26,11 +29,34 @@ from memoria.index import (
     pin,
     rebuild,
     search,
+    search_semantic,
 )
 from memoria.records import NORMALIZED_RELATIVE_PATH, NormalizedRecord, write_normalized_records
 from memoria.repository import Repository
 from memoria.subjects import Entry, OverlayAct, entry_to_markdown, load_entry
 from memoria.write import Actor, WriteError
+
+
+def _basis_vector(index, dim=EMBEDDING_DIMENSIONS):
+    """A unit vector along axis ``index`` - together, an orthonormal basis
+    lets a fake embedder place fixture texts at exact, known distances from
+    each other with no dependence on a real model (#81's "the test path is
+    deterministic")."""
+    vector = [0.0] * dim
+    vector[index % dim] = 1.0
+    return vector
+
+
+def _fake_embed_fn(vectors):
+    """A deterministic ``EmbedFn`` (#81) over a caller-supplied ``{text:
+    vector}`` mapping - never touches ``fastembed`` or the network. Raises on
+    a text the test forgot to place, rather than silently embedding it as
+    all-zero, so a fixture gap fails loudly."""
+
+    def embed(texts):
+        return [vectors[text] for text in texts]
+
+    return embed
 
 
 def _record(
@@ -435,6 +461,25 @@ def test_results_feed_straight_into_read_with_no_reconstruction(tmp_path):
     assert reference.record_id == hit.src_id
 
 
+def test_semantic_results_feed_straight_into_read_with_no_reconstruction(tmp_path):
+    """#81's key interfaces: the same anchor scheme as `search` - a semantic
+    hit resolves through `read(ref)` exactly like a lexical one, with no
+    reconstruction step."""
+    from memoria import references
+
+    records = [_record("SRC-000012", ["A fox by the pond."])]
+    repository = Repository(root=tmp_path)
+    embed_fn = _fake_embed_fn(
+        {"A fox by the pond.": _basis_vector(0), "fox": _basis_vector(0)}
+    )
+    build_index(repository, records, embed_fn=embed_fn)
+
+    (hit,) = search_semantic(repository, "fox", embed_fn=embed_fn).results
+
+    reference = references.parse(hit.anchor)
+    assert reference.record_id == hit.src_id
+
+
 def test_rebuild_regenerates_an_index_deleted_from_disk(tmp_path):
     """§42: derived state carries no authority and can always be thrown away.
 
@@ -564,6 +609,236 @@ def test_a_snippet_does_not_change_which_rows_match(tmp_path):
     assert all(r.snippet for r in with_snippet)
 
 
+# --- the semantic index (#81, ADR-0007) --------------------------------------
+
+
+def test_build_index_with_no_embed_fn_leaves_the_vector_table_empty(tmp_path):
+    """The documented default: `build_index` is called by most of this
+    file's other tests with no `embed_fn` at all, and none of them should pay
+    for - or need - a model."""
+    records = [_record("SRC-000001", ["A blue heron flew over the pond."])]
+    repository = _index(tmp_path, records)
+
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.enable_load_extension(True)
+    sqlite_vec.load(con)
+    con.enable_load_extension(False)
+    try:
+        assert con.execute("SELECT COUNT(*) FROM paragraph_vectors").fetchone()[0] == 0
+    finally:
+        con.close()
+
+
+def test_build_index_populates_one_vector_per_real_paragraph(tmp_path):
+    records = [
+        _record(
+            "SRC-000001",
+            ["A blue heron flew over the pond.", "Nothing about birds here."],
+        )
+    ]
+    repository = Repository(root=tmp_path)
+    embed_fn = _fake_embed_fn(
+        {
+            "A blue heron flew over the pond.": _basis_vector(0),
+            "Nothing about birds here.": _basis_vector(1),
+        }
+    )
+
+    build_index(repository, records, embed_fn=embed_fn)
+
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.enable_load_extension(True)
+    sqlite_vec.load(con)
+    con.enable_load_extension(False)
+    try:
+        anchors = {
+            row[0] for row in con.execute("SELECT anchor FROM paragraph_vectors")
+        }
+    finally:
+        con.close()
+    assert anchors == {"src-000001-p1", "src-000001-p2"}
+
+
+def test_search_semantic_finds_the_nearest_paragraph_by_meaning(tmp_path):
+    """The point of the feature: a query with none of a paragraph's own
+    wording still finds it, because the two embed close together."""
+    records = [
+        _record("SRC-000001", ["A blue heron flew low over the pond."]),
+        _record("SRC-000002", ["The stock market fell sharply today."]),
+    ]
+    repository = Repository(root=tmp_path)
+    embed_fn = _fake_embed_fn(
+        {
+            "A blue heron flew low over the pond.": _basis_vector(0),
+            "The stock market fell sharply today.": _basis_vector(1),
+            "a wading bird by the water": _basis_vector(0),
+        }
+    )
+    build_index(repository, records, embed_fn=embed_fn)
+
+    result = search_semantic(
+        repository, "a wading bird by the water", embed_fn=embed_fn
+    )
+
+    assert [r.anchor for r in result.results][0] == "src-000001-p1"
+
+
+def test_search_semantic_returns_the_specific_paragraph_anchor(tmp_path):
+    records = [
+        _record(
+            "SRC-000002",
+            ["Unrelated.", "A blue heron flew over the pond."],
+        )
+    ]
+    repository = Repository(root=tmp_path)
+    embed_fn = _fake_embed_fn(
+        {
+            "Unrelated.": _basis_vector(1),
+            "A blue heron flew over the pond.": _basis_vector(0),
+            "heron": _basis_vector(0),
+        }
+    )
+    build_index(repository, records, embed_fn=embed_fn)
+
+    hit = search_semantic(repository, "heron", embed_fn=embed_fn).results[0]
+
+    assert hit.src_id == "SRC-000002"
+    assert hit.anchor == "src-000002-p2"
+    assert hit.source_type == "journal"
+
+
+def test_search_semantic_reuses_search_filters(tmp_path):
+    """#12's filter representation, not a new one (docs/tool-surface.md's
+    "Key interfaces") - a `source_type` filter excludes the nearer paragraph
+    exactly as it would for `search`."""
+    records = [
+        _record(
+            "SRC-000001", ["A heron by the pond."], source_type="editorial"
+        ),
+        _record("SRC-000002", ["A heron by the pond, said plainly."], source_type="journal"),
+    ]
+    repository = Repository(root=tmp_path)
+    embed_fn = _fake_embed_fn(
+        {
+            "A heron by the pond.": _basis_vector(0),
+            "A heron by the pond, said plainly.": _basis_vector(0),
+            "heron": _basis_vector(0),
+        }
+    )
+    build_index(repository, records, embed_fn=embed_fn)
+
+    result = search_semantic(
+        repository,
+        "heron",
+        SearchFilters(source_type="journal"),
+        embed_fn=embed_fn,
+    )
+
+    assert [r.src_id for r in result.results] == ["SRC-000002"]
+    assert "filters: source_type=journal" in result.scope
+
+
+def test_search_semantic_over_a_missing_index_returns_no_results(tmp_path):
+    repository = Repository(root=tmp_path)
+
+    def _must_not_be_called(texts):
+        raise AssertionError("embed_fn must not run against a missing index")
+
+    result = search_semantic(repository, "heron", embed_fn=_must_not_be_called)
+
+    assert result.results == ()
+    assert "0 paragraphs" in result.scope
+
+
+def test_search_semantic_with_no_vectors_built_does_not_call_embed_fn(tmp_path):
+    """`build_index` ran with no embedder (the default), so the vector table
+    exists but is empty - there is nothing to compare a query vector
+    against, so nothing should pay to compute one."""
+    records = [_record("SRC-000001", ["A blue heron flew over the pond."])]
+    repository = _index(tmp_path, records)
+
+    def _must_not_be_called(texts):
+        raise AssertionError("embed_fn must not run with nothing embedded")
+
+    result = search_semantic(repository, "heron", embed_fn=_must_not_be_called)
+
+    assert result.results == ()
+    assert "0 paragraphs" in result.scope
+
+
+def test_search_semantic_scope_line_names_embedded_and_matched_counts(tmp_path):
+    """§33.1: "an index reports nothing about its own recall" on its own -
+    this is the one place a session can state what the semantic index
+    covered. Nearest-neighbour search has no notion of "no match" below
+    `SEMANTIC_SEARCH_LIMIT` - every embedded paragraph is a candidate, so
+    both counts show here (`test_search_semantic_caps_at_the_documented_limit`
+    is where they diverge)."""
+    records = [
+        _record("SRC-000001", ["A blue heron flew over the pond."]),
+        _record("SRC-000002", ["The stock market fell sharply."]),
+    ]
+    repository = Repository(root=tmp_path)
+    embed_fn = _fake_embed_fn(
+        {
+            "A blue heron flew over the pond.": _basis_vector(0),
+            "The stock market fell sharply.": _basis_vector(1),
+            "heron": _basis_vector(0),
+        }
+    )
+    build_index(repository, records, embed_fn=embed_fn)
+
+    result = search_semantic(repository, "heron", embed_fn=embed_fn)
+
+    assert result.scope == (
+        f"embedded 2 paragraphs with {EMBEDDING_MODEL_NAME}; "
+        "filters: none; 2 semantic hits"
+    )
+
+
+def test_search_semantic_caps_at_the_documented_limit(tmp_path):
+    paragraphs = [f"paragraph number {i}." for i in range(SEMANTIC_SEARCH_LIMIT + 5)]
+    records = [_record("SRC-000001", paragraphs)]
+    repository = Repository(root=tmp_path)
+    vectors = {text: _basis_vector(0) for text in paragraphs}
+    vectors["query"] = _basis_vector(0)
+    embed_fn = _fake_embed_fn(vectors)
+    build_index(repository, records, embed_fn=embed_fn)
+
+    result = search_semantic(repository, "query", embed_fn=embed_fn)
+
+    assert len(result.results) == SEMANTIC_SEARCH_LIMIT
+
+
+def test_no_cluster_summary_is_ever_embedded(tmp_path):
+    """One of #81's own acceptance criteria: cluster summaries are
+    `[inferred]` text, never evidence, and must never reach the embedder -
+    `build_index`'s embedding loop walks `NormalizedRecord.paragraphs` only,
+    never the `memo` table, so a planted cluster summary is the regression
+    check that this stays true even though nothing here queries `memo` at
+    all today."""
+    records = [_record("SRC-000001", ["Bob went to town."])]
+    repository = _index(tmp_path, records)
+
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.execute(
+        "INSERT INTO memo (key, kind, anchor, value, written_at) "
+        "VALUES ('a-cluster', 'cluster_summary', '', "
+        "'[inferred] Bob travelled to several towns this year.', '')"
+    )
+    con.commit()
+    con.close()
+
+    seen_texts: list[str] = []
+
+    def _recording_embed_fn(texts):
+        seen_texts.extend(texts)
+        return [_basis_vector(0) for _ in texts]
+
+    build_index(repository, records, embed_fn=_recording_embed_fn)
+
+    assert seen_texts == ["Bob went to town."]
+
+
 # --- the rebuild rule (#17) --------------------------------------------------
 
 
@@ -596,9 +871,20 @@ def test_every_table_is_either_preserved_or_derived(tmp_path):
     repository = _index(tmp_path, [_record("SRC-000001", ["A paragraph."])])
 
     named = set(PRESERVED_TABLES) | set(DERIVED_TABLES)
-    # FTS5 keeps its own shadow tables beside the virtual table; they are
-    # SQLite's, not ours, and are dropped with their parent.
-    ours = {name for name in _tables(repository) if not name.startswith("records_")}
+    # FTS5 and sqlite-vec each keep their own shadow tables beside their
+    # virtual table; they are SQLite's/the extension's, not ours, and are
+    # dropped with their parent (verified below by
+    # test_rebuild_regenerates_the_vector_table_without_orphan_shadow_tables).
+    # `sqlite_sequence` is SQLite's own bookkeeping table for the vec0
+    # module's internal rowid sequence and outlives any single vec0 table's
+    # drop/recreate cycle - it is not derived state to name either way.
+    ours = {
+        name
+        for name in _tables(repository)
+        if not name.startswith("records_")
+        and not name.startswith("paragraph_vectors_")
+        and name != "sqlite_sequence"
+    }
     assert ours == named
 
 
@@ -621,6 +907,41 @@ def test_rebuild_regenerates_the_fts5_table_without_orphan_shadow_tables(tmp_pat
         "records_config",
     }
     assert len(search(repository, "fox")) == 1
+
+
+def test_rebuild_regenerates_the_vector_table_without_orphan_shadow_tables(tmp_path):
+    """The vec0 counterpart of the FTS5 check above: `paragraph_vectors` is
+    dropped and recreated by name on every rebuild (#81; §42's "delete and
+    regenerate all derived state"), and its shadow tables must go with it -
+    a second and third rebuild leave exactly one set, and the rows are the
+    latest build's, not an accumulation."""
+    records = [_record("SRC-000001", ["The fox ran through the woods."])]
+    embed_fn = _fake_embed_fn(
+        {"The fox ran through the woods.": _basis_vector(0), "fox": _basis_vector(0)}
+    )
+    repository = Repository(root=tmp_path)
+    build_index(repository, records, embed_fn=embed_fn)
+    build_index(repository, records, embed_fn=embed_fn)
+    build_index(repository, records, embed_fn=embed_fn)
+
+    shadows = {
+        name for name in _tables(repository) if name.startswith("paragraph_vectors_")
+    }
+    assert shadows == {
+        "paragraph_vectors_chunks",
+        "paragraph_vectors_info",
+        "paragraph_vectors_rowids",
+        "paragraph_vectors_vector_chunks00",
+    }
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.enable_load_extension(True)
+    sqlite_vec.load(con)
+    con.enable_load_extension(False)
+    try:
+        assert con.execute("SELECT COUNT(*) FROM paragraph_vectors").fetchone()[0] == 1
+    finally:
+        con.close()
+    assert len(search_semantic(repository, "fox", embed_fn=embed_fn).results) == 1
 
 
 def test_build_index_no_longer_deletes_the_database_file(tmp_path):
@@ -1144,6 +1465,9 @@ def _dump_derived(repository):
     from memoria.index import DERIVED_TABLES
 
     con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.enable_load_extension(True)
+    sqlite_vec.load(con)
+    con.enable_load_extension(False)
     try:
         return {
             table: sorted(con.execute(f"SELECT * FROM {table}").fetchall())

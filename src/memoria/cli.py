@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from memoria import changes
+from memoria.embeddings import default_embed_fn
 from memoria.extraction import RECURRENCE_THRESHOLD_DEFAULT
 from memoria.index import INDEX_RELATIVE_PATH, IndexSchemaError, rebuild
 from memoria.normalize import normalize as run_normalize
@@ -209,6 +210,12 @@ def main(argv=None):
                 repository,
                 recurrence_threshold=args.recurrence_threshold,
                 reset_cache=args.reset_cache,
+                # The one caller that opts into the semantic index (#81):
+                # `rebuild`'s own default is `None` (skip) so that every
+                # other caller - the test suite included - never triggers a
+                # real model load. `memoria rebuild` is the actual "at
+                # rebuild" moment ADR-0007 names.
+                embed_fn=default_embed_fn,
             )
         except IndexSchemaError as exc:
             print(f"rebuild: {exc}", file=sys.stderr)

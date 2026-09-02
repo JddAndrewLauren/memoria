@@ -9,6 +9,24 @@ description = "Memoria PoC CLI"
 requires-python = ">=3.10"
 dependencies = [
     "PyYAML>=6.0",
+    # The semantic index (#81, ADR-0007): a `sqlite-vec` virtual table beside
+    # the FTS5 one in `.memoria/index.db`, populated at `memoria rebuild` by
+    # a local CPU ONNX model through `fastembed`. Unlike `mcp`/`web`/
+    # `convert`/`graph` below, these are not an adapter's dependency to defer
+    # behind an extra - `memoria.index` (the core, imported by the CLI
+    # itself) owns the table's shape, and ADR-0007's own consequences name
+    # this "the core's first non-trivial runtime dependency" rather than
+    # something to keep optional. Both are pinned exactly, as the ADR asks:
+    # `sqlite-vec` is pre-1.0, and a `fastembed` bump could silently change
+    # what a rebuilt index's vectors mean.
+    #
+    # Installing this pulls in `onnxruntime` and the rest of `fastembed`'s
+    # chain, but downloads no model weights by itself - that only happens
+    # the first time something actually calls `memoria.embeddings.
+    # default_embed_fn` (fetched from the Hugging Face Hub), which nothing
+    # in this package's own test suite does (see `memoria.embeddings`).
+    "fastembed==0.8.0",
+    "sqlite-vec==0.1.9",
 ]
 
 [project.scripts]

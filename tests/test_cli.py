@@ -185,6 +185,39 @@ def test_rebuild_needs_no_corpus_at_all(tmp_path):
     assert "0 appearance(s) over 0 lexically-matchable" in result.stdout
 
 
+def test_rebuild_writes_the_semantic_index_table_beside_fts5(tmp_path):
+    """#81 AC 1: one database file, both tables - `memoria rebuild` wires
+    the real embedder (`memoria.embeddings.default_embed_fn`) so this is the
+    actual "at rebuild" moment ADR-0007 names, not merely `build_index`
+    called with none. This repository has no evidence corpus, so the table
+    is created but stays empty - the assertion is on its shape, not its
+    rows, so this needs no network and no model load."""
+    import sqlite3
+
+    import sqlite_vec
+
+    (tmp_path / "pyproject.toml").write_text("")
+    env = {k: v for k, v in os.environ.items() if k != "MEMORIA_EVIDENCE_ROOT"}
+
+    result = run_cli("rebuild", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    con = sqlite3.connect(tmp_path / ".memoria" / "index.db")
+    con.enable_load_extension(True)
+    sqlite_vec.load(con)
+    con.enable_load_extension(False)
+    try:
+        tables = {
+            name
+            for name, in con.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        assert {"records", "paragraph_vectors"} <= tables
+    finally:
+        con.close()
+
+
 def test_rebuild_reports_how_long_it_took(tmp_path):
     """#21's sixth acceptance criterion: what `rebuild` regenerated is
     already reported line by line; this is the "how long it took" half."""

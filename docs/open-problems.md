@@ -97,7 +97,16 @@ not exist in the PoC, so at M5 the surface opens from the Section view only (ADR
 
 Where: `poc-plan.md` §3 and §5, part 19 §19.11.
 
-### 2.2 Semantic embeddings — DECIDED 2026-09-01, by choice
+### 2.2 Semantic embeddings — CLOSED 2026-09-02, built at M2
+
+**Built** (#81): `search_semantic(query, filters)` ships on the tool surface
+(`docs/tool-surface.md`), over a `sqlite-vec` table beside the FTS5 one in
+`.memoria/index.db`, populated at `memoria rebuild` by `bge-small-en-v1.5`
+through `fastembed`, against fixture records — the labelled query set
+(`tests/fixtures/labelled_queries.yaml`) ships with its documented shape and
+a passing, currently-vacuous check (`tests/test_labelled_queries.py`), empty
+until a real archive exists to draw entries from. What follows is the
+2026-09-01 decision and the state it was taken against, kept as written.
 
 **Decided later the same day** (`adr/0007-embeddings-enter-by-choice.md`): embeddings
 enter by choice, shape fixed — a `sqlite-vec` table in the index file, a local CPU model
