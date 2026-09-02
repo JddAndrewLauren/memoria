@@ -1,21 +1,31 @@
+import dataclasses
 import sqlite3
 import time
+from datetime import datetime
 
 import pytest
 
+from memoria import extraction as ex
 from memoria.index import (
     INDEX_RELATIVE_PATH,
     SNIPPET_ELLIPSIS,
     SNIPPET_MATCH_END,
     SNIPPET_MATCH_START,
+    GatheredSource,
     SearchFilters,
     build_index,
+    exclude,
     filter_predicate,
+    gather,
+    list_overlay,
+    pin,
     rebuild,
     search,
 )
+from memoria.records import NORMALIZED_RELATIVE_PATH, NormalizedRecord, write_normalized_records
 from memoria.repository import Repository
-from memoria.records import NormalizedRecord
+from memoria.subjects import Entry, entry_to_markdown
+from memoria.write import Actor
 
 
 def _record(
@@ -509,3 +519,271 @@ def test_reset_cache_discards_it_deliberately(tmp_path):
         ).fetchone()[0] == "1"
     finally:
         con.close()
+
+
+# --- the gathered set and its pin/exclude overlay (#18) ----------------------
+
+
+def _write_entry(tmp_path, entry):
+    subject_slug = entry.id.split("/", 1)[0][len("SUB-") :]
+    slug = entry.id.split("/", 1)[1]
+    directory = tmp_path / "subjects" / subject_slug
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{slug}.md").write_text(entry_to_markdown(entry))
+
+
+def _gather_repo(tmp_path, paragraphs, entries, record_id="SRC-000001"):
+    """A repository with an index and some entries, normalized-record-backed
+    so `memoria rebuild` (not just `build_index`) works against it."""
+    repository = Repository(root=tmp_path)
+    for entry in entries:
+        _write_entry(tmp_path, entry)
+    record = _record(record_id, paragraphs)
+    write_normalized_records([record], tmp_path / NORMALIZED_RELATIVE_PATH)
+    build_index(repository, [record])
+    return repository
+
+
+def _memo(repository, anchor, **kwargs):
+    ex.record_extraction(repository, anchor, ex.ParagraphExtraction(**kwargs))
+
+
+def _place(entry_id, surface_form):
+    return ex.ProposedPlacement(entry_id, surface_form)
+
+
+def _form(surface_form, subject_id="SUB-people"):
+    return ex.ProposedForm(surface_form, subject_id)
+
+
+_AUTHOR = Actor(name="Author", email="author@example.com")
+
+
+def test_gather_returns_the_paragraphs_the_match_terms_matched(tmp_path):
+    """AC 1: the gathered set is built from the entry's match terms."""
+    entry = Entry(id="SUB-people/robert", match_terms=["Bob"], body="")
+    repository = _gather_repo(
+        tmp_path, ["Bob went to town.", "Nothing relevant here."], [entry]
+    )
+    _memo(
+        repository,
+        "src-000001-p1",
+        placements=[_place("SUB-people/robert", "Bob")],
+    )
+    _memo(repository, "src-000001-p2")
+    ex.derive(repository)
+
+    result = gather(repository, "SUB-people/robert")
+
+    assert [g.anchor for g in result] == ["src-000001-p1"]
+    assert result[0] == GatheredSource(
+        src_id="SRC-000001", anchor="src-000001-p1", pinned=False
+    )
+
+
+def test_adding_a_match_term_extends_the_gathered_set_on_the_next_pass(tmp_path):
+    """AC 2. The entry's own slug ("robert") deliberately does not license
+    "Bob" implicitly, so the extension can only be the added match term."""
+    entry = Entry(id="SUB-people/robert", match_terms=[], body="")
+    repository = _gather_repo(tmp_path, ["Bob went to town."], [entry])
+    _memo(repository, "src-000001-p1", unplaced=[_form("Bob")])
+    ex.derive(repository)
+    assert gather(repository, "SUB-people/robert") == []
+
+    _write_entry(
+        tmp_path, Entry(id="SUB-people/robert", match_terms=["Bob"], body="")
+    )
+    ex.derive(repository)
+
+    assert [g.anchor for g in gather(repository, "SUB-people/robert")] == [
+        "src-000001-p1"
+    ]
+
+
+def test_pin_and_exclude_are_recorded_with_actor_and_timestamp(tmp_path):
+    """AC 3."""
+    entry = Entry(id="SUB-people/bob", match_terms=[], body="")
+    repository = _gather_repo(tmp_path, ["Bob went to town."], [entry])
+
+    pin(repository, "SUB-people/bob", "src-000001-p1", _AUTHOR)
+
+    rows = list_overlay(repository)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.entry_id == "SUB-people/bob"
+    assert row.anchor == "src-000001-p1"
+    assert row.action == "pin"
+    assert row.actor_name == "Author"
+    assert row.actor_email == "author@example.com"
+    # Raises if unparseable - the attribution is a real timestamp, not a
+    # placeholder.
+    datetime.fromisoformat(row.at)
+
+
+def test_excluding_a_source_survives_rebuild(tmp_path):
+    """AC 4: an exclusion is still in force after `memoria rebuild` -
+    survives because `gather_overlay` is a preserved table, not a derived
+    one."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    repository = _gather_repo(tmp_path, ["Bob went to town."], [entry])
+    _memo(repository, "src-000001-p1", placements=[_place("SUB-people/bob", "Bob")])
+    ex.derive(repository)
+    assert [g.anchor for g in gather(repository, "SUB-people/bob")] == [
+        "src-000001-p1"
+    ]
+
+    exclude(repository, "SUB-people/bob", "src-000001-p1", _AUTHOR)
+    assert gather(repository, "SUB-people/bob") == []
+
+    rebuild(repository)
+
+    assert gather(repository, "SUB-people/bob") == []
+
+
+def test_a_pinned_source_stays_in_the_set_even_when_matching_would_not_find_it(
+    tmp_path,
+):
+    """AC 5."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    repository = _gather_repo(
+        tmp_path, ["Bob went to town.", "An unrelated paragraph."], [entry]
+    )
+    _memo(repository, "src-000001-p1", placements=[_place("SUB-people/bob", "Bob")])
+    _memo(repository, "src-000001-p2")
+    ex.derive(repository)
+    assert [g.anchor for g in gather(repository, "SUB-people/bob")] == [
+        "src-000001-p1"
+    ]
+
+    pin(repository, "SUB-people/bob", "src-000001-p2", _AUTHOR)
+
+    result = {g.anchor: g.pinned for g in gather(repository, "SUB-people/bob")}
+    assert result == {"src-000001-p1": False, "src-000001-p2": True}
+
+
+def test_the_gathered_set_carries_no_id():
+    """AC 6: nothing here mints an identifier for the set itself - a
+    `GatheredSource` names only the paragraph and the overlay flag on it."""
+    fields = {f.name for f in dataclasses.fields(GatheredSource)}
+    assert fields == {"src_id", "anchor", "pinned"}
+
+
+def test_validate_fails_a_pin_lacking_attribution(tmp_path):
+    """AC 7. The schema's ``NOT NULL`` only rules out ``NULL`` - an actor
+    with an empty name/email still writes a row, and `validate` is what
+    actually holds the requirement."""
+    from memoria.validate import validate
+
+    entry = Entry(id="SUB-people/bob", match_terms=[], body="")
+    repository = _gather_repo(tmp_path, ["Bob went to town."], [entry])
+    (tmp_path / "raw").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "raw" / "manifest.yaml").write_text("units: []\n")
+    pin(
+        repository,
+        "SUB-people/bob",
+        "src-000001-p1",
+        Actor(name="", email=""),
+    )
+
+    errors = validate(evidence_root=tmp_path, repo_root=tmp_path)
+    assert any("attribution" in error for error in errors)
+
+
+def test_a_theme_gathers_exactly_where_its_match_terms_co_occur(tmp_path):
+    """AC 8: a Theme promoted from a cluster - match terms naming two
+    entries and the relation between them - gathers the paragraph where
+    they co-occur, and nothing else, with no model call in `gather` itself.
+    """
+    bob = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    carol = Entry(id="SUB-people/carol", match_terms=["Carol"], body="")
+    tension = Entry(
+        id="SUB-themes/tension",
+        match_terms=[
+            "SUB-people/bob",
+            "SUB-people/carol",
+            "SUB-people/bob -> pressures -> SUB-people/carol",
+        ],
+        body="",
+    )
+    repository = _gather_repo(
+        tmp_path,
+        ["Bob pressures Carol.", "Something else entirely."],
+        [bob, carol, tension],
+    )
+    _memo(
+        repository,
+        "src-000001-p1",
+        placements=[_place("SUB-people/bob", "Bob"), _place("SUB-people/carol", "Carol")],
+        relations=[ex.ProposedRelation("SUB-people/bob", "pressures", "SUB-people/carol")],
+    )
+    _memo(repository, "src-000001-p2")
+    ex.derive(repository)
+
+    result = gather(repository, "SUB-themes/tension")
+
+    assert [g.anchor for g in result] == ["src-000001-p1"]
+
+
+def test_re_deriving_does_not_change_a_themes_gathered_set(tmp_path):
+    """AC 9: re-running the extraction (and re-clustering) is a no-op on a
+    promoted Theme's gathered set when placements have not changed."""
+    bob = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    carol = Entry(id="SUB-people/carol", match_terms=["Carol"], body="")
+    tension = Entry(
+        id="SUB-themes/tension",
+        match_terms=["SUB-people/bob -> pressures -> SUB-people/carol"],
+        body="",
+    )
+    repository = _gather_repo(
+        tmp_path, ["Bob pressures Carol."], [bob, carol, tension]
+    )
+    _memo(
+        repository,
+        "src-000001-p1",
+        placements=[_place("SUB-people/bob", "Bob"), _place("SUB-people/carol", "Carol")],
+        relations=[ex.ProposedRelation("SUB-people/bob", "pressures", "SUB-people/carol")],
+    )
+    ex.derive(repository)
+    before = gather(repository, "SUB-themes/tension")
+
+    ex.derive(repository)
+    ex.derive(repository)
+    after = gather(repository, "SUB-themes/tension")
+
+    assert before == after == [
+        GatheredSource(src_id="SRC-000001", anchor="src-000001-p1", pinned=False)
+    ]
+
+
+def test_adding_an_entry_or_relation_match_term_extends_a_themes_gathered_set(
+    tmp_path,
+):
+    """AC 10."""
+    bob = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    carol = Entry(id="SUB-people/carol", match_terms=["Carol"], body="")
+    tension = Entry(id="SUB-themes/tension", match_terms=[], body="")
+    repository = _gather_repo(
+        tmp_path, ["Bob pressures Carol."], [bob, carol, tension]
+    )
+    _memo(
+        repository,
+        "src-000001-p1",
+        placements=[_place("SUB-people/bob", "Bob"), _place("SUB-people/carol", "Carol")],
+        relations=[ex.ProposedRelation("SUB-people/bob", "pressures", "SUB-people/carol")],
+    )
+    ex.derive(repository)
+    assert gather(repository, "SUB-themes/tension") == []
+
+    _write_entry(
+        tmp_path,
+        Entry(
+            id="SUB-themes/tension",
+            match_terms=["SUB-people/bob -> pressures -> SUB-people/carol"],
+            body="",
+        ),
+    )
+    ex.derive(repository)
+
+    assert [g.anchor for g in gather(repository, "SUB-themes/tension")] == [
+        "src-000001-p1"
+    ]

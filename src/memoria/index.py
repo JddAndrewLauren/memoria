@@ -16,15 +16,25 @@ this module, so the reverse direction would be a cycle. Keeping it here also
 puts the rebuild rule (``PRESERVED_TABLES`` / ``DERIVED_TABLES``) beside the
 function that enforces it, where one test can check that every table in the
 file is named by exactly one of the two.
+
+**It also owns the gathered set and its pin/exclude overlay** (#18, part 06
+§8.3): ``gather`` recombines what ``placements``/``relations`` already hold
+with a direct lexical match against an entry's own word-shaped match terms,
+and ``pin``/``exclude`` record the author's attributed overlay in the
+preserved ``gather_overlay`` table - the second thing in this file, beside
+the memo cache, that a rebuild does not throw away.
 """
 
 from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from memoria.records import NormalizedRecord, real_paragraphs, read_all
 from memoria.repository import Repository
+from memoria.subjects import classify_match_term, load_entry
+from memoria.write import Actor
 
 INDEX_RELATIVE_PATH = ".memoria/index.db"
 
@@ -46,14 +56,17 @@ INDEX_RELATIVE_PATH = ".memoria/index.db"
 # real failure mode here, someone adding a table and forgetting to say which
 # side of the line it falls on.
 
-# The memo cache and its schema marker. **The only rows in this file a
-# rebuild does not throw away**, and the reason is narrow: everything else
-# here can be recomputed from evidence plus the author's durable acts, and
-# these cannot be recomputed at all without a model. That is the whole
-# predicate - not "paragraph rows versus cluster rows" - which is why one
-# table with a `kind` column carries both (part 06 §8.12's "one cache, two
-# key compositions").
-PRESERVED_TABLES = ("memoria_schema", "memo")
+# The memo cache and its schema marker, and the pin/exclude overlay. **The
+# only rows in this file a rebuild does not throw away**, and the memo
+# cache's reason is narrow: everything else here can be recomputed from
+# evidence plus the author's durable acts, and it cannot be recomputed at
+# all without a model. That is the whole predicate - not "paragraph rows
+# versus cluster rows" - which is why one table with a `kind` column carries
+# both (part 06 §8.12's "one cache, two key compositions"). The overlay is
+# preserved for a different reason (#18, part 06 §8.3): a pin or exclusion
+# is itself an attributed author act, not recomputable evidence, so a
+# rebuild that erased it would silently reverse a decision the author made.
+PRESERVED_TABLES = ("memoria_schema", "memo", "gather_overlay")
 
 # Everything else. Dropped and regenerated on every `memoria rebuild`, which
 # is §42's contract made mechanical.
@@ -98,6 +111,20 @@ _PRESERVED_DDL = (
     "written_at TEXT NOT NULL"
     ")",
     "CREATE INDEX IF NOT EXISTS memo_kind_anchor ON memo(kind, anchor)",
+    # One row per (entry, anchor): the author's most recent pin or exclude of
+    # that source against that entry (#18, part 06 §8.3). `INSERT OR
+    # REPLACE`'d, never appended to - a later act simply supersedes an
+    # earlier one, the same "click-authorized" shape as a settlement (§8.7).
+    # `actor_name`/`actor_email` and `at` are the attribution `memoria
+    # validate` checks for (issue #18's seventh criterion); they are plain
+    # columns rather than a git commit trailer because these rows are never
+    # backed by a file - there is nothing else to attribute them from.
+    "CREATE TABLE IF NOT EXISTS gather_overlay("
+    "entry_id TEXT NOT NULL, anchor TEXT NOT NULL, "
+    "action TEXT NOT NULL CHECK (action IN ('pin', 'exclude')), "
+    "actor_name TEXT NOT NULL, actor_email TEXT NOT NULL, at TEXT NOT NULL, "
+    "PRIMARY KEY (entry_id, anchor)"
+    ")",
 )
 
 _DERIVED_DDL = (
@@ -589,3 +616,212 @@ def rebuild(
             repository, recurrence_threshold=recurrence_threshold
         )
     return RebuildReport(records=records, counts=counts)
+
+
+# --- the gathered set and its pin/exclude overlay (#18, part 06 §8.3) -------
+
+
+@dataclass(frozen=True)
+class GatheredSource:
+    """One paragraph in an entry's gathered set.
+
+    The gathered set itself has no stable ID - it asserts nothing, so
+    nothing outside this function ever needs to name one (§8.3's sixth
+    criterion). ``anchor`` is what is already addressable, and it is enough:
+    a caller that wants to read the evidence reads it through ``read(ref)``.
+    """
+
+    src_id: str
+    anchor: str
+    pinned: bool = False
+
+
+@dataclass(frozen=True)
+class OverlayEntry:
+    """One row of the pin/exclude overlay - the attributed act, not the
+    resulting membership. ``memoria validate`` reads these to check that
+    every row carries attribution."""
+
+    entry_id: str
+    anchor: str
+    action: str
+    actor_name: str
+    actor_email: str
+    at: str
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _record_overlay(
+    repository: Repository, entry_id: str, anchor: str, action: str, actor: Actor
+) -> None:
+    con = connect(repository)
+    try:
+        con.execute(
+            "INSERT INTO gather_overlay "
+            "(entry_id, anchor, action, actor_name, actor_email, at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (entry_id, anchor) DO UPDATE SET "
+            "action = excluded.action, actor_name = excluded.actor_name, "
+            "actor_email = excluded.actor_email, at = excluded.at",
+            (entry_id, anchor, action, actor.name, actor.email, _now()),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def pin(repository: Repository, entry_id: str, anchor: str, actor: Actor) -> None:
+    """Author act: ``anchor`` stays in ``entry_id``'s gathered set regardless
+    of what the matching pass finds (part 06 §8.3's overlay).
+
+    Recorded in the preserved ``gather_overlay`` table, so it survives
+    ``memoria rebuild`` - the same durability class as the memo cache, for
+    the same reason: this is not derivable state.
+
+    Overwrites a prior pin or exclusion of the same source against the same
+    entry, attributed and timestamped to this call - the author's later act
+    supersedes their earlier one rather than stacking a history of them,
+    the same shape as a settlement (§8.7).
+    """
+    _record_overlay(repository, entry_id, anchor, "pin", actor)
+
+
+def exclude(repository: Repository, entry_id: str, anchor: str, actor: Actor) -> None:
+    """Author act: ``anchor`` stays out of ``entry_id``'s gathered set even
+    if the matching pass would otherwise include it. See ``pin``."""
+    _record_overlay(repository, entry_id, anchor, "exclude", actor)
+
+
+def list_overlay(repository: Repository) -> list[OverlayEntry]:
+    """Every pin/exclude row in the repository's index.
+
+    Only ``memoria validate``'s attribution check needs every row at once;
+    ``gather`` reads its own entry's rows directly.
+    """
+    db_path = repository.root / INDEX_RELATIVE_PATH
+    if not db_path.exists():
+        return []
+    con = sqlite3.connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT entry_id, anchor, action, actor_name, actor_email, at "
+            "FROM gather_overlay ORDER BY entry_id, anchor"
+        ).fetchall()
+    finally:
+        con.close()
+    return [OverlayEntry(*row) for row in rows]
+
+
+def _lexical_match(con: sqlite3.Connection, term: str) -> list[str]:
+    """Anchors whose paragraph text contains ``term`` - the deterministic
+    lexical pass part 06 §8.3 says gathering "stays" as, over and above
+    whatever the extraction placed. Quoted as an FTS5 phrase so a term with
+    more than one word, or one that happens to collide with FTS5 query
+    syntax, is still matched literally."""
+    query = '"' + term.replace('"', '""') + '"'
+    return [
+        row[0]
+        for row in con.execute(
+            "SELECT anchor FROM records WHERE records MATCH ?", (query,)
+        )
+    ]
+
+
+def gather(repository: Repository, entry_id: str) -> list[GatheredSource]:
+    """The gathered set (part 06 §8.3): every paragraph this entry's subject
+    matched, plus the author's pin/exclude overlay.
+
+    No model call, ever: ``memoria.extraction.derive`` already ran whatever
+    reading a model call needed and left its verdict in ``placements`` and
+    ``relations``; this only recombines what is already durable or already
+    in the index, over three sources unioned by anchor:
+
+    - ``placements`` already licensed under ``entry_id`` - built from the
+      entry's *word*-shaped match terms plus its implicit name
+      (``memoria.extraction._licensing_terms``);
+    - a direct lexical match against each of the entry's own word-shaped
+      match terms, the deterministic pass that gathering "stays" as (§8.3) -
+      catching a literal mention the model missed, which is the recall this
+      module's docstring calls the design's central risk;
+    - for an ``entry``- or ``relation``-shaped match term, the placements or
+      relations rows it names. This is how a Theme or Arc promoted from a
+      cluster gathers (ADR-0005, 2026-09-01 amendment): its match terms are
+      the entries and relations that defined the cluster, and this is the
+      join over placements. ``extraction.read_placements`` deliberately does
+      not consult these two shapes - a Theme is never itself placed - so
+      this function is the only place they are.
+
+    Then the overlay: an excluded anchor is dropped even if matched above,
+    and a pinned one is added even if nothing above found it.
+
+    Ordered by anchor for a stable, reproducible result. A missing index -
+    every fresh clone - returns no results, matching ``search``.
+    """
+    entry = load_entry(repository, *entry_id.split("/", 1))
+
+    db_path = repository.root / INDEX_RELATIVE_PATH
+    if not db_path.exists():
+        return []
+    con = sqlite3.connect(db_path)
+    try:
+        anchors: set[str] = {
+            row[0]
+            for row in con.execute(
+                "SELECT anchor FROM placements WHERE entry_id = ?", (entry_id,)
+            )
+        }
+        for term in entry.match_terms:
+            kind = classify_match_term(term)
+            if kind == "word":
+                anchors.update(_lexical_match(con, term))
+            elif kind == "entry":
+                anchors.update(
+                    row[0]
+                    for row in con.execute(
+                        "SELECT anchor FROM placements WHERE entry_id = ?", (term,)
+                    )
+                )
+            else:  # "relation"
+                left, verb, right = (part.strip() for part in term.split(" -> "))
+                anchors.update(
+                    row[0]
+                    for row in con.execute(
+                        "SELECT anchor FROM relations "
+                        "WHERE from_ref = ? AND verb = ? AND to_ref = ?",
+                        (left, verb, right),
+                    )
+                )
+
+        overlay = dict(
+            con.execute(
+                "SELECT anchor, action FROM gather_overlay WHERE entry_id = ?",
+                (entry_id,),
+            ).fetchall()
+        )
+        for anchor, action in overlay.items():
+            if action == "exclude":
+                anchors.discard(anchor)
+            else:
+                anchors.add(anchor)
+
+        if not anchors:
+            return []
+        placeholders = ",".join("?" for _ in anchors)
+        rows = con.execute(
+            f"SELECT anchor, src_id FROM paragraphs WHERE anchor IN ({placeholders})",
+            tuple(anchors),
+        ).fetchall()
+    finally:
+        con.close()
+
+    pinned = {anchor for anchor, action in overlay.items() if action == "pin"}
+    return sorted(
+        (
+            GatheredSource(src_id=src_id, anchor=anchor, pinned=anchor in pinned)
+            for anchor, src_id in rows
+        ),
+        key=lambda gathered: gathered.anchor,
+    )
