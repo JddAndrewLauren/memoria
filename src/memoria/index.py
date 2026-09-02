@@ -1052,9 +1052,8 @@ def overlay_for_anchor(repository: Repository, anchor: str) -> ReadOverlay | Non
     effect on membership.
 
     Both are scoped to ``load_all_entries`` - entries actually on disk -
-    rather than to whatever ``placements``/``gather_overlay`` happen to
-    still name, so a deleted or renamed entry never surfaces from a stale
-    index.
+    rather than to whatever the index's ``placements`` rows happen to still
+    name, so a deleted or renamed entry never surfaces from a stale index.
 
     Returns an empty overlay when there is no index yet (no ``memoria
     rebuild`` has run), the same no-index behaviour ``search`` and
@@ -1071,15 +1070,11 @@ def overlay_for_anchor(repository: Repository, anchor: str) -> ReadOverlay | Non
     if not db_path.exists():
         return ReadOverlay(entry_links=[], exclusions=[], citing_settlements=[])
     try:
-        con = connect(repository)
-        try:
-            excluded_rows = con.execute(
-                "SELECT entry_id FROM gather_overlay "
-                "WHERE anchor = ? AND action = 'exclude'",
-                (anchor,),
-            ).fetchall()
-        finally:
-            con.close()
+        # `entry_links` still comes out of the index, by way of `gather`, so
+        # an unreadable index means no overlay at all. Probed up front rather
+        # than left to `gather` so the answer does not depend on whether any
+        # entries happen to be on disk to trigger a read.
+        connect(repository).close()
         entries = load_all_entries(repository)
         entry_links = sorted(
             entry_id
@@ -1088,8 +1083,16 @@ def overlay_for_anchor(repository: Repository, anchor: str) -> ReadOverlay | Non
         )
     except (IndexSchemaError, sqlite3.Error):
         return None
+    # Off the entry files, not the index: #21 moved the overlay onto the
+    # entry itself, so `load_all_entries` already scopes this to entries
+    # actually on disk.
     exclusions = sorted(
-        entry_id for (entry_id,) in excluded_rows if entry_id in entries
+        entry_id
+        for entry_id, entry in entries.items()
+        if any(
+            act.anchor == anchor and act.action == "exclude"
+            for act in entry.overlay
+        )
     )
     return ReadOverlay(
         entry_links=entry_links, exclusions=exclusions, citing_settlements=[]

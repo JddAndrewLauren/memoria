@@ -8,6 +8,7 @@ substrings.
 """
 
 import sqlite3
+import subprocess
 
 import pytest
 import yaml
@@ -769,7 +770,10 @@ def _write_entry(tmp_path, entry):
 
 def _overlay_repo(tmp_path, entries=()):
     """The default `_record()`, indexed, with `entries` written to disk -
-    the shape a decorated read's overlay needs beneath it."""
+    the shape a decorated read's overlay needs beneath it. A real
+    (uncommitted) git repository: `pin`/`exclude` now write the entry file
+    through the durable write path (#21), which commits."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, capture_output=True)
     for entry in entries:
         _write_entry(tmp_path, entry)
     record = _record()
@@ -881,13 +885,19 @@ def test_a_pin_adds_an_entry_link_with_no_placement_behind_it(tmp_path):
 def test_a_pin_or_exclusion_against_an_entry_no_longer_on_disk_is_dropped(tmp_path):
     """Retry item 3: a stale index must not name an entry that has been
     deleted or renamed since - `entry_links`/`exclusions` are scoped to
-    `load_all_entries`, not to whatever the index rows still say."""
-    entry = Entry(id="SUB-people/bob", match_terms=[], body="")
-    repository = _overlay_repo(tmp_path, [entry])
+    `load_all_entries`, not to whatever the index rows still say.
+
+    Both entries have to exist to be curated at all: since #21 the overlay
+    lives on the entry file, so `pin`/`exclude` refuse an entry that is not
+    on disk. The stale-row case is therefore reached by deleting the files
+    afterwards, not by curating an entry that never existed."""
+    bob = Entry(id="SUB-people/bob", match_terms=[], body="")
+    carol = Entry(id="SUB-people/carol", match_terms=[], body="")
+    repository = _overlay_repo(tmp_path, [bob, carol])
     pin(repository, "SUB-people/bob", "src-000184-p1", _AUTHOR)
     exclude(repository, "SUB-people/carol", "src-000184-p1", _AUTHOR)
-    # "carol" never existed on disk; "bob" is removed after being pinned.
     (tmp_path / "subjects" / "people" / "bob.md").unlink()
+    (tmp_path / "subjects" / "people" / "carol.md").unlink()
 
     result = read(repository, "SRC-000184 P1")
 
