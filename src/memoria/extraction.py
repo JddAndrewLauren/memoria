@@ -40,7 +40,7 @@ import sqlite3
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 from memoria import clustering
 from memoria.clustering import ClusteringUnavailable, CoOccurrence
@@ -1263,6 +1263,48 @@ def promote_candidate(
     )
 
 
+def _would_seed(
+    members: Sequence[str],
+    relations: Sequence[tuple[str, str, str]],
+    candidate_labels: Mapping[str, str] = {},
+) -> tuple[str, ...]:
+    """The full, ordered match-term list ``promote_cluster`` would seed an
+    entry with from this cluster's members and relations - relation terms
+    split around the member terms, deduplicated, in the same order
+    ``promote_cluster`` writes them in. Returned untruncated, in seed order,
+    so a caller that needs the cap (``promote_cluster``, to report how many
+    it dropped; ``_route_for``, to know what would actually be seeded today)
+    slices ``[:MAX_SEEDED_MATCH_TERMS]`` itself.
+
+    The one ordering implementation both ``promote_cluster`` and
+    ``_route_for`` share (docs/tool-surface.md) - if they drift, a cluster's
+    promotion and its own routing test can disagree about what it seeds.
+    """
+    member_terms: list[str] = []
+    for node in members:
+        if node.startswith(CANDIDATE_REF_PREFIX):
+            word = candidate_labels.get(node)
+            if word:
+                member_terms.append(word)
+        else:
+            member_terms.append(node)
+    relation_terms = [
+        f"{from_ref} -> {verb} -> {to_ref}"
+        for from_ref, verb, to_ref in relations
+        if not from_ref.startswith(CANDIDATE_REF_PREFIX)
+        and not to_ref.startswith(CANDIDATE_REF_PREFIX)
+    ]
+    # The cap holds room for relations. Members alone would fill it on any
+    # cluster of MAX_SEEDED_MATCH_TERMS members and more, and a Theme seeded
+    # with no relation at all is not what AC 8 promises; so the strongest
+    # relations take up to half, members follow, and the rest of the
+    # relations fill whatever is left.
+    half = MAX_SEEDED_MATCH_TERMS // 2
+    return tuple(
+        _deduplicate(relation_terms[:half] + member_terms + relation_terms[half:])
+    )
+
+
 def promote_cluster(
     repository: Repository,
     cluster_id: str,
@@ -1322,28 +1364,7 @@ def promote_cluster(
     finally:
         con.close()
 
-    member_terms: list[str] = []
-    for node in nodes:
-        if node.startswith(CANDIDATE_REF_PREFIX):
-            word = candidate_labels.get(node)
-            if word:
-                member_terms.append(word)
-        else:
-            member_terms.append(node)
-    relation_terms = [
-        f"{from_ref} -> {verb} -> {to_ref}"
-        for from_ref, verb, to_ref in relations
-        if not from_ref.startswith(CANDIDATE_REF_PREFIX)
-        and not to_ref.startswith(CANDIDATE_REF_PREFIX)
-    ]
-
-    # The cap holds room for relations. Members alone would fill it on any
-    # cluster of MAX_SEEDED_MATCH_TERMS members and more, and a Theme seeded
-    # with no relation at all is not what AC 8 promises; so the strongest
-    # relations take up to half, members follow, and the rest of the
-    # relations fill whatever is left.
-    half = MAX_SEEDED_MATCH_TERMS // 2
-    terms = _deduplicate(relation_terms[:half] + member_terms + relation_terms[half:])
+    terms = list(_would_seed(nodes, relations, candidate_labels))
     seeded = terms[:MAX_SEEDED_MATCH_TERMS]
     slug = entry_slug or entry_slug_for(label or cluster_id)
     return _materialize(
@@ -2079,13 +2100,13 @@ class ClusterGroup:
     has been promoted routes to the entry, not to its stale label"). A
     promoted entry never points back at its origin cluster - cluster identity
     does not survive re-clustering - so this is read the only way it can be:
-    forward, off the entry's own current match terms, checked two ways
-    against the cluster's own defining terms (``_route_for``). It is ``None``
-    before any promotion, after one whose match terms have since been edited
-    past what this cluster still defines, and for every other cluster the
-    entry's terms do not equally define - an ancestor of the real origin
-    cluster included, since a coarser level's members are always a superset
-    of a finer one's.
+    forward, off the entry's own current match terms, checked for exact
+    equality against what this cluster would seed today (``_route_for``). It
+    is ``None`` before any promotion, after one whose match terms have since
+    been edited past what this cluster still defines, and for every other
+    cluster the entry's terms do not exactly equal - an ancestor of the real
+    origin cluster included, since a coarser level's members are always a
+    superset of a finer one's.
 
     ``summary`` is the cluster's memoized ``[inferred]`` text - never
     generated here, only served (ADR-0005 build shape 3) - and is ``None``
@@ -2179,39 +2200,39 @@ def _theme_routes(repository: Repository) -> dict[frozenset[str], str]:
 
 
 def _route_for(
-    terms: frozenset[str], routes: dict[frozenset[str], str], candidate_count: int = 0
+    members: Sequence[str],
+    relations: Sequence[tuple[str, str, str]],
+    routes: dict[frozenset[str], str],
+    candidate_labels: Mapping[str, str] = {},
 ) -> str | None:
-    """The entry ``terms`` (one cluster's own entry- and relation-shaped
-    members) routes to, if a Theme's or Arc's own seeded set still defines
-    it - see ``_theme_routes``.
+    """The entry this cluster (``members``, ``relations``) routes to, if a
+    Theme's or Arc's own seeded set still defines it - see
+    ``_theme_routes``.
 
-    **Two-way, not one-way.** One-way containment (an entry's terms are a
+    **Exact, not bounded.** One-way containment (an entry's terms are a
     subset of the cluster's) is not enough: it also matches a hand-authored
     Theme whose terms merely happen to overlap an unrelated cluster's larger
     membership, and it matches every ancestor of the cluster an entry was
     actually promoted from, since a coarser level's members are always a
-    superset of a finer one's (``clustering.py``'s nesting). So the cluster
-    must also define nothing beyond what the entry names - checked the other
-    way, ``terms - seed`` - with two deliberate slacks, both bounded by how
-    ``promote_cluster`` actually seeds:
+    superset of a finer one's (``clustering.py``'s nesting). A bounded slack
+    on top of containment cannot fix this without also re-opening it: any
+    cardinality allowance forgiven for "the cap could have crowded a member
+    out" is indistinguishable from "the cluster is just bigger than the
+    entry" once enough candidate-shaped members are present, and real
+    extractions carry many (review round 3).
 
-    - the cap. ``promote_cluster`` seeds at most ``MAX_SEEDED_MATCH_TERMS``
-      terms, so a cluster whose own term count already exceeds the cap is
-      allowed exactly that many terms missing from the entry, no more.
-    - candidate-shaped members. ``cluster_members`` orders by ``member_ref``,
-      and ``CAND:`` sorts ahead of ``SUB-``, so on a cluster that mixes
-      entries and candidates, ``promote_cluster`` fills the seed with
-      candidate label words *before* entry references - a real entry member
-      can be displaced from the seed by the cap even when the cluster's own
-      entry-shaped term count alone never exceeded it. ``candidate_count``
-      (the cluster's candidate-shaped member count, which ``terms`` never
-      includes - see ``_cluster_terms``) is added to that count before the
-      cap is applied, so the slack only grows when the two together could
-      actually have crowded a real member out, not merely because a cluster
-      happens to contain some candidates.
-
-    A cluster small enough - entries, relations, and candidates together -
-    to have been seeded in full must still match in full.
+    So this does not approximate what ``promote_cluster`` might have seeded
+    - it computes what ``promote_cluster`` **would seed today**, via the
+    same ``_would_seed`` ordering, capped at ``MAX_SEEDED_MATCH_TERMS`` and
+    stripped of the plain-word terms a candidate-shaped member contributes
+    (``_theme_routes`` never puts those in ``routes`` either, since a Theme's
+    own match terms are filtered the same way), and requires the cluster's
+    would-seed set to equal a route's seed **exactly**. This forgives
+    candidate crowding and the cap by construction - both are already baked
+    into ``_would_seed``'s truncation - while still failing a hand-authored
+    overlap or a coarser ancestor no matter how many candidates either
+    carries, because neither one's would-seed set is actually equal to the
+    route it merely resembles.
 
     This still cannot tell a hand-authored Theme from a promoted one when
     the two are indistinguishable by construction - an entry whose terms
@@ -2219,33 +2240,16 @@ def _route_for(
     decision 6 rules out a durable pointer that would settle it; this is the
     residual and it is bounded, not open-ended.
     """
-    for seed, entry_id in routes.items():
-        if not seed or not seed <= terms:
-            continue
-        allowed_missing = max(
-            0, len(terms) + candidate_count - MAX_SEEDED_MATCH_TERMS
-        )
-        if len(terms - seed) <= allowed_missing:
-            return entry_id
-    return None
-
-
-def _cluster_terms(
-    members: Sequence[str], relations: Sequence[tuple[str, str, str]]
-) -> frozenset[str]:
-    """One cluster's defining terms in match-term form - the same shapes
-    ``promote_cluster`` seeds an entry with - over its entry-shaped members
-    and the relations whose ends are both entries. Candidate-shaped members
-    and candidate-touching relations are excluded: a candidate has no match
-    term of its own to route through."""
-    entry_terms = {ref for ref in members if not ref.startswith(CANDIDATE_REF_PREFIX)}
-    relation_terms = {
-        f"{from_ref} -> {verb} -> {to_ref}"
-        for from_ref, verb, to_ref in relations
-        if not from_ref.startswith(CANDIDATE_REF_PREFIX)
-        and not to_ref.startswith(CANDIDATE_REF_PREFIX)
-    }
-    return frozenset(entry_terms | relation_terms)
+    would_seed = frozenset(
+        term
+        for term in _would_seed(members, relations, candidate_labels)[
+            :MAX_SEEDED_MATCH_TERMS
+        ]
+        if classify_match_term(term) != "word"
+    )
+    if not would_seed:
+        return None
+    return routes.get(would_seed)
 
 
 def search_global(
@@ -2348,6 +2352,7 @@ def search_global(
         labels: dict[str, str] = {}
         members: dict[str, list[str]] = {}
         relations: dict[str, list[tuple[str, str, str]]] = {}
+        candidate_labels: dict[str, str] = {}
         if cluster_ids:
             placeholders = ",".join("?" for _ in cluster_ids)
             labels = dict(
@@ -2369,6 +2374,12 @@ def search_global(
                 cluster_ids,
             ):
                 relations.setdefault(cluster_id, []).append((from_ref, verb, to_ref))
+            candidate_labels = {
+                f"{CANDIDATE_REF_PREFIX}{candidate_id}": candidate_label
+                for candidate_id, candidate_label in con.execute(
+                    "SELECT candidate_id, label FROM candidates"
+                )
+            }
     finally:
         con.close()
 
@@ -2382,16 +2393,15 @@ def search_global(
     groups = []
     for cluster_id in cluster_ids:
         cluster_members = members.get(cluster_id, ())
-        terms = _cluster_terms(cluster_members, relations.get(cluster_id, ()))
-        candidate_count = sum(
-            1 for ref in cluster_members if ref.startswith(CANDIDATE_REF_PREFIX)
-        )
+        cluster_relations = relations.get(cluster_id, ())
         groups.append(
             ClusterGroup(
                 cluster_id=cluster_id,
                 level=level,
                 label=labels.get(cluster_id, ""),
-                entry_id=_route_for(terms, routes, candidate_count),
+                entry_id=_route_for(
+                    cluster_members, cluster_relations, routes, candidate_labels
+                ),
                 results=tuple(
                     SearchResult(src_id=src_id, anchor=anchor, source_type=source_type)
                     for src_id, anchor, source_type, _ in by_cluster[cluster_id]

@@ -1349,6 +1349,84 @@ def test_search_global_a_large_promoted_cluster_with_candidates_still_routes(
     assert result.groups[0].entry_id == promotion.entry_id
 
 
+def test_search_global_a_hand_authored_theme_is_not_captured_by_candidate_crowding(
+    tmp_path,
+):
+    """Review round 3. `allowed_missing` was a pure cardinality slack - it
+    grew with the cluster's candidate-shaped member count regardless of
+    whether ``seed`` was consistent with what this cluster would actually
+    seed, so it loosened containment for every route, hand-authored ones
+    included. A Theme naming only one of several co-occurring people wrongly
+    routed once its cluster carried roughly
+    ``MAX_SEEDED_MATCH_TERMS - len(seed)`` candidate-shaped members - not a
+    corner case, since recurring unplaced forms are the most numerous node
+    shape in a real extraction. Reproduced with the reviewer's numbers: 3
+    paragraphs, alice/bob/carol placed together, 12 recurring unplaced
+    forms, and a hand-authored ``SUB-themes/hand-written`` naming only bob."""
+    entries = [
+        Entry(id="SUB-people/alice", match_terms=["Alice"], body=""),
+        Entry(id="SUB-people/bob", match_terms=["Bob"], body=""),
+        Entry(id="SUB-people/carol", match_terms=["Carol"], body=""),
+        Entry(id="SUB-themes/hand-written", match_terms=["SUB-people/bob"], body=""),
+    ]
+    candidate_words = [f"candword{n:02d}" for n in range(12)]
+    paragraph = "Alice, Bob and Carol met, with " + ", ".join(candidate_words) + "."
+    repository = _repo(tmp_path, [paragraph] * 3, entries=entries)
+    for number in (1, 2, 3):
+        _memo(
+            repository,
+            f"src-000001-p{number}",
+            placements=(
+                _place("SUB-people/alice", "Alice"),
+                _place("SUB-people/bob", "Bob"),
+                _place("SUB-people/carol", "Carol"),
+            ),
+            unplaced=tuple(_form(word) for word in candidate_words),
+        )
+    ex.derive(repository, recurrence_threshold=1)
+    assert len(_rows(repository, "clusters")) == 1, "one co-occurring cluster"
+
+    result = ex.search_global(repository, "Alice")
+
+    assert result.groups[0].entry_id is None
+
+
+def test_route_for_a_candidate_carrying_coarse_ancestor_does_not_leak(tmp_path):
+    """Review round 3, the ancestor-leak counterpart to the hand-authored
+    case above: a coarser cluster that merely contains its finer child's
+    promoted members, plus enough candidate-shaped members to have crowded
+    those extra entries out of today's cap, must not inherit the child's
+    route either. The reviewer could not synthesize this dendrogram through
+    Louvain - candidates pull the pair into one self-parented cluster - so
+    this exercises `_route_for` directly with hand-built cluster shapes
+    instead of going through `derive`.
+
+    Chosen so plain one-way containment (the pre-round-1 bug) would also
+    reject it - the point here is specifically that candidate crowding does
+    not resurrect a false match: 9 candidate-shaped members fill 9 of the 12
+    seed slots, leaving room for only 3 of the ancestor's 6 entries, and
+    those 3 are chosen (alphabetically first) to be an unrelated trio -
+    ``alice``/``bob``/``carol`` - never the child's own ``xavier``/
+    ``yolanda``/``zoe``, so today's would-seed genuinely differs from the
+    child's route in both directions, exactly as the real cluster does."""
+    child_members = ["SUB-people/xavier", "SUB-people/yolanda", "SUB-people/zoe"]
+    routes = {frozenset(child_members): "SUB-themes/child"}
+
+    assert ex._route_for(child_members, (), routes) == "SUB-themes/child"
+
+    candidate_labels = {
+        f"{ex.CANDIDATE_REF_PREFIX}c{n:02d}": f"candword{n:02d}" for n in range(9)
+    }
+    ancestor_members = (
+        list(candidate_labels) + ["SUB-people/alice", "SUB-people/bob", "SUB-people/carol"]
+        + child_members
+    )
+
+    assert (
+        ex._route_for(ancestor_members, (), routes, candidate_labels) is None
+    ), "the ancestor must not inherit the child's route"
+
+
 def test_search_global_summarize_false_never_carries_a_summary(tmp_path):
     """AC 3: `summarize=false` returns none, even when one has been written."""
     repository = _repo(tmp_path, ["Bob and the acquisition."] * 3)
