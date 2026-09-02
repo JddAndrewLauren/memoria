@@ -12,10 +12,10 @@ and issue #1 for what it cost.
 Practically, this means:
 
 - `memoria normalize` produces normalized records from any raw unit whose suffix
-  has a registered converter — plain text, docx and pdf today, with email owed
-  by #78. What was removed with that corpus is the rest of its ingestion
-  layer: editorial segregation, year resolution, cross-reference extraction
-  and the benchmark answer key.
+  has a registered converter — plain text, docx, pdf and email today, the last
+  of these one record per message. What was removed with that corpus is the
+  rest of its ingestion layer: editorial segregation, year resolution,
+  cross-reference extraction and the benchmark answer key.
 - `docs/normalized-record-schema.md` survives as the **contract** a future
   normalizer must satisfy. It is what `memoria.index` and `memoria validate`
   already read, and it is what to build against.
