@@ -325,3 +325,21 @@ def test_read_raw_source_refuses_an_original_file_that_escapes_the_evidence_root
 
     with pytest.raises(ReadError):
         read_raw_source(repository, "SRC-000184")
+
+
+def test_read_raw_source_refuses_a_binary_original_naming_its_type(tmp_path):
+    """A docx or pdf original is refused, not handed back as bytes (#113).
+
+    The payload here is text; a binary file's raw bytes returned as if they
+    were text would be worse than `cat`, not equal to it.
+    """
+    evidence_root = tmp_path / "evidence"
+    (evidence_root / "raw" / "vol-01").mkdir(parents=True)
+    original = evidence_root / "raw" / "vol-01" / "letter.docx"
+    original.write_bytes(b"\x50\x4b\x03\x04not really a zip but not utf-8 \xff\xfe")
+
+    repository = _write(tmp_path, _record(original_file="raw/vol-01/letter.docx"))
+    repository = Repository(root=repository.root, evidence_root=evidence_root)
+
+    with pytest.raises(ReadError, match=r"\.docx"):
+        read_raw_source(repository, "SRC-000184")

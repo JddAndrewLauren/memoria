@@ -54,7 +54,7 @@ from memoria.ledger import (
     session_id_from_env,
 )
 from memoria.records import Read, ReadError, read as read_ref, real_paragraphs
-from memoria.repository import Repository, from_env
+from memoria.repository import NoEvidenceRoot, Repository, from_env
 
 mcp = MCPServer(
     "memoria",
@@ -141,7 +141,7 @@ def render(result: Read) -> str:
 
 
 @mcp.tool()
-def read(ref: str) -> str:
+def read(ref: str, raw: bool = False) -> str:
     """Read any stable reference, verbatim.
 
     Accepts a normalized source record by ID (`SRC-000184`), one paragraph of
@@ -155,16 +155,24 @@ def read(ref: str) -> str:
     full-source read. Evidence text is never summarized, abridged or
     reformatted.
 
+    `raw=True`, for a bare record ID only, serves the pre-normalization
+    original behind that record instead - the file the normalizer read, not
+    what it produced. Refused for anything else, and for a binary original
+    (docx, pdf) rather than handed back as bytes.
+
     Reference kinds the archive defines but this build does not resolve yet -
     SES-, CHG-, CLM-, RES-, DEC- - return an error naming the kind.
     """
     try:
-        result = read_ref(repository(), ref)
-    except ReadError as exc:
+        result = read_ref(repository(), ref, raw=raw)
+    except (ReadError, NoEvidenceRoot) as exc:
         # ToolError is the SDK's anticipated-failure type: it reaches the
         # model as is_error with this message intact. A bare exception would
         # be reported as "Error executing tool read" with the reason stripped,
-        # which is the silent failure #11 exists to forbid.
+        # which is the silent failure #11 exists to forbid. NoEvidenceRoot is
+        # the one other core exception a raw read can raise (#113): the same
+        # named refusal every evidence read gives, not a second failure
+        # shape the model has to learn.
         #
         # Not ledgered: the ledger records what was served (#13), and a
         # failed read served nothing.

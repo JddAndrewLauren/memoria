@@ -166,7 +166,7 @@ full-source read may never be removed or degraded.
 ## `read(ref)` — forced 2026-09-01, issue #11
 
 ```
-read(ref: str) -> str
+read(ref: str, raw: bool = False) -> str
 ```
 
 One tool, not a family. Dispatch is read off the reference, because the ID
@@ -266,6 +266,27 @@ reason a full-source `SRC-` read is (issue #16). An entry read resolves by
 its frontmatter `id` rather than by filename, so a renamed entry file still
 answers to the `SUB-x/y` it was created with.
 
+**`raw=True` serves the pre-normalization original, not the record** — the
+file at the referenced record's `original_file`, through `read_raw_source`,
+confined to `MEMORIA_EVIDENCE_ROOT` the same way every evidence read is
+(#25's "Open original", already served by #64's
+`/api/sources/{id}/raw`). It is accepted for a bare `SRC-` ID only — never a
+paragraph, a `SUB-`, a `CHP-`/`SEC-`/`CHG-`, or a path, all of which carry no
+`original_file` — and refused otherwise, naming the reference it was given.
+The original is what grep could have found before a normalizer ever ran, so
+serving it is part of the superset-of-grep constraint, not an exception to
+it (#113).
+
+A binary original (docx, pdf) is refused too, naming its type, rather than
+handed back as bytes: the payload here is text, and a `.docx`'s raw bytes
+returned as if they were text would be worse than `cat`, not equal to it.
+Without `MEMORIA_EVIDENCE_ROOT` configured, a raw read fails with the same
+`NoEvidenceRoot` message every other evidence read gives.
+
+Like the full-source read, a raw read is bare — no header, no delimiter. It
+is ledgered like any other read, with its citation marked `SRC-000184 raw`
+so the served line names it as the original rather than the record.
+
 ### What it refuses, and how
 
 Reference kinds part 04 §4 defines but this build does not resolve —
@@ -279,21 +300,22 @@ Errors reach the model as `ToolError`, which is the SDK's anticipated-failure
 type: the call comes back `is_error` with the message intact. Any other
 exception is reported as `Error executing tool read` with the reason stripped,
 which would be exactly the silent failure #11 forbids — so the adapter maps
-the core's one error type onto it.
+the core's error types onto it: `ReadError` always, and — for a `raw=True`
+read with no evidence corpus configured — `NoEvidenceRoot` too (#113), the
+same named refusal every other evidence read gives rather than a second
+failure shape the model has to learn.
 
 ### What is deliberately still missing
 
 - **No overlay.** Decoration with entry links, exclusions and citing
   settlements is issue #20, at M2.
-- **No `raw` parameter.** Every read is undecorated today, so the
-  full-source read is raw by accident rather than by contract. **#20 owes the
-  parameter**: when it adds decoration it must also add the flag that turns it
-  off, because "a raw full-source read remains available" is a constraint on
-  the surface after M2, not just before it. This is the one part of the
-  signature this slice did not force, and it is recorded here so that #20
-  finds it rather than discovering it.
-- **No raw *original*.** Reading the pre-normalization source at
-  `original_file` is #64/#25's "Open original", not this.
+- **`raw` exists; #20 must share its shape.** #113 forced the parameter
+  ahead of schedule, for the pre-normalization original rather than the
+  overlay #20 will add — but it forced the *shape* #20 was already recorded
+  here as owing: a `raw` flag on `read`, not a second reference form or a
+  suffix on `ref`. When #20 adds decoration, "undecorated" is a second
+  meaning for the same parameter to grow into, not a reason to add a
+  different one.
 
 ## `search_text(query, filters)` — forced 2026-09-01, issue #12
 
