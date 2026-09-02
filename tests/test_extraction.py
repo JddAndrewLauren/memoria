@@ -496,6 +496,31 @@ def test_promoting_a_candidate_turns_its_forms_into_placements_next_rebuild(tmp_
     assert "SUB-people" not in counts.per_subject, "the candidate is an entry now"
 
 
+def test_promotion_refuses_a_slug_the_read_side_would_reject(tmp_path):
+    """The write side may not create an entry `parse_entry` cannot read back.
+
+    `entry_slug` reaches promotion straight from the author's tool call, so
+    it bypasses `entry_slug_for`; #119 made a malformed id a checked property
+    on the way in, and an archive that accepted the write anyway would hold a
+    file it could never serve.
+    """
+    repository = _repo(tmp_path, [f"Paragraph {n}." for n in range(3)])
+    for number in (1, 2, 3):
+        _memo(repository, f"src-000001-p{number}", unplaced=(_form("Carol"),))
+    ex.derive(repository, recurrence_threshold=1)
+    candidate_id = _rows(repository, "candidates")[0][0]
+
+    for slug in ("Bad Slug!", "carol ", "-carol", "carol/extra"):
+        with pytest.raises(ex.ExtractionError, match="SUB-<subject>/<entry-slug>"):
+            ex.promote_candidate(
+                repository, candidate_id, ex.CURATOR, entry_slug=slug
+            )
+
+    assert list((tmp_path / "subjects" / "people").glob("*.md")) == [
+        tmp_path / "subjects" / "people" / "_subject.md"
+    ], "nothing was written"
+
+
 def test_promoting_a_cluster_seeds_entry_references_and_relations(tmp_path):
     """AC 8, second half. A relation whose ends are both entries is
     expressible as a match term; the format decides that, not us."""
