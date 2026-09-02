@@ -44,10 +44,18 @@ web = [
 # reasoning as mcp/web above - the core stays PyYAML-only, and `dev` pulling
 # this extra in is what keeps `memoria normalize` exercising a real converter
 # in every test rather than a skip. `docx` is MarkItDown's own extra for its
-# mammoth-based docx path. Exact versions are #79's to pin.
+# mammoth-based docx path.
+#
+# Pinned exactly, not a range (#79, part 05 §5.4): the paragraph hash is the
+# extraction's memo key, so a converter version a bare range could silently
+# pick up would reconvert every unit it touches with no record of when or
+# why. A bump is a deliberate edit here, `memoria validate` checks it against
+# what `raw/manifest.yaml` recorded at the last normalize run, and
+# `memoria normalize --all` afterwards reports how many paragraph hashes it
+# changed before the extraction ever reads them.
 convert = [
-    "markitdown[docx]>=0.1,<0.2",
-    "pdfplumber>=0.11,<0.12",
+    "markitdown[docx]==0.1.7",
+    "pdfplumber==0.11.10",
 ]
 dev = [
     "pytest>=8.0",

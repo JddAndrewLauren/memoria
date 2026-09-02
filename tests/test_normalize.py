@@ -4,13 +4,18 @@ import base64
 import io
 import mailbox
 import sqlite3
+from dataclasses import replace
 from email.message import EmailMessage
 
 from docx import Document
 from docx.shared import Inches
 
 from memoria.index import INDEX_RELATIVE_PATH, build_index, search
-from memoria.manifest import DEFAULT_MANIFEST_RELATIVE_PATH, load_manifest
+from memoria.manifest import (
+    DEFAULT_MANIFEST_RELATIVE_PATH,
+    load_converter_pins,
+    load_manifest,
+)
 from memoria.normalize import CONVERTERS, EMAIL_CONVERTER_VERSION, normalize
 from memoria.records import (
     NORMALIZED_RELATIVE_PATH,
@@ -334,6 +339,94 @@ def test_reconverting_with_force_all_is_still_byte_identical(tmp_path):
 
     assert report.converted == ["SRC-000001"]
     assert record_path.read_bytes() == before
+
+
+# --- converter pinning and the paragraph-hash drift report (#79) ----------
+
+
+def test_all_with_unchanged_pins_reports_zero_changed_paragraph_hashes(tmp_path):
+    evidence_root = tmp_path / "evidence"
+    _write_raw_file(evidence_root, "a.txt", "One.\n\nTwo.")
+    repository = Repository(root=tmp_path / "repo")
+    normalize(repository, evidence_root)
+    record_path = repository.root / NORMALIZED_RELATIVE_PATH / "SRC-000001.md"
+    before = record_path.read_bytes()
+
+    report = normalize(repository, evidence_root, force_all=True)
+
+    assert report.paragraph_drift == {}
+    assert record_path.read_bytes() == before
+
+
+def test_a_converter_change_reports_the_exact_count_of_changed_paragraph_hashes(
+    tmp_path, monkeypatch
+):
+    """A fixture converter whose output differs by whitespace: two of three
+    paragraphs shift, one does not, so the drift report must name exactly
+    two - not three (paragraph count is unchanged) and not zero (the
+    unchanged paragraph's hash really is unchanged)."""
+    evidence_root = tmp_path / "evidence"
+    _write_raw_file(evidence_root, "a.txt", "First.\n\nSecond.\n\nThird.")
+    repository = Repository(root=tmp_path / "repo")
+    normalize(repository, evidence_root)
+
+    from memoria import normalize as normalize_module
+
+    def _shifted(raw_bytes: bytes) -> normalize_module.ConversionDraft:
+        draft = normalize_module.convert_plain_text(raw_bytes)
+        paragraphs = list(draft.paragraphs)
+        paragraphs[0] = paragraphs[0] + " "  # whitespace-only drift
+        paragraphs[1] = paragraphs[1] + " "  # whitespace-only drift
+        return replace(draft, paragraphs=paragraphs)
+
+    monkeypatch.setitem(
+        normalize_module.CONVERTERS, ".txt", (_shifted, lambda: "plain-text 2")
+    )
+    report = normalize(repository, evidence_root, force_all=True)
+
+    assert report.converted == ["SRC-000001"]
+    assert report.paragraph_drift == {"SRC-000001": 2}
+
+
+def test_a_brand_new_unit_reports_no_paragraph_drift(tmp_path):
+    """A unit with no prior record has nothing to drift against - its
+    paragraphs are new content, not a converter's reconversion of old
+    content."""
+    evidence_root = tmp_path / "evidence"
+    _write_raw_file(evidence_root, "a.txt", "First.\n\nSecond.")
+    repository = Repository(root=tmp_path / "repo")
+
+    report = normalize(repository, evidence_root)
+
+    assert report.converted == ["SRC-000001"]
+    assert report.paragraph_drift == {}
+
+
+def test_normalize_records_the_pinned_converter_version_in_the_manifest(tmp_path):
+    evidence_root = tmp_path / "evidence"
+    _write_raw_file(evidence_root, "a.txt", "Content.")
+    repository = Repository(root=tmp_path / "repo")
+
+    normalize(repository, evidence_root)
+
+    converters = load_converter_pins(evidence_root / DEFAULT_MANIFEST_RELATIVE_PATH)
+    assert converters == {".txt": CONVERTERS[".txt"][1]()}
+
+
+def test_a_converter_pin_is_preserved_when_its_suffix_disappears(tmp_path):
+    """A suffix with no unit left in the corpus (the unit was deleted) keeps
+    its last-recorded pin rather than losing it - #79's manifest is a
+    record of what has been pinned, not only of what is present today."""
+    evidence_root = tmp_path / "evidence"
+    path_a = _write_raw_file(evidence_root, "a.txt", "Content.")
+    repository = Repository(root=tmp_path / "repo")
+    normalize(repository, evidence_root)
+
+    path_a.unlink()
+    normalize(repository, evidence_root)
+
+    converters = load_converter_pins(evidence_root / DEFAULT_MANIFEST_RELATIVE_PATH)
+    assert converters == {".txt": CONVERTERS[".txt"][1]()}
 
 
 def test_a_unit_with_no_registered_converter_is_reported_but_not_converted(tmp_path):
