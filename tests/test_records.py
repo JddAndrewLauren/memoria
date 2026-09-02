@@ -21,6 +21,7 @@ from memoria.records import (
     read_raw_source,
     real_paragraphs,
     record_to_markdown,
+    reveal_original_source,
     write_normalized_records,
 )
 from memoria.repository import NoEvidenceRoot, Repository
@@ -369,3 +370,61 @@ def test_read_raw_source_refuses_a_non_utf8_text_original_honestly(tmp_path):
     assert "raw/vol-01/letter.txt" in message
     assert "does not decode as UTF-8" in message
     assert "text in another encoding" in message
+
+
+# --- reveal_original_source (#65) -------------------------------------------
+
+
+def test_reveal_original_source_launches_the_original_file(tmp_path, monkeypatch):
+    evidence_root = tmp_path / "evidence"
+    (evidence_root / "raw" / "vol-01").mkdir(parents=True)
+    original = evidence_root / "raw" / "vol-01" / "text.txt"
+    original.write_text("The unnormalized text.\n", encoding="utf-8")
+
+    repository = _write(tmp_path, _record())
+    repository = Repository(root=repository.root, evidence_root=evidence_root)
+
+    launched = []
+    monkeypatch.setattr("memoria.records._launch", lambda path: launched.append(path))
+
+    path = reveal_original_source(repository, "SRC-000184")
+
+    assert path == original
+    assert launched == [original]
+
+
+def test_reveal_original_source_refuses_an_unknown_record(tmp_path, monkeypatch):
+    repository = _write(tmp_path, _record())
+    repository = Repository(root=repository.root, evidence_root=tmp_path / "evidence")
+    monkeypatch.setattr(
+        "memoria.records._launch",
+        lambda path: pytest.fail("must not launch a refused reveal"),
+    )
+
+    with pytest.raises(ReadError):
+        reveal_original_source(repository, "SRC-000999")
+
+
+def test_reveal_original_source_refuses_a_missing_original_file(tmp_path, monkeypatch):
+    repository = _write(tmp_path, _record())
+    repository = Repository(root=repository.root, evidence_root=tmp_path / "evidence")
+    monkeypatch.setattr(
+        "memoria.records._launch",
+        lambda path: pytest.fail("must not launch a refused reveal"),
+    )
+
+    with pytest.raises(ReadError):
+        reveal_original_source(repository, "SRC-000184")
+
+
+def test_reveal_original_source_without_an_evidence_root_is_a_named_refusal(
+    tmp_path, monkeypatch
+):
+    repository = _write(tmp_path, _record())
+    monkeypatch.setattr(
+        "memoria.records._launch",
+        lambda path: pytest.fail("must not launch a refused reveal"),
+    )
+
+    with pytest.raises(NoEvidenceRoot):
+        reveal_original_source(repository, "SRC-000184")

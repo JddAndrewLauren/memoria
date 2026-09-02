@@ -1,37 +1,57 @@
-"""The four reads #64 builds: list sources, read one source, raw source,
-search.
+"""The reads #64 and #24 build: list sources, read one source, raw source,
+search, list subjects, list one subject's entries.
 
 Each route calls ``memoria.*`` and shapes the result into a typed response
 model - it holds no rule the CLI or the MCP server does not, opens no
 SQLite database and reads no evidence file itself
-(``test_web_app.py``'s isolation test). Subjects and entries (#24) are not
-here: they wait on #16.
+(``test_web_app.py``'s isolation test).
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from memoria.index import SearchFilters
 from memoria.index import search as search_index
-from memoria.records import NormalizedRecord, ReadError
+from memoria.records import NormalizedRecord, Read, ReadError
 from memoria.records import list_sources as list_sources_core
 from memoria.records import load as load_source
+from memoria.records import read as read_ref
 from memoria.records import read_raw_source as read_raw_source_core
 from memoria.records import real_paragraphs
+from memoria.records import reveal_original_source as reveal_original_source_core
 from memoria.repository import NoEvidenceRoot, Repository
+from memoria.subjects import load_all_entries, load_all_subjects
 from memoria.web.dependencies import get_repository
 from memoria.web.schemas import (
+    CitationOut,
+    EntryListResponse,
+    EntrySummary,
+    LocalityOut,
     Paragraph,
     RawSourceResponse,
+    ReadOverlayOut,
+    RevealSourceResponse,
     SearchResponse,
     SearchResultOut,
     SourceDetail,
     SourceListResponse,
     SourceSummary,
+    SubjectListResponse,
+    SubjectSummary,
 )
 
 router = APIRouter()
+
+# A loopback peer address is the one fact an HTTP server can check for
+# "is the browser on this machine" without trusting anything the client
+# claims - a header is just text the client sent. #65's locality gate.
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1"}
+
+
+def _is_local(request: Request) -> bool:
+    client = request.client
+    return client is not None and client.host in _LOOPBACK_HOSTS
 
 
 def _to_summary(record: NormalizedRecord) -> SourceSummary:
@@ -109,6 +129,117 @@ def raw_source(
     except (ReadError, NoEvidenceRoot) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return RawSourceResponse(text=raw.text, original_locator=raw.original_locator)
+
+
+@router.get("/locality")
+def locality(request: Request) -> LocalityOut:
+    """Whether this connection is local - the one fact "Reveal in editor"
+    (#65) needs to decide whether to exist on this client at all. General
+    on purpose: any future locality-gated action reads this same fact
+    rather than each route re-deriving it (ADR-0002: no other surface may
+    acquire a client-locality condition of its own).
+    """
+    return LocalityOut(is_local=_is_local(request))
+
+
+@router.post("/sources/{record_id}/reveal")
+def reveal_source(
+    record_id: str, request: Request, repository: Repository = Depends(get_repository)
+) -> RevealSourceResponse:
+    """"Reveal in editor" (#65): launch the un-normalized file this record
+    was normalized from in the host's editor or file manager.
+
+    Refused for a non-local request even if the UI never should have shown
+    the button that reached this - the server never trusts the client's
+    own idea of whether it is local, only the same peer-address check
+    ``/locality`` reports. This is what keeps the action purely additive
+    (ADR-0002): a hosted client gets a plain 403, never a launch on a
+    machine it is not sitting at.
+    """
+    if not _is_local(request):
+        raise HTTPException(status_code=403, detail="reveal is local-only")
+    try:
+        reveal_original_source_core(repository, record_id)
+    except (ReadError, NoEvidenceRoot) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return RevealSourceResponse(opened=True)
+
+
+def _to_citation(ref: str, result: Read) -> CitationOut:
+    return CitationOut(
+        ref=ref,
+        citation=result.citation,
+        text=result.text,
+        record=_to_summary(result.record) if result.record is not None else None,
+        paragraph=result.paragraph,
+        overlay=ReadOverlayOut(
+            entry_links=result.overlay.entry_links,
+            exclusions=result.overlay.exclusions,
+            citing_settlements=result.overlay.citing_settlements,
+        )
+        if result.overlay is not None
+        else None,
+    )
+
+
+@router.get("/read")
+def read(ref: str, repository: Repository = Depends(get_repository)) -> CitationOut:
+    """Resolve one reference - the slide-over citation panel's read (§19.9).
+
+    Wraps ``memoria.records.read`` exactly, the same composed core the MCP
+    tool surface's ``read(ref)`` calls: a ``SRC-`` paragraph anchor (a search
+    hit's or a paragraph's own ``anchor``) serves the cited text, its record
+    and its curated-overlay backlinks (#20); a ``SUB-x/y`` entry reference -
+    an overlay's own ``entry_links``/``exclusions`` - serves the entry's raw
+    text, so a backlink is clickable into the same panel in both directions
+    (#25's acceptance criteria) without a second read shape. Ledgering the
+    served read is the caller's job (``memoria.records.read``'s own
+    docstring) - this route never imports ``memoria.ledger``, so an author's
+    own read here writes nothing to ``events.jsonl``.
+    """
+    try:
+        result = read_ref(repository, ref)
+    except ReadError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _to_citation(ref, result)
+
+
+@router.get("/subjects")
+def list_subjects(repository: Repository = Depends(get_repository)) -> SubjectListResponse:
+    """The `SUBJECTS` tree's top level: the subjects on disk, each with its
+    entry count computed from the entries actually there (#24) - an
+    un-seeded repository (`memoria seed-subjects` never run) is an empty
+    list, not an error, the same honesty ``list_sources`` keeps for an
+    un-normalized one.
+    """
+    subjects = load_all_subjects(repository)
+    counts: dict[str, int] = {}
+    for entry_id in load_all_entries(repository):
+        subject_id = entry_id.split("/", 1)[0]
+        counts[subject_id] = counts.get(subject_id, 0) + 1
+    return SubjectListResponse(
+        items=[
+            SubjectSummary(id=subject.id, entry_count=counts.get(subject.id, 0))
+            for subject in subjects
+        ]
+    )
+
+
+@router.get("/subjects/{subject_id}/entries")
+def list_entries(
+    subject_id: str, repository: Repository = Depends(get_repository)
+) -> EntryListResponse:
+    """One subject's entries, for the `SUBJECTS` tree's second level."""
+    known_ids = {subject.id for subject in load_all_subjects(repository)}
+    if subject_id not in known_ids:
+        raise HTTPException(status_code=404, detail=f"no such subject: {subject_id}")
+    entries = load_all_entries(repository)
+    items = [
+        EntrySummary(id=entry.id, match_terms=entry.match_terms)
+        for entry_id, entry in sorted(entries.items())
+        if entry_id.split("/", 1)[0] == subject_id
+    ]
+    return EntryListResponse(items=items)
 
 
 @router.get("/search")

@@ -65,6 +65,133 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/locality": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Locality
+         * @description Whether this connection is local - the one fact "Reveal in editor"
+         *     (#65) needs to decide whether to exist on this client at all. General
+         *     on purpose: any future locality-gated action reads this same fact
+         *     rather than each route re-deriving it (ADR-0002: no other surface may
+         *     acquire a client-locality condition of its own).
+         */
+        get: operations["locality_api_locality_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sources/{record_id}/reveal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reveal Source
+         * @description "Reveal in editor" (#65): launch the un-normalized file this record
+         *     was normalized from in the host's editor or file manager.
+         *
+         *     Refused for a non-local request even if the UI never should have shown
+         *     the button that reached this - the server never trusts the client's
+         *     own idea of whether it is local, only the same peer-address check
+         *     ``/locality`` reports. This is what keeps the action purely additive
+         *     (ADR-0002): a hosted client gets a plain 403, never a launch on a
+         *     machine it is not sitting at.
+         */
+        post: operations["reveal_source_api_sources__record_id__reveal_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read
+         * @description Resolve one reference - the slide-over citation panel's read (§19.9).
+         *
+         *     Wraps ``memoria.records.read`` exactly, the same composed core the MCP
+         *     tool surface's ``read(ref)`` calls: a ``SRC-`` paragraph anchor (a search
+         *     hit's or a paragraph's own ``anchor``) serves the cited text, its record
+         *     and its curated-overlay backlinks (#20); a ``SUB-x/y`` entry reference -
+         *     an overlay's own ``entry_links``/``exclusions`` - serves the entry's raw
+         *     text, so a backlink is clickable into the same panel in both directions
+         *     (#25's acceptance criteria) without a second read shape. Ledgering the
+         *     served read is the caller's job (``memoria.records.read``'s own
+         *     docstring) - this route never imports ``memoria.ledger``, so an author's
+         *     own read here writes nothing to ``events.jsonl``.
+         */
+        get: operations["read_api_read_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/subjects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Subjects
+         * @description The `SUBJECTS` tree's top level: the subjects on disk, each with its
+         *     entry count computed from the entries actually there (#24) - an
+         *     un-seeded repository (`memoria seed-subjects` never run) is an empty
+         *     list, not an error, the same honesty ``list_sources`` keeps for an
+         *     un-normalized one.
+         */
+        get: operations["list_subjects_api_subjects_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/subjects/{subject_id}/entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Entries
+         * @description One subject's entries, for the `SUBJECTS` tree's second level.
+         */
+        get: operations["list_entries_api_subjects__subject_id__entries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/search": {
         parameters: {
             query?: never;
@@ -99,10 +226,91 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * CitationOut
+         * @description One resolved reference - the slide-over citation panel's read (§19.9).
+         *
+         *     The single generic read the panel uses in both directions: a ``SRC-``
+         *     paragraph anchor serves the cited text, its record and its backlinks
+         *     (``overlay``); a ``SUB-x/y`` entry reference serves the entry's own text,
+         *     with ``record``/``paragraph``/``overlay`` all ``None`` - a backlink is
+         *     clickable into the same panel, and the panel does not need a second shape
+         *     to render it (#25's "traverse in both directions"). Wraps
+         *     ``memoria.records.read`` exactly - the same core function the MCP tool
+         *     surface calls - so this is the one generic reference read the viewer has,
+         *     never a second one duplicating ``/sources/{id}``.
+         */
+        CitationOut: {
+            /** Ref */
+            ref: string;
+            /** Citation */
+            citation: string;
+            /** Text */
+            text: string;
+            record?: components["schemas"]["SourceSummary"] | null;
+            /** Paragraph */
+            paragraph?: number | null;
+            overlay?: components["schemas"]["ReadOverlayOut"] | null;
+        };
+        /**
+         * EditorialRecordOut
+         * @description One piece of editorial apparatus, linked to the paragraph it
+         *     annotates (#25's "what the data actually is").
+         *
+         *     ``editorial_type`` is one of ``footnote``, ``bracketed-span``,
+         *     ``interpolation`` or ``introduction``; a consumer renders whatever value
+         *     is actually present rather than assuming that list is closed, the same
+         *     posture ``SourceSummary.source_type`` already takes. ``retrospective``
+         *     marks apparatus added after the fact, distinct from the evidence it
+         *     annotates. ``linked_record_id``/``linked_anchor`` name the paragraph it
+         *     attaches to - never inline in that paragraph's own text (§6).
+         */
+        EditorialRecordOut: {
+            /** Editorial Type */
+            editorial_type: string;
+            /** Retrospective */
+            retrospective: boolean;
+            /** Linked Record Id */
+            linked_record_id: string;
+            /** Linked Anchor */
+            linked_anchor: string;
+            /** Text */
+            text: string;
+        };
+        /** EntryListResponse */
+        EntryListResponse: {
+            /** Items */
+            items: components["schemas"]["EntrySummary"][];
+        };
+        /**
+         * EntrySummary
+         * @description One entry under a subject - CONTEXT.md's vocabulary, not "item" or
+         *     "record" (#24's acceptance criteria).
+         */
+        EntrySummary: {
+            /** Id */
+            id: string;
+            /** Match Terms */
+            match_terms: string[];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * LocalityOut
+         * @description Whether this connection's client is on the same machine as the
+         *     server.
+         *
+         *     "Reveal in editor" (#65)'s one locality fact - general on purpose, per
+         *     ``docs/adr/0002-ui-is-a-react-client.md``'s "no other surface may
+         *     acquire a client-locality condition" of its own: any future
+         *     locality-gated action reads this same field rather than deriving one.
+         */
+        LocalityOut: {
+            /** Is Local */
+            is_local: boolean;
         };
         /**
          * Paragraph
@@ -129,6 +337,33 @@ export interface components {
             text: string;
             /** Original Locator */
             original_locator: string;
+        };
+        /**
+         * ReadOverlayOut
+         * @description The curated overlay a decorated paragraph read carries (#20):
+         *     mirrors ``memoria.index.ReadOverlay`` field for field. ``citing_settlements``
+         *     is always empty in this build - settlements have no durable storage yet
+         *     (#20's own docstring) - and stays on the shape rather than being dropped,
+         *     the same forward-compatibility call ``ReadOverlay`` itself makes.
+         */
+        ReadOverlayOut: {
+            /** Entry Links */
+            entry_links: string[];
+            /** Exclusions */
+            exclusions: string[];
+            /** Citing Settlements */
+            citing_settlements: string[];
+        };
+        /**
+         * RevealSourceResponse
+         * @description Confirms "Reveal in editor" (#65) launched.
+         *
+         *     Carries no other state - the editor or file manager runs on the host,
+         *     outside this response.
+         */
+        RevealSourceResponse: {
+            /** Opened */
+            opened: boolean;
         };
         /** SearchResponse */
         SearchResponse: {
@@ -201,7 +436,7 @@ export interface components {
              * Apparatus
              * @default []
              */
-            apparatus: components["schemas"]["SourceSummary"][];
+            apparatus: components["schemas"]["EditorialRecordOut"][];
         };
         /**
          * SourceListResponse
@@ -242,6 +477,25 @@ export interface components {
             original_file: string;
             /** Original Locator */
             original_locator: string;
+        };
+        /** SubjectListResponse */
+        SubjectListResponse: {
+            /** Items */
+            items: components["schemas"]["SubjectSummary"][];
+        };
+        /**
+         * SubjectSummary
+         * @description One subject - the `SUBJECTS` tree's top level (#24).
+         *
+         *     ``entry_count`` is computed from the entries actually on disk, never
+         *     hardcoded (#24's acceptance criteria) - the same discipline
+         *     ``SourceListResponse.total`` keeps for sources.
+         */
+        SubjectSummary: {
+            /** Id */
+            id: string;
+            /** Entry Count */
+            entry_count: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -349,6 +603,139 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RawSourceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    locality_api_locality_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalityOut"];
+                };
+            };
+        };
+    };
+    reveal_source_api_sources__record_id__reveal_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                record_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevealSourceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_api_read_get: {
+        parameters: {
+            query: {
+                ref: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CitationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_subjects_api_subjects_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectListResponse"];
+                };
+            };
+        };
+    };
+    list_entries_api_subjects__subject_id__entries_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subject_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntryListResponse"];
                 };
             };
             /** @description Validation Error */
