@@ -14,7 +14,9 @@ from memoria.references import (
     BadReference,
     ChangeReference,
     ChapterReference,
+    DecisionReference,
     PathReference,
+    ResearchMemoReference,
     SectionReference,
     SessionReference,
     SourceReference,
@@ -126,6 +128,45 @@ def test_format_citation_for_a_session_turn():
     )
 
 
+# --- DEC- decision ids and RES- research memo ids (#30) ----------------------
+
+
+def test_parse_resolves_a_bare_decision_id():
+    assert references.parse("DEC-0088") == DecisionReference("DEC-0088")
+
+
+def test_parse_is_case_insensitive_for_decision_ids():
+    assert references.parse("dec-0088") == DecisionReference("DEC-0088")
+
+
+def test_a_malformed_decision_id_says_so_rather_than_claiming_the_kind_is_unknown():
+    with pytest.raises(BadReference, match="four-digit"):
+        references.parse("DEC-1")
+
+
+def test_format_citation_for_a_decision_reference():
+    assert references.format_citation(DecisionReference("DEC-0088")) == "DEC-0088"
+
+
+def test_parse_resolves_a_bare_research_memo_id():
+    assert references.parse("RES-20261018-003") == ResearchMemoReference("RES-20261018-003")
+
+
+def test_parse_is_case_insensitive_for_research_memo_ids():
+    assert references.parse("res-20261018-003") == ResearchMemoReference("RES-20261018-003")
+
+
+def test_a_malformed_research_memo_id_says_so_rather_than_claiming_the_kind_is_unknown():
+    with pytest.raises(BadReference, match="RES-YYYYMMDD-NNN"):
+        references.parse("RES-20261018-3")
+
+
+def test_format_citation_for_a_research_memo_reference():
+    assert references.format_citation(
+        ResearchMemoReference("RES-20261018-003")
+    ) == "RES-20261018-003"
+
+
 @pytest.mark.parametrize(
     "ref",
     [
@@ -155,8 +196,6 @@ def test_parse_resolves_a_repository_path():
     ("ref", "kind"),
     [
         ("CLM-0041", "CLM"),
-        ("RES-20261018-003", "RES"),
-        ("DEC-0088", "DEC"),
     ],
 )
 def test_a_kind_the_archive_defines_but_this_build_lacks_is_a_value_not_a_path(

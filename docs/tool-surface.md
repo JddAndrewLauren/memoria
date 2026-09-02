@@ -355,11 +355,11 @@ gives.
 ### What it refuses, and how
 
 Reference kinds part 04 §4 defines but this build does not resolve —
-`CLM-`, `RES-`, `DEC-` — return an error **naming the kind**, never a silent
+`CLM-` — return an error **naming the kind**, never a silent
 empty result. A kind that is not part of the scheme at all is named too, and
 distinguished from one that is merely unbuilt. `SUB-x` and `SUB-x/y` were on
-this list until issue #16, `CHG-` until ADR-0008, and `SES-` (with or
-without a `#T` turn) until #28.
+this list until issue #16, `CHG-` until ADR-0008, `SES-` (with or without a
+`#T` turn) until #28, and `RES-`/`DEC-` until #30.
 
 Errors reach the model as `ToolError`, which is the SDK's anticipated-failure
 type: the call comes back `is_error` with the message intact. Any other
