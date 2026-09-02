@@ -217,7 +217,7 @@ def read(ref: str, raw: bool = False) -> str:
     paragraph with no curated overlay appended.
 
     Reference kinds the archive defines but this build does not resolve yet -
-    SES-, CHG-, CLM-, RES-, DEC- - return an error naming the kind.
+    CLM-, RES-, DEC- - return an error naming the kind.
     """
     try:
         result = read_ref(repository(), ref, raw=raw)

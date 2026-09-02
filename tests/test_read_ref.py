@@ -292,8 +292,6 @@ def test_reading_an_unresolvable_chapter_or_section_id_names_it(tmp_path):
 @pytest.mark.parametrize(
     ("ref", "kind"),
     [
-        ("SES-20260912-1432", "SES"),
-        ("SES-20260912-1432#T017", "SES"),
         ("CLM-0041", "CLM"),
         ("RES-20261018-003", "RES"),
         ("DEC-0088", "DEC"),
@@ -719,11 +717,11 @@ def test_raw_refuses_a_binary_original_naming_its_type(tmp_path):
 def test_raw_over_an_unresolvable_reference_names_the_reference(tmp_path):
     """The reference is judged before the raw capability is (#113 review).
 
-    `SES-` resolves to no kind here, so that - not the raw refusal - is what
+    `CLM-` resolves to no kind here, so that - not the raw refusal - is what
     the caller has to fix first.
     """
     with pytest.raises(ReadError) as caught:
-        read(_repo(tmp_path), "SES-20260912-1432", raw=True)
+        read(_repo(tmp_path), "CLM-0041", raw=True)
 
     assert "not resolvable in this build yet" in str(caught.value)
     assert "raw only serves" not in str(caught.value)
@@ -732,6 +730,14 @@ def test_raw_over_an_unresolvable_reference_names_the_reference(tmp_path):
 def test_raw_over_an_unknown_kind_names_the_kind(tmp_path):
     with pytest.raises(ReadError, match="unknown reference kind FOO-"):
         read(_repo(tmp_path), "FOO-0001", raw=True)
+
+
+def test_raw_refuses_a_resolvable_session_reference(tmp_path):
+    """`SES-` resolves (#28), so the raw guard - not "not resolvable" - is
+    what fires: a transcript carries neither an `original_file` nor an
+    overlay to strip."""
+    with pytest.raises(ReadError, match="raw only serves"):
+        read(_repo(tmp_path), "SES-20260912-1432", raw=True)
 
 
 def test_raw_refuses_a_non_utf8_text_original_without_calling_it_binary(tmp_path):

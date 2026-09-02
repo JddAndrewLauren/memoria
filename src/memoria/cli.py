@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+from pathlib import Path
 
 from memoria import changes
 from memoria.extraction import RECURRENCE_THRESHOLD_DEFAULT
@@ -9,6 +10,7 @@ from memoria.index import INDEX_RELATIVE_PATH, IndexSchemaError, rebuild
 from memoria.normalize import normalize as run_normalize
 from memoria.records import NORMALIZED_RELATIVE_PATH
 from memoria.repository import NoEvidenceRoot, from_env, require_evidence_root
+from memoria.sessions import SessionError, derive_session
 from memoria.subjects import write_builtin_subjects
 from memoria.validate import validate
 from memoria.write import Checkpointed, checkpoint
@@ -128,6 +130,17 @@ def main(argv=None):
         action="store_true",
         help="Reconvert every unit, not only those whose hash or converter changed",
     )
+    derive_session_parser = subparsers.add_parser(
+        "derive-session",
+        help=(
+            "Derive transcript.md and metadata.yaml for a session from "
+            "Claude Code's own per-session JSONL (#28)"
+        ),
+    )
+    derive_session_parser.add_argument("session_id", help="This session's SES- id")
+    derive_session_parser.add_argument(
+        "jsonl_path", help="Path to the Claude Code session's own JSONL file"
+    )
 
     args = parser.parse_args(argv)
 
@@ -219,6 +232,21 @@ def main(argv=None):
             f"{repository.root / changes.CHANGES_RELATIVE_PATH}"
         )
         print(f"rebuild: completed in {report.elapsed_seconds:.2f}s")
+        return 0
+
+    if args.command == "derive-session":
+        try:
+            result = derive_session(repository, args.session_id, Path(args.jsonl_path))
+        except SessionError as exc:
+            print(f"derive-session: {exc}", file=sys.stderr)
+            return 1
+        if result.changed:
+            print(
+                f"derive-session: derived {result.turns} turn(s) to "
+                f"{result.transcript_path}"
+            )
+        else:
+            print(f"derive-session: {args.session_id} already derived, unchanged")
         return 0
 
     if args.command == "checkpoint":

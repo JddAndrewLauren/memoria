@@ -507,3 +507,64 @@ def test_validate_fails_and_names_an_unspaced_relation_match_term(tmp_path):
     assert len(errors) == 1
     assert "bob.md" in errors[0]
     assert "relation" in errors[0].lower()
+
+
+# --- SES-...#T017 citations: the missing-transcript-turn check (#28) --------
+
+
+def _write_transcript(repo_root, session_id, turns):
+    session_path = (
+        repo_root / "sessions" / session_id[4:8] / session_id[8:10] / session_id
+    )
+    session_path.mkdir(parents=True, exist_ok=True)
+    blocks = [
+        f'<a id="t{number:03d}"></a>\n\n## T{number:03d} — {role}\n\n{text}'
+        for number, role, text in turns
+    ]
+    (session_path / "transcript.md").write_text(
+        "\n\n".join(blocks) + "\n", encoding="utf-8"
+    )
+
+
+def test_validate_passes_when_a_session_turn_citation_resolves(tmp_path):
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    _write_transcript(
+        repo_root, "SES-20260912-1432", [(1, "Author", "Decide the subject.")]
+    )
+    (repo_root / "decisions.md").write_text(
+        "Decided the subject. See SES-20260912-1432#T001.", encoding="utf-8"
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert errors == []
+
+
+def test_validate_fails_and_names_a_missing_transcript_turn(tmp_path):
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    _write_transcript(
+        repo_root, "SES-20260912-1432", [(1, "Author", "Decide the subject.")]
+    )
+    (repo_root / "decisions.md").write_text(
+        "Decided the subject. See SES-20260912-1432#T017.", encoding="utf-8"
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert len(errors) == 1
+    assert "SES-20260912-1432#T017" in errors[0]
+    assert "decisions.md" in errors[0]
+
+
+def test_validate_fails_and_names_a_citation_to_a_session_with_no_transcript(tmp_path):
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    repo_root.mkdir(parents=True, exist_ok=True)
+    (repo_root / "questions.md").write_text(
+        "Raised in SES-20260913-0900#T001.", encoding="utf-8"
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert len(errors) == 1
+    assert "SES-20260913-0900#T001" in errors[0]
+    assert "questions.md" in errors[0]
