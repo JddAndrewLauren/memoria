@@ -173,6 +173,12 @@ def entry_to_markdown(entry: Entry) -> str:
 def parse_entry(text: str, *, source: str = "<string>") -> Entry:
     """Parse an entry back into an ``Entry``.
 
+    ``id`` must be a well-formed ``SUB-<subject>/<entry-slug>`` reference -
+    the same shape ``classify_match_term`` requires of an entry reference -
+    so a malformed id (missing the ``SUB-`` prefix, missing its ``/<slug>``
+    entirely, or with an empty segment on either side) is a checked property
+    here rather than a hole below the directory-mismatch check (#91, #119).
+
     Every match term is classified with ``classify_match_term``, which
     raises on a malformed entry reference or relation - this is what makes
     "validation accepts all three shapes" a checked property rather than a
@@ -182,6 +188,12 @@ def parse_entry(text: str, *, source: str = "<string>") -> Entry:
 
     if "id" not in frontmatter:
         raise SubjectError(f"{source}: entry is missing 'id'")
+    entry_id = str(frontmatter["id"])
+    if not _ENTRY_REF_RE.match(entry_id):
+        raise SubjectError(
+            f"{source}: entry id {entry_id!r} is not of the form "
+            "SUB-<subject>/<entry-slug>"
+        )
 
     match_terms = frontmatter.get("match_terms", [])
     if not isinstance(match_terms, list):
@@ -201,7 +213,7 @@ def parse_entry(text: str, *, source: str = "<string>") -> Entry:
     if body.endswith("\n"):
         body = body[:-1]
 
-    return Entry(id=str(frontmatter["id"]), match_terms=match_terms, body=body)
+    return Entry(id=entry_id, match_terms=match_terms, body=body)
 
 
 def classify_match_term(term: str) -> str:
