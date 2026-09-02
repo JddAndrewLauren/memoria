@@ -279,7 +279,11 @@ def render_global(result: extraction.GlobalSearchResult) -> str:
 
     A cluster routed to a promoted entry (`ClusterGroup.entry_id`) is headed
     by that entry rather than by its own auto-generated label - #74's "a
-    promoted cluster routes to the entry, not to its stale label". A summary
+    promoted cluster routes to the entry, not to its stale label" - but the
+    cluster id still rides alongside it. Dropping it would make an over-route
+    unverifiable from the served text alone, and would disagree with the
+    ledger line for the same call, which always names the cluster
+    (`memoria.ledger.append_search_global`'s `clusters` field). A summary
     line appears only when the call asked for one (`result.summarize`), and
     says so explicitly when none has been written yet - it is never left
     silent, which would read as "no summary exists" when it may simply not
@@ -290,7 +294,7 @@ def render_global(result: extraction.GlobalSearchResult) -> str:
     blocks = []
     for group in result.groups:
         header = (
-            f"entry: {group.entry_id}"
+            f"entry: {group.entry_id}  (cluster: {group.cluster_id})"
             if group.entry_id
             else f"cluster: {group.cluster_id}  label: {group.label}"
         )

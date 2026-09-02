@@ -519,6 +519,41 @@ def test_search_global_groups_hits_by_cluster_and_ledgers_the_mode(tmp_path):
     assert set(event["served"]) == {f"src-000001-p{n}" for n in (1, 2, 3)}
 
 
+def test_search_global_a_routed_group_still_names_its_cluster_id(tmp_path):
+    """Review round 1, finding 3: dropping the cluster id from a routed
+    group's header made an over-route unverifiable from the served text
+    alone, and left it disagreeing with the ledger line for the same call,
+    which always names the matched clusters."""
+    repository = _serve(
+        tmp_path,
+        ["Bob pressed about the acquisition."] * 3,
+        entries=[
+            Entry(id="SUB-people/bob", match_terms=["Bob"], body=""),
+            Entry(id="SUB-events/acquisition", match_terms=["the acquisition"], body=""),
+        ],
+    )
+    for number in (1, 2, 3):
+        server.extraction_record(
+            [
+                _recorded(
+                    f"src-000001-p{number}",
+                    placements=[
+                        ("SUB-people/bob", "Bob"),
+                        ("SUB-events/acquisition", "the acquisition"),
+                    ],
+                )
+            ]
+        )
+    server.extraction_derive(recurrence_threshold=1)
+    cluster_id = ex.search_global(repository, "acquisition").groups[0].cluster_id
+    promotion = ex.promote_cluster(repository, cluster_id, ex.CURATOR)
+
+    rendered = server.search_global("acquisition")
+
+    assert f"entry: {promotion.entry_id}" in rendered
+    assert f"(cluster: {cluster_id})" in rendered
+
+
 def test_search_global_summarize_true_marks_served_text_inferred(tmp_path):
     """AC 3, AC 9: the memoized text comes back marked `[inferred]`, and the
     ledger says a summary was actually served."""

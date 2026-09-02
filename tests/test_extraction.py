@@ -1195,6 +1195,127 @@ def test_search_global_routing_degrades_once_the_entrys_terms_are_edited_away(
     assert result.groups[0].entry_id is None
 
 
+def test_search_global_a_hand_authored_theme_does_not_capture_an_unrelated_cluster(
+    tmp_path,
+):
+    """Review round 1, finding 1. One-way containment - an entry's terms are
+    a subset of the cluster's - is not enough: a hand-authored Theme naming
+    just one of several co-occurring people is a subset of that whole
+    cluster too, and was wrongly routing to it. Nothing here calls
+    `promote_cluster` at all - `SUB-themes/hand-written` is author-created,
+    part 06 §8.4's other route to an entry."""
+    entries = [
+        Entry(id="SUB-people/bob", match_terms=["Bob"], body=""),
+        Entry(id="SUB-people/carol", match_terms=["Carol"], body=""),
+        Entry(id="SUB-themes/hand-written", match_terms=["SUB-people/bob"], body=""),
+    ]
+    repository = _repo(tmp_path, ["Bob and Carol talked."] * 3, entries=entries)
+    for number in (1, 2, 3):
+        _memo(
+            repository,
+            f"src-000001-p{number}",
+            placements=(
+                _place("SUB-people/bob", "Bob"),
+                _place("SUB-people/carol", "Carol"),
+            ),
+        )
+    ex.derive(repository, recurrence_threshold=1)
+    assert len(_rows(repository, "clusters")) == 1, "two nodes nest no further"
+
+    result = ex.search_global(repository, "Bob")
+
+    assert result.groups[0].entry_id is None
+
+
+def test_search_global_routes_the_earliest_entry_deterministically_on_a_tie(
+    tmp_path,
+):
+    """Review round 1, finding 4. Two entries with the identical term set
+    collide on the same routing-table key; `_theme_routes` must resolve that
+    deterministically rather than however dict insertion happens to land."""
+    entries = [
+        Entry(id="SUB-people/bob", match_terms=["Bob"], body=""),
+        Entry(id="SUB-themes/z-later", match_terms=["SUB-people/bob"], body=""),
+        Entry(id="SUB-themes/a-earlier", match_terms=["SUB-people/bob"], body=""),
+    ]
+    repository = _repo(tmp_path, ["Bob alone."] * 3, entries=entries)
+    for number in (1, 2, 3):
+        _memo(repository, f"src-000001-p{number}", placements=(_place("SUB-people/bob", "Bob"),))
+    ex.derive(repository, recurrence_threshold=1)
+
+    result = ex.search_global(repository, "Bob")
+
+    assert result.groups[0].entry_id == "SUB-themes/a-earlier"
+
+
+def _nested_entry_repo(tmp_path):
+    """`_nested_repo` (above), but every node is a promoted entry reached
+    through a real placement rather than a candidate. Needed here because a
+    cluster of candidates seeds only plain words on promotion (`promote_cluster`),
+    which never route at all - this fixture is what lets a promotion seed
+    entry references instead, so the ancestor-leak in finding 2 is
+    reproducible."""
+    groups = 8
+    names = [f"person{group}{index}" for group in range(groups) for index in range(3)]
+    entries = [Entry(id=f"SUB-people/{n}", match_terms=[n], body="") for n in names]
+    paragraphs = []
+    placements = []
+    for group in range(groups):
+        members = [f"person{group}{index}" for index in range(3)]
+        for _ in range(3):
+            paragraphs.append(f"Group {group} together.")
+            placements.append(
+                tuple(_place(f"SUB-people/{m}", m) for m in members)
+            )
+    for group in range(0, groups, 2):
+        for index in range(3):
+            paragraphs.append(f"Groups {group} and {group + 1} meet.")
+            placements.append(
+                (
+                    _place(f"SUB-people/person{group}{index}", f"person{group}{index}"),
+                    _place(
+                        f"SUB-people/person{group + 1}{index}",
+                        f"person{group + 1}{index}",
+                    ),
+                )
+            )
+    repository = _repo(tmp_path, paragraphs, entries=entries)
+    for number, paragraph_placements in enumerate(placements, start=1):
+        _memo(repository, f"src-000001-p{number}", placements=paragraph_placements)
+    return repository
+
+
+def test_search_global_a_promoted_cluster_does_not_leak_to_its_coarser_ancestor(
+    tmp_path,
+):
+    """Review round 1, finding 2. A coarser level's members are always a
+    superset of a finer one's (`clustering.py`), so one-way containment let a
+    fine cluster's promotion falsely capture its own broader ancestor too -
+    reproduced here by promoting the finest cluster and checking its parent
+    at the coarser level stays unrouted."""
+    repository = _nested_entry_repo(tmp_path)
+    ex.derive(repository, recurrence_threshold=1)
+    rows = _rows(repository, "clusters")
+    finest = max(row[1] for row in rows)
+    fine_id, fine_level, fine_parent = next(
+        (row[0], row[1], row[2]) for row in rows if row[1] == finest and row[2]
+    )
+    parent_level = next(row[1] for row in rows if row[0] == fine_parent)
+    assert parent_level != fine_level
+
+    promotion = ex.promote_cluster(repository, fine_id, ex.CURATOR)
+
+    fine_result = ex.search_global(repository, None, SearchFilters(level=fine_level))
+    fine_group = next(g for g in fine_result.groups if g.cluster_id == fine_id)
+    assert fine_group.entry_id == promotion.entry_id, "the real origin still routes"
+
+    coarse_result = ex.search_global(
+        repository, None, SearchFilters(level=parent_level)
+    )
+    coarse_group = next(g for g in coarse_result.groups if g.cluster_id == fine_parent)
+    assert coarse_group.entry_id is None, "the ancestor must not inherit the route"
+
+
 def test_search_global_summarize_false_never_carries_a_summary(tmp_path):
     """AC 3: `summarize=false` returns none, even when one has been written."""
     repository = _repo(tmp_path, ["Bob and the acquisition."] * 3)

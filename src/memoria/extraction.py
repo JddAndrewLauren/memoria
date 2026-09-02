@@ -2079,9 +2079,13 @@ class ClusterGroup:
     has been promoted routes to the entry, not to its stale label"). A
     promoted entry never points back at its origin cluster - cluster identity
     does not survive re-clustering - so this is read the only way it can be:
-    forward, off the entry's own current match terms (``_route_for``). It is
-    ``None`` before any promotion, and again after one whose match terms have
-    since been edited past what this cluster still defines.
+    forward, off the entry's own current match terms, checked two ways
+    against the cluster's own defining terms (``_route_for``). It is ``None``
+    before any promotion, after one whose match terms have since been edited
+    past what this cluster still defines, and for every other cluster the
+    entry's terms do not equally define - an ancestor of the real origin
+    cluster included, since a coarser level's members are always a superset
+    of a finer one's.
 
     ``summary`` is the cluster's memoized ``[inferred]`` text - never
     generated here, only served (ADR-0005 build shape 3) - and is ``None``
@@ -2151,11 +2155,17 @@ def _scope_line(paragraphs: int, clusters: int, level: int, year_range: str | No
 
 
 def _theme_routes(repository: Repository) -> dict[frozenset[str], str]:
-    """Every promoted Theme's or Arc's entry- and relation-shaped match terms,
-    as a set, mapped back to its entry id - the routing table ``search_global``
-    checks a matched cluster's own defining terms against (see ``ClusterGroup``).
-    Sorted by entry id first, so a cluster more than one entry's terms fit
-    routes to the earliest one deterministically."""
+    """Every Theme's or Arc's entry- and relation-shaped match terms, as a
+    set, mapped back to its entry id - the routing table ``search_global``
+    checks a matched cluster's own defining terms against (see
+    ``_route_for``). Not every entry here was promoted from a cluster - a
+    Theme may be hand-authored (part 06 §8.4) - so this table alone
+    over-matches; ``_route_for`` is what tells the two apart.
+
+    Sorted by entry id first and inserted with ``setdefault``, so two entries
+    that happen to carry the identical term set - a real collision, not
+    ambiguity ``_route_for`` resolves - route to the earliest one
+    deterministically rather than whichever was seen last."""
     routes: dict[frozenset[str], str] = {}
     for entry_id, entry in sorted(load_all_entries(repository).items()):
         if entry_id.split("/", 1)[0] not in CO_OCCURRENCE_SUBJECTS:
@@ -2164,16 +2174,39 @@ def _theme_routes(repository: Repository) -> dict[frozenset[str], str]:
             term for term in entry.match_terms if classify_match_term(term) != "word"
         )
         if terms:
-            routes[terms] = entry_id
+            routes.setdefault(terms, entry_id)
     return routes
 
 
 def _route_for(terms: frozenset[str], routes: dict[frozenset[str], str]) -> str | None:
     """The entry ``terms`` (one cluster's own entry- and relation-shaped
-    members) routes to, if any promoted entry's seeded set still fits inside
-    it - see ``_theme_routes``."""
+    members) routes to, if a Theme's or Arc's own seeded set still defines
+    it - see ``_theme_routes``.
+
+    **Two-way, not one-way.** One-way containment (an entry's terms are a
+    subset of the cluster's) is not enough: it also matches a hand-authored
+    Theme whose terms merely happen to overlap an unrelated cluster's larger
+    membership, and it matches every ancestor of the cluster an entry was
+    actually promoted from, since a coarser level's members are always a
+    superset of a finer one's (``clustering.py``'s nesting). So the cluster
+    must also define nothing beyond what the entry names - checked the other
+    way, ``terms - seed`` - with one deliberate slack: ``promote_cluster``
+    caps what it seeds at ``MAX_SEEDED_MATCH_TERMS``, so a cluster whose own
+    term count exceeds the cap is allowed exactly that many terms missing
+    from the entry, no more. A cluster small enough to have been seeded in
+    full must match in full.
+
+    This still cannot tell a hand-authored Theme from a promoted one when
+    the two are indistinguishable by construction - an entry whose terms
+    exactly equal a real cluster's own definition, promoted or not. ADR-0005
+    decision 6 rules out a durable pointer that would settle it; this is the
+    residual and it is bounded, not open-ended.
+    """
     for seed, entry_id in routes.items():
-        if seed and seed <= terms:
+        if not seed or not seed <= terms:
+            continue
+        allowed_missing = max(0, len(terms) - MAX_SEEDED_MATCH_TERMS)
+        if len(terms - seed) <= allowed_missing:
             return entry_id
     return None
 
