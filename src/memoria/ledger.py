@@ -141,6 +141,42 @@ def append_search(
     )
 
 
+def append_search_global(
+    repository: Repository,
+    session_id: str,
+    query: str | None,
+    filters: SearchFilters | None,
+    summarize: bool,
+    summary_served: bool,
+    clusters: list[str],
+    anchors: list[str],
+) -> None:
+    """Ledger one served ``search_global(query, filters, summarize)`` call
+    (#74). Names the mode that ran - ``summarize`` - and, since ADR-0005's
+    "Build shape" 3 records that a summary is *served*, not run, whether the
+    call actually served one: ``summarize=True`` over clusters with no
+    summary yet still ran in that mode and served none.
+
+    ``clusters`` names the matched cluster ids in their own field rather than
+    in ``served`` - the same call ``append_extraction_summary_task`` makes,
+    for the same reason: a cluster id is not something ``read(ref)`` accepts
+    (ADR-0005 decision 6), so it does not belong beside the anchors that are.
+    """
+    _append(
+        repository,
+        session_id,
+        {
+            "tool": "search_global",
+            "query": query,
+            "filters": _filters_dict(filters),
+            "summarize": summarize,
+            "summary_served": summary_served,
+            "clusters": clusters,
+            "served": anchors,
+        },
+    )
+
+
 def _filters_dict(filters: SearchFilters | None) -> dict | None:
     """``asdict`` rather than a hand-picked field list: a filter `#12` adds
     later is ledgered automatically, instead of silently dropping until

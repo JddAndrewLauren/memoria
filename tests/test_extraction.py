@@ -12,6 +12,7 @@ from memoria import extraction as ex
 from memoria.index import (
     DERIVED_TABLES,
     INDEX_RELATIVE_PATH,
+    SearchFilters,
     build_index,
     rebuild,
 )
@@ -32,12 +33,12 @@ SRC_ROOT = pathlib.Path(__file__).resolve().parents[1] / "src" / "memoria"
 # --- helpers -----------------------------------------------------------------
 
 
-def _record(paragraphs, record_id="SRC-000001"):
+def _record(paragraphs, record_id="SRC-000001", event_date="Oct. 22."):
     return NormalizedRecord(
         id=record_id,
         source_type="journal",
-        recorded_date="Oct. 22.",
-        event_date="Oct. 22.",
+        recorded_date=event_date,
+        event_date=event_date,
         date_confidence="exact",
         contemporaneous=True,
         original_file="raw/vol-01/text.txt",
@@ -46,7 +47,7 @@ def _record(paragraphs, record_id="SRC-000001"):
     )
 
 
-def _repo(tmp_path, paragraphs, entries=(), auto_promote=()):
+def _repo(tmp_path, paragraphs, entries=(), auto_promote=(), event_date="Oct. 22."):
     """A repository with the built-in subjects, an index, and some entries."""
     repository = Repository(root=tmp_path)
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
@@ -71,7 +72,7 @@ def _repo(tmp_path, paragraphs, entries=(), auto_promote=()):
         ],
         check=True,
     )
-    record = _record(paragraphs)
+    record = _record(paragraphs, event_date=event_date)
     write_normalized_records([record], tmp_path / NORMALIZED_RELATIVE_PATH)
     build_index(repository, [record])
     return repository
@@ -1061,3 +1062,464 @@ def test_the_pass_runs_on_a_repository_with_no_index_built(tmp_path):
 
     assert counts.candidates_above_threshold == 1
     assert ex.pending_cluster_summaries(repository)
+
+
+# --- #74: search_global -------------------------------------------------------
+
+
+def test_search_global_groups_matched_paragraphs_by_cluster_with_a_scope_line(tmp_path):
+    """AC 1 and AC 5: references grouped by cluster, feeding `read(ref)`
+    verbatim, under a §33-style scope line - exercised over the core alone,
+    with no MCP server in the loop."""
+    entries = [
+        Entry(id="SUB-people/bob", match_terms=["Bob"], body=""),
+        Entry(id="SUB-events/acquisition", match_terms=["the acquisition"], body=""),
+    ]
+    repository = _repo(
+        tmp_path,
+        ["Bob pressed about the acquisition."] * 3,
+        entries=entries,
+        event_date="2011-06-01",
+    )
+    for number in (1, 2, 3):
+        _memo(
+            repository,
+            f"src-000001-p{number}",
+            placements=(
+                _place("SUB-people/bob", "Bob"),
+                _place("SUB-events/acquisition", "the acquisition"),
+            ),
+        )
+    ex.derive(repository, recurrence_threshold=1)
+    (cluster_id, level, *_rest) = _rows(repository, "clusters")[0]
+    assert len(_rows(repository, "clusters")) == 1, "two nodes nest no further"
+
+    result = ex.search_global(repository, "acquisition")
+
+    assert len(result.groups) == 1
+    group = result.groups[0]
+    assert group.cluster_id == cluster_id
+    assert {(r.src_id, r.anchor) for r in group.results} == {
+        ("SRC-000001", f"src-000001-p{n}") for n in (1, 2, 3)
+    }
+    assert result.scope == (
+        f"clustered 3 paragraphs across 2011; 1 cluster matched at level {level}"
+    )
+
+
+def test_search_global_a_promoted_cluster_routes_to_the_entry_not_its_stale_label(
+    tmp_path,
+):
+    """AC 2, part 06 §8.4 and ADR-0005 decision 6."""
+    entries = [
+        Entry(id="SUB-people/bob", match_terms=["Bob"], body=""),
+        Entry(id="SUB-events/acquisition", match_terms=["the acquisition"], body=""),
+    ]
+    repository = _repo(tmp_path, ["Bob pressed about the acquisition."] * 3, entries=entries)
+    for number in (1, 2, 3):
+        _memo(
+            repository,
+            f"src-000001-p{number}",
+            placements=(
+                _place("SUB-people/bob", "Bob"),
+                _place("SUB-events/acquisition", "the acquisition"),
+            ),
+            relations=(
+                ex.ProposedRelation(
+                    "SUB-people/bob", "presses", "SUB-events/acquisition"
+                ),
+            ),
+        )
+    ex.derive(repository, recurrence_threshold=1)
+    cluster_id = _rows(repository, "clusters")[0][0]
+    promotion = ex.promote_cluster(repository, cluster_id, ex.CURATOR)
+
+    result = ex.search_global(repository, "acquisition")
+
+    assert len(result.groups) == 1
+    assert result.groups[0].entry_id == promotion.entry_id
+
+
+def test_search_global_an_unpromoted_cluster_shows_its_own_label(tmp_path):
+    """The common case, and every case before the first promotion."""
+    entries = [Entry(id="SUB-people/bob", match_terms=["Bob"], body="")]
+    repository = _repo(tmp_path, ["Bob and the acquisition."] * 3, entries=entries)
+    for number in (1, 2, 3):
+        _memo(
+            repository,
+            f"src-000001-p{number}",
+            placements=(_place("SUB-people/bob", "Bob"),),
+            unplaced=(_form("the acquisition", "SUB-events"),),
+        )
+    ex.derive(repository, recurrence_threshold=1)
+
+    result = ex.search_global(repository, "acquisition")
+
+    assert result.groups[0].entry_id is None
+    assert result.groups[0].label
+
+
+def test_search_global_routing_degrades_once_the_entrys_terms_are_edited_away(
+    tmp_path,
+):
+    """Documented rather than hidden: ADR-0005 decision 6 says a promoted
+    entry never points back at its cluster, so once the author tunes the
+    Theme past what the cluster itself still defines, `search_global` can no
+    longer read the link back off its terms - the declared cost of rejecting
+    a durable pointer."""
+    entries = [
+        Entry(id="SUB-people/bob", match_terms=["Bob"], body=""),
+        Entry(id="SUB-events/acquisition", match_terms=["the acquisition"], body=""),
+    ]
+    repository = _repo(tmp_path, ["Bob pressed about the acquisition."] * 3, entries=entries)
+    for number in (1, 2, 3):
+        _memo(
+            repository,
+            f"src-000001-p{number}",
+            placements=(
+                _place("SUB-people/bob", "Bob"),
+                _place("SUB-events/acquisition", "the acquisition"),
+            ),
+        )
+    ex.derive(repository, recurrence_threshold=1)
+    cluster_id = _rows(repository, "clusters")[0][0]
+    promotion = ex.promote_cluster(repository, cluster_id, ex.CURATOR)
+    (tmp_path / promotion.path).write_text(
+        entry_to_markdown(
+            Entry(id=promotion.entry_id, match_terms=["a new idea"], body="")
+        )
+    )
+
+    result = ex.search_global(repository, "acquisition")
+
+    assert result.groups[0].entry_id is None
+
+
+def test_search_global_a_hand_authored_theme_does_not_capture_an_unrelated_cluster(
+    tmp_path,
+):
+    """Review round 1, finding 1. One-way containment - an entry's terms are
+    a subset of the cluster's - is not enough: a hand-authored Theme naming
+    just one of several co-occurring people is a subset of that whole
+    cluster too, and was wrongly routing to it. Nothing here calls
+    `promote_cluster` at all - `SUB-themes/hand-written` is author-created,
+    part 06 §8.4's other route to an entry."""
+    entries = [
+        Entry(id="SUB-people/bob", match_terms=["Bob"], body=""),
+        Entry(id="SUB-people/carol", match_terms=["Carol"], body=""),
+        Entry(id="SUB-themes/hand-written", match_terms=["SUB-people/bob"], body=""),
+    ]
+    repository = _repo(tmp_path, ["Bob and Carol talked."] * 3, entries=entries)
+    for number in (1, 2, 3):
+        _memo(
+            repository,
+            f"src-000001-p{number}",
+            placements=(
+                _place("SUB-people/bob", "Bob"),
+                _place("SUB-people/carol", "Carol"),
+            ),
+        )
+    ex.derive(repository, recurrence_threshold=1)
+    assert len(_rows(repository, "clusters")) == 1, "two nodes nest no further"
+
+    result = ex.search_global(repository, "Bob")
+
+    assert result.groups[0].entry_id is None
+
+
+def test_search_global_routes_the_earliest_entry_deterministically_on_a_tie(
+    tmp_path,
+):
+    """Review round 1, finding 4. Two entries with the identical term set
+    collide on the same routing-table key; `_theme_routes` must resolve that
+    deterministically rather than however dict insertion happens to land."""
+    entries = [
+        Entry(id="SUB-people/bob", match_terms=["Bob"], body=""),
+        Entry(id="SUB-themes/z-later", match_terms=["SUB-people/bob"], body=""),
+        Entry(id="SUB-themes/a-earlier", match_terms=["SUB-people/bob"], body=""),
+    ]
+    repository = _repo(tmp_path, ["Bob alone."] * 3, entries=entries)
+    for number in (1, 2, 3):
+        _memo(repository, f"src-000001-p{number}", placements=(_place("SUB-people/bob", "Bob"),))
+    ex.derive(repository, recurrence_threshold=1)
+
+    result = ex.search_global(repository, "Bob")
+
+    assert result.groups[0].entry_id == "SUB-themes/a-earlier"
+
+
+def _nested_entry_repo(tmp_path):
+    """`_nested_repo` (above), but every node is a promoted entry reached
+    through a real placement rather than a candidate. Needed here because a
+    cluster of candidates seeds only plain words on promotion (`promote_cluster`),
+    which never route at all - this fixture is what lets a promotion seed
+    entry references instead, so the ancestor-leak in finding 2 is
+    reproducible."""
+    groups = 8
+    names = [f"person{group}{index}" for group in range(groups) for index in range(3)]
+    entries = [Entry(id=f"SUB-people/{n}", match_terms=[n], body="") for n in names]
+    paragraphs = []
+    placements = []
+    for group in range(groups):
+        members = [f"person{group}{index}" for index in range(3)]
+        for _ in range(3):
+            paragraphs.append(f"Group {group} together.")
+            placements.append(
+                tuple(_place(f"SUB-people/{m}", m) for m in members)
+            )
+    for group in range(0, groups, 2):
+        for index in range(3):
+            paragraphs.append(f"Groups {group} and {group + 1} meet.")
+            placements.append(
+                (
+                    _place(f"SUB-people/person{group}{index}", f"person{group}{index}"),
+                    _place(
+                        f"SUB-people/person{group + 1}{index}",
+                        f"person{group + 1}{index}",
+                    ),
+                )
+            )
+    repository = _repo(tmp_path, paragraphs, entries=entries)
+    for number, paragraph_placements in enumerate(placements, start=1):
+        _memo(repository, f"src-000001-p{number}", placements=paragraph_placements)
+    return repository
+
+
+def test_search_global_a_promoted_cluster_does_not_leak_to_its_coarser_ancestor(
+    tmp_path,
+):
+    """Review round 1, finding 2. A coarser level's members are always a
+    superset of a finer one's (`clustering.py`), so one-way containment let a
+    fine cluster's promotion falsely capture its own broader ancestor too -
+    reproduced here by promoting the finest cluster and checking its parent
+    at the coarser level stays unrouted."""
+    repository = _nested_entry_repo(tmp_path)
+    ex.derive(repository, recurrence_threshold=1)
+    rows = _rows(repository, "clusters")
+    finest = max(row[1] for row in rows)
+    fine_id, fine_level, fine_parent = next(
+        (row[0], row[1], row[2]) for row in rows if row[1] == finest and row[2]
+    )
+    parent_level = next(row[1] for row in rows if row[0] == fine_parent)
+    assert parent_level != fine_level
+
+    promotion = ex.promote_cluster(repository, fine_id, ex.CURATOR)
+
+    fine_result = ex.search_global(repository, None, SearchFilters(level=fine_level))
+    fine_group = next(g for g in fine_result.groups if g.cluster_id == fine_id)
+    assert fine_group.entry_id == promotion.entry_id, "the real origin still routes"
+
+    coarse_result = ex.search_global(
+        repository, None, SearchFilters(level=parent_level)
+    )
+    coarse_group = next(g for g in coarse_result.groups if g.cluster_id == fine_parent)
+    assert coarse_group.entry_id is None, "the ancestor must not inherit the route"
+
+
+def test_search_global_a_large_promoted_cluster_with_candidates_still_routes(
+    tmp_path,
+):
+    """Review round 2. `cluster_members` orders by `member_ref`, and
+    `CAND:` sorts ahead of `SUB-` - so on a cluster over
+    `MAX_SEEDED_MATCH_TERMS` that mixes entries and candidates,
+    `promote_cluster` fills the seed with candidate-shaped words first and
+    drops real entry members, even though the cluster's own entry-shaped
+    term count never exceeded the cap. The cap-only slack in `_route_for`
+    does not forgive that: it must also forgive exactly as many missing
+    terms as the cluster has candidate-shaped members, no more."""
+    names = [f"person{n:02d}" for n in range(ex.MAX_SEEDED_MATCH_TERMS)]
+    entries = [Entry(id=f"SUB-people/{n}", match_terms=[n], body="") for n in names]
+    candidate_words = ["candalpha", "candbeta"]
+    paragraph = " ".join(names + candidate_words) + " gathered."
+    repository = _repo(tmp_path, [paragraph] * 3, entries=entries)
+    for number in (1, 2, 3):
+        _memo(
+            repository,
+            f"src-000001-p{number}",
+            placements=tuple(_place(f"SUB-people/{n}", n) for n in names),
+            unplaced=tuple(_form(word) for word in candidate_words),
+        )
+    ex.derive(repository, recurrence_threshold=1)
+    (cluster_id,) = {row[0] for row in _rows(repository, "clusters")}
+    promotion = ex.promote_cluster(repository, cluster_id, ex.CURATOR)
+
+    result = ex.search_global(repository, "person00")
+
+    assert len(result.groups) == 1
+    assert result.groups[0].entry_id == promotion.entry_id
+
+
+def test_search_global_a_hand_authored_theme_is_not_captured_by_candidate_crowding(
+    tmp_path,
+):
+    """Review round 3. `allowed_missing` was a pure cardinality slack - it
+    grew with the cluster's candidate-shaped member count regardless of
+    whether ``seed`` was consistent with what this cluster would actually
+    seed, so it loosened containment for every route, hand-authored ones
+    included. A Theme naming only one of several co-occurring people wrongly
+    routed once its cluster carried roughly
+    ``MAX_SEEDED_MATCH_TERMS - len(seed)`` candidate-shaped members - not a
+    corner case, since recurring unplaced forms are the most numerous node
+    shape in a real extraction. Reproduced with the reviewer's numbers: 3
+    paragraphs, alice/bob/carol placed together, 12 recurring unplaced
+    forms, and a hand-authored ``SUB-themes/hand-written`` naming only bob."""
+    entries = [
+        Entry(id="SUB-people/alice", match_terms=["Alice"], body=""),
+        Entry(id="SUB-people/bob", match_terms=["Bob"], body=""),
+        Entry(id="SUB-people/carol", match_terms=["Carol"], body=""),
+        Entry(id="SUB-themes/hand-written", match_terms=["SUB-people/bob"], body=""),
+    ]
+    candidate_words = [f"candword{n:02d}" for n in range(12)]
+    paragraph = "Alice, Bob and Carol met, with " + ", ".join(candidate_words) + "."
+    repository = _repo(tmp_path, [paragraph] * 3, entries=entries)
+    for number in (1, 2, 3):
+        _memo(
+            repository,
+            f"src-000001-p{number}",
+            placements=(
+                _place("SUB-people/alice", "Alice"),
+                _place("SUB-people/bob", "Bob"),
+                _place("SUB-people/carol", "Carol"),
+            ),
+            unplaced=tuple(_form(word) for word in candidate_words),
+        )
+    ex.derive(repository, recurrence_threshold=1)
+    assert len(_rows(repository, "clusters")) == 1, "one co-occurring cluster"
+
+    result = ex.search_global(repository, "Alice")
+
+    assert result.groups[0].entry_id is None
+
+
+def test_route_for_a_candidate_carrying_coarse_ancestor_does_not_leak(tmp_path):
+    """Review round 3, the ancestor-leak counterpart to the hand-authored
+    case above: a coarser cluster that merely contains its finer child's
+    promoted members, plus enough candidate-shaped members to have crowded
+    those extra entries out of today's cap, must not inherit the child's
+    route either. The reviewer could not synthesize this dendrogram through
+    Louvain - candidates pull the pair into one self-parented cluster - so
+    this exercises `_route_for` directly with hand-built cluster shapes
+    instead of going through `derive`.
+
+    Chosen so plain one-way containment (the pre-round-1 bug) would also
+    reject it - the point here is specifically that candidate crowding does
+    not resurrect a false match: 9 candidate-shaped members fill 9 of the 12
+    seed slots, leaving room for only 3 of the ancestor's 6 entries, and
+    those 3 are chosen (alphabetically first) to be an unrelated trio -
+    ``alice``/``bob``/``carol`` - never the child's own ``xavier``/
+    ``yolanda``/``zoe``, so today's would-seed genuinely differs from the
+    child's route in both directions, exactly as the real cluster does."""
+    child_members = ["SUB-people/xavier", "SUB-people/yolanda", "SUB-people/zoe"]
+    routes = {frozenset(child_members): "SUB-themes/child"}
+
+    assert ex._route_for(child_members, (), routes) == "SUB-themes/child"
+
+    candidate_labels = {
+        f"{ex.CANDIDATE_REF_PREFIX}c{n:02d}": f"candword{n:02d}" for n in range(9)
+    }
+    ancestor_members = (
+        list(candidate_labels) + ["SUB-people/alice", "SUB-people/bob", "SUB-people/carol"]
+        + child_members
+    )
+
+    assert (
+        ex._route_for(ancestor_members, (), routes, candidate_labels) is None
+    ), "the ancestor must not inherit the child's route"
+
+
+def test_search_global_summarize_false_never_carries_a_summary(tmp_path):
+    """AC 3: `summarize=false` returns none, even when one has been written."""
+    repository = _repo(tmp_path, ["Bob and the acquisition."] * 3)
+    for number in (1, 2, 3):
+        _memo(repository, f"src-000001-p{number}", unplaced=(_form("Bob"),))
+    ex.derive(repository, recurrence_threshold=1)
+    task = ex.pending_cluster_summaries(repository)[0]
+    ex.record_summary(repository, task.cluster_id, task.memo_key, "A summary.")
+
+    result = ex.search_global(repository, "Bob", summarize=False)
+
+    assert all(group.summary is None for group in result.groups)
+    assert result.summary_served is False
+
+
+def test_search_global_summarize_true_serves_memoized_text_or_says_none_yet(
+    tmp_path,
+):
+    """AC 3 and AC 8: served, never generated - a cluster with no summary
+    says so, and there is no model anywhere in this call to make one."""
+    repository = _repo(tmp_path, ["Bob and the acquisition."] * 3)
+    for number in (1, 2, 3):
+        _memo(repository, f"src-000001-p{number}", unplaced=(_form("Bob"),))
+    ex.derive(repository, recurrence_threshold=1)
+
+    unsummarized = ex.search_global(repository, "Bob", summarize=True)
+    assert unsummarized.groups[0].summary is None
+    assert unsummarized.summary_served is False
+
+    task = ex.pending_cluster_summaries(repository)[0]
+    ex.record_summary(repository, task.cluster_id, task.memo_key, "A summary.")
+
+    summarized = ex.search_global(repository, "Bob", summarize=True)
+    assert summarized.groups[0].summary == "A summary."
+    assert summarized.summary_served is True
+
+
+def test_search_global_with_no_query_returns_every_cluster_at_the_requested_level(
+    tmp_path,
+):
+    """AC 6 and AC 7: `search_global(query=None, filters={level: n})` is the
+    map step - every cluster at that level, with its summary, under a scope
+    line naming the level."""
+    repository = _nested_repo(tmp_path)
+    ex.derive(repository, recurrence_threshold=1)
+    rows = _rows(repository, "clusters")
+    finest = max(row[1] for row in rows)
+    expected = {row[0] for row in rows if row[1] == finest}
+
+    result = ex.search_global(
+        repository, None, SearchFilters(level=finest), summarize=True
+    )
+
+    assert {group.cluster_id for group in result.groups} == expected
+    assert f"level {finest}" in result.scope
+    assert all(group.level == finest for group in result.groups)
+
+
+def test_search_global_defaults_to_the_finest_level_and_always_names_it(tmp_path):
+    """§33.1's discipline applied here: a call that leaves `level` unset still
+    resolves one, and it is never left for the caller to infer."""
+    repository = _nested_repo(tmp_path)
+    ex.derive(repository, recurrence_threshold=1)
+    finest = max(row[1] for row in _rows(repository, "clusters"))
+
+    result = ex.search_global(repository, None)
+
+    assert result.level == finest
+    assert f"level {finest}" in result.scope
+
+
+def test_search_global_filters_narrow_the_matched_paragraphs(tmp_path):
+    """The other six `SearchFilters` narrow query mode exactly as they narrow
+    `search` (#12) - proven with one guaranteed to exclude everything, since
+    the compose logic itself is `index.filter_predicate`'s own test coverage."""
+    repository = _repo(tmp_path, ["Bob and the acquisition."] * 3)
+    for number in (1, 2, 3):
+        _memo(repository, f"src-000001-p{number}", unplaced=(_form("Bob"),))
+    ex.derive(repository, recurrence_threshold=1)
+
+    result = ex.search_global(repository, "Bob", SearchFilters(contemporaneous=False))
+
+    assert result.groups == ()
+
+
+def test_search_global_over_a_missing_index_returns_no_groups(tmp_path):
+    """Matches `search` and `gather`: the corpus not being built is an
+    answer, not a driver exception, and nothing here creates the file."""
+    repository = Repository(root=tmp_path)
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+
+    result = ex.search_global(repository, "anything")
+
+    assert result.groups == ()
+    assert "0 clusters matched" in result.scope
+    assert not (tmp_path / INDEX_RELATIVE_PATH).exists()

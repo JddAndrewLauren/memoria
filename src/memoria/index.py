@@ -326,6 +326,15 @@ class SearchFilters:
     word. An empty string is not a filter: it is treated exactly like
     ``None``, because a substring match on ``""`` would otherwise return
     every record that merely *has* the header (see ``filter_predicate``).
+
+    ``level`` is the seventh, added 2026-09-01 for ``search_global`` (#74,
+    ADR-0005 "Build shape" 4) - a cluster level, not a column on
+    ``paragraphs``. It rides on this dataclass so one ``filters`` argument
+    still covers everything a caller might narrow by (part 11 §25's filter
+    list groups it with the other six), but ``filter_predicate`` below never
+    references it: search_global consults it directly against ``clusters``,
+    and ``search_text`` has no cluster to filter by, so it is silently
+    unconsulted there rather than refused.
     """
 
     event_date: str | None = None
@@ -334,6 +343,7 @@ class SearchFilters:
     contemporaneous: bool | None = None
     from_: str | None = None
     to: str | None = None
+    level: int | None = None
 
 
 @dataclass(frozen=True)

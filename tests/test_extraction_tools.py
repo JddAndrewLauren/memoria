@@ -481,6 +481,118 @@ def test_recording_and_deriving_ledger_nothing(tmp_path):
     assert len(_ledger(repository)) == before
 
 
+# --- #74: search_global (a read tool, not an extraction-maintainer one) -----
+
+
+def test_the_server_registers_a_search_global_tool():
+    tools = {tool.name: tool for tool in asyncio.run(server.mcp.list_tools())}
+
+    assert "search_global" in tools
+    assert set(tools["search_global"].input_schema["properties"]) == {
+        "query",
+        "filters",
+        "summarize",
+    }
+    assert tools["search_global"].input_schema.get("required", []) == []
+
+
+def test_search_global_groups_hits_by_cluster_and_ledgers_the_mode(tmp_path):
+    """AC 1, AC 4: grouped references, and one ledger line naming the mode
+    (`summarize`) and the clusters it served, alongside the served anchors."""
+    repository = _serve(tmp_path, ["Bob and the acquisition."] * 3)
+    for number in (1, 2, 3):
+        server.extraction_record(
+            [_recorded(f"src-000001-p{number}", unplaced=[("Bob", "SUB-people")])]
+        )
+    server.extraction_derive(recurrence_threshold=1)
+
+    rendered = server.search_global("Bob")
+
+    assert "src-000001-p1" in rendered
+    assert "clustered 3 paragraphs" in rendered
+    events = _ledger(repository)
+    (event,) = [e for e in events if e["tool"] == "search_global"]
+    assert event["query"] == "Bob"
+    assert event["summarize"] is False
+    assert event["summary_served"] is False
+    assert event["clusters"]
+    assert set(event["served"]) == {f"src-000001-p{n}" for n in (1, 2, 3)}
+
+
+def test_search_global_a_routed_group_still_names_its_cluster_id(tmp_path):
+    """Review round 1, finding 3: dropping the cluster id from a routed
+    group's header made an over-route unverifiable from the served text
+    alone, and left it disagreeing with the ledger line for the same call,
+    which always names the matched clusters."""
+    repository = _serve(
+        tmp_path,
+        ["Bob pressed about the acquisition."] * 3,
+        entries=[
+            Entry(id="SUB-people/bob", match_terms=["Bob"], body=""),
+            Entry(id="SUB-events/acquisition", match_terms=["the acquisition"], body=""),
+        ],
+    )
+    for number in (1, 2, 3):
+        server.extraction_record(
+            [
+                _recorded(
+                    f"src-000001-p{number}",
+                    placements=[
+                        ("SUB-people/bob", "Bob"),
+                        ("SUB-events/acquisition", "the acquisition"),
+                    ],
+                )
+            ]
+        )
+    server.extraction_derive(recurrence_threshold=1)
+    cluster_id = ex.search_global(repository, "acquisition").groups[0].cluster_id
+    promotion = ex.promote_cluster(repository, cluster_id, ex.CURATOR)
+
+    rendered = server.search_global("acquisition")
+
+    assert f"entry: {promotion.entry_id}" in rendered
+    assert f"(cluster: {cluster_id})" in rendered
+
+
+def test_search_global_summarize_true_marks_served_text_inferred(tmp_path):
+    """AC 3, AC 9: the memoized text comes back marked `[inferred]`, and the
+    ledger says a summary was actually served."""
+    repository = _serve(tmp_path, ["Bob and the acquisition."] * 3)
+    for number in (1, 2, 3):
+        server.extraction_record(
+            [_recorded(f"src-000001-p{number}", unplaced=[("Bob", "SUB-people")])]
+        )
+    server.extraction_derive(recurrence_threshold=1)
+    task = ex.pending_cluster_summaries(repository)[0]
+    ex.record_summary(repository, task.cluster_id, task.memo_key, "A cluster summary.")
+
+    rendered = server.search_global("Bob", summarize=True)
+
+    assert "[inferred] A cluster summary." in rendered
+    (event,) = [e for e in _ledger(repository) if e["tool"] == "search_global"]
+    assert event["summarize"] is True
+    assert event["summary_served"] is True
+
+
+def test_a_served_read_never_carries_a_cluster_summary(tmp_path):
+    """AC 3's last clause: a test asserts summaries never appear in a
+    `read(ref)` result. `read` never touches a cluster row, so this is
+    structural rather than a race against `search_global`."""
+    repository = _serve(tmp_path, ["Bob and the acquisition."] * 3)
+    for number in (1, 2, 3):
+        server.extraction_record(
+            [_recorded(f"src-000001-p{number}", unplaced=[("Bob", "SUB-people")])]
+        )
+    server.extraction_derive(recurrence_threshold=1)
+    task = ex.pending_cluster_summaries(repository)[0]
+    ex.record_summary(repository, task.cluster_id, task.memo_key, "A cluster summary.")
+
+    rendered = server.read("SRC-000001 P1")
+
+    assert "[inferred]" not in rendered
+    assert "A cluster summary." not in rendered
+
+
 # --- the skill ---------------------------------------------------------------
 
 
