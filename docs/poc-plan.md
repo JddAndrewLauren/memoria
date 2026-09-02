@@ -163,15 +163,26 @@ per-session JSONL under `~/.claude/projects/<slug>/<session-id>.jsonl` with
 post-session pass — which is the §13 curation step regardless.
 
 **Evidence lives in a sibling repo, and direct reads are routed, not forbidden**
-(2026-08-31). The corpus moved to `../thoreau-evidence/`, whose own git history is
-Invariant 3's tamper-evidence. In this repo a PreToolUse hook
-(`.claude/hooks/route-evidence-reads.sh`) denies Read/Grep/Glob against the evidence
-path with a message pointing at the Memoria tools. The framing matters: the hook is a
-**router, not a wall** — the tools return the same verbatim text plus the curated
-overlay (entry links, exclusions, settlements citing the paragraph), and every served
-read lands in `events.jsonl`, which is what makes §33's manifest a record rather than
-a request. Bash can still reach the files; accepted — the goal is that the logged
-path is the path of least resistance.
+(2026-08-31; widened 2026-09-01, #112). The corpus moved to `../thoreau-evidence/`,
+whose own git history is Invariant 3's tamper-evidence. In this repo a PreToolUse
+hook (`.claude/hooks/route-evidence-reads.sh`) denies Read/Grep/Glob against the
+evidence path with a message pointing at the Memoria tools. The framing matters: the
+hook is a **router, not a wall** — the tools return the same verbatim text plus the
+curated overlay (entry links, exclusions, settlements citing the paragraph), and
+every served read lands in `events.jsonl`, which is what makes §33's manifest a
+record rather than a request.
+
+The M1 gate (#15) found the router pointed at the wrong thing: no session opens the
+raw evidence directly, but `sources/normalized/` and `.memoria/` — this repo's own
+records and index — are read every time, and one session's Bash sweep over
+`sources/normalized/*.md` went around the hook entirely while the ledger showed
+nothing for it. The hook now also denies Read/Grep/Glob under this repo's own
+`sources/normalized/` and `.memoria/`, whether or not an evidence corpus is
+configured, and is registered for Bash too: a command whose text names
+`sources/normalized`, `.memoria/`, or the evidence root is denied by exact-string
+containment, no attempt at shell parsing. A determined rewrite of the command text
+can still get past that; accepted — the goal remains that the logged path is the
+path of least resistance, not that evasion is impossible.
 
 Verified present: Claude Code 2.1.252, Python 3.14.4, Node 26.3, SQLite 3.46.1
 with FTS5, no MCP servers configured.
