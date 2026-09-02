@@ -1498,3 +1498,22 @@ def list_appearances(repository: Repository, entry_id: str) -> list[Appearance]:
     finally:
         con.close()
     return [Appearance(src_id=src_id, anchor=anchor, note=note) for src_id, anchor, note in rows]
+
+
+def appeared_entry_ids(repository: Repository) -> frozenset[str]:
+    """Every entry with at least one row in the ``appearances`` table -
+    ``list_appearances``'s query collapsed to entry identity alone, for a
+    caller (drift detection, #41) that needs to know which entries the
+    manuscript prose touches at all, not the passages themselves.
+
+    A missing index - every fresh clone - returns no results, matching
+    ``list_appearances``."""
+    db_path = repository.root / INDEX_RELATIVE_PATH
+    if not db_path.exists():
+        return frozenset()
+    con = connect(repository)
+    try:
+        rows = con.execute("SELECT DISTINCT entry_id FROM appearances").fetchall()
+    finally:
+        con.close()
+    return frozenset(row[0] for row in rows)
