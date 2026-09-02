@@ -954,6 +954,72 @@ def gather(repository: Repository, entry_id: str) -> list[GatheredSource]:
     )
 
 
+@dataclass(frozen=True)
+class ReadOverlay:
+    """The curated overlay a decorated evidence read carries (#20, part 06
+    §8.3 / ``poc-plan.md`` §7): which entries this paragraph is currently
+    linked to, which entries have excluded it, and which settlements cite
+    it.
+
+    Built directly off ``placements`` and ``gather_overlay``, keyed by
+    anchor rather than by entry - the read-time inverse of ``gather``'s
+    per-entry recall. It does not reproduce ``gather``'s lexical/
+    co-occurrence recall, deliberately: that machinery answers "what belongs
+    in this entry" and exists to mitigate placement *recall*; a read answers
+    "what is this paragraph already linked to", which is exactly what
+    ``placements`` and the pin/exclude overlay already record as attributed
+    fact.
+
+    ``citing_settlements`` is always empty in this build. Settlements are an
+    M4 concept (``docs/plan/16-build-order.md``) with no durable storage yet
+    to query - the field exists now so the overlay's shape does not change
+    again when M4 lands one.
+    """
+
+    entry_links: list[str]
+    exclusions: list[str]
+    citing_settlements: list[str]
+
+
+def overlay_for_anchor(repository: Repository, anchor: str) -> ReadOverlay:
+    """The curated overlay for one paragraph's anchor (#20).
+
+    ``entry_links`` names every entry this anchor is currently linked to -
+    a ``placements`` row, a pin, or both, minus anything excluded.
+    ``exclusions`` names every entry that has excluded this anchor, whether
+    or not it was otherwise placed there - the curator act itself, not just
+    its effect on membership.
+
+    A missing index (no ``memoria rebuild`` yet) returns an empty overlay,
+    the same no-index behaviour ``search`` and ``gather`` already give.
+    """
+    db_path = repository.root / INDEX_RELATIVE_PATH
+    if not db_path.exists():
+        return ReadOverlay(entry_links=[], exclusions=[], citing_settlements=[])
+    con = connect(repository)
+    try:
+        placed = {
+            row[0]
+            for row in con.execute(
+                "SELECT DISTINCT entry_id FROM placements WHERE anchor = ?",
+                (anchor,),
+            )
+        }
+        overlay_rows = con.execute(
+            "SELECT entry_id, action FROM gather_overlay WHERE anchor = ?",
+            (anchor,),
+        ).fetchall()
+    finally:
+        con.close()
+    excluded = {entry_id for entry_id, action in overlay_rows if action == "exclude"}
+    pinned = {entry_id for entry_id, action in overlay_rows if action == "pin"}
+    return ReadOverlay(
+        entry_links=sorted((placed | pinned) - excluded),
+        exclusions=sorted(excluded),
+        citing_settlements=[],
+    )
+
+
 # --- appearances, lexical engine only (#19, part 06 §8.11) ------------------
 
 

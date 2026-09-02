@@ -215,15 +215,19 @@ def test_no_read_writes_anything_under_either_root_but_the_ledger(tmp_path):
 
 
 def test_the_envelope_carries_the_verbatim_text_contiguously(tmp_path):
-    """The header may grow; the payload may not be touched."""
+    """The header may grow, and the overlay (#20) now follows the payload
+    behind its own delimiter - but the payload itself may not be touched,
+    and must appear contiguously between the two."""
     repository = _repo(tmp_path)
     result = read(repository, "SRC-000184 P2")
 
     rendered = server.render(result)
 
-    header, _, payload = rendered.partition("\n---\n")
+    header, _, rest = rendered.partition("\n---\n")
+    payload, _, overlay = rest.partition("\n---\n")
     assert payload == result.text
     assert "original_locator: Journal I, entry dated Oct. 22." in header
+    assert overlay == server.render_overlay(result.overlay)
 
 
 def test_a_full_source_read_is_rendered_bare(tmp_path):
