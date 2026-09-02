@@ -954,6 +954,87 @@ def gather(repository: Repository, entry_id: str) -> list[GatheredSource]:
     )
 
 
+@dataclass(frozen=True)
+class ReadOverlay:
+    """The curated overlay a decorated evidence read carries (#20, part 06
+    §8.3 / ``poc-plan.md`` §7): which entries this paragraph is currently
+    gathered into, which entries have excluded it, and which settlements
+    cite it.
+
+    ``citing_settlements`` is always empty in this build. Settlements are an
+    M4 concept (``docs/plan/16-build-order.md``) with no durable storage yet
+    to query - the field exists now so the overlay's shape does not change
+    again when M4 lands one.
+    """
+
+    entry_links: list[str]
+    exclusions: list[str]
+    citing_settlements: list[str]
+
+
+def overlay_for_anchor(repository: Repository, anchor: str) -> ReadOverlay | None:
+    """The curated overlay for one paragraph's anchor (#20).
+
+    ``entry_links`` is the **gathered-set-inverse**: every entry currently
+    on disk whose ``gather`` result includes this anchor - the same word-,
+    entry- and relation-shaped recall ``gather`` runs for a placement's
+    intended entry, and the same pin/exclude overlay it applies, just read
+    backwards from the anchor rather than forward from one entry. A
+    placements-only version under-reports exactly the recall ``gather``
+    itself exists to mitigate (part 06 §8.3's "central risk"), so this calls
+    ``gather`` once per entry rather than duplicating its matching logic - a
+    second, drifting copy of that logic would be worse than the extra
+    queries.
+
+    ``exclusions`` names every entry that has excluded this anchor, whether
+    or not it was otherwise gathered - the curator act itself, not just its
+    effect on membership.
+
+    Both are scoped to ``load_all_entries`` - entries actually on disk -
+    rather than to whatever ``placements``/``gather_overlay`` happen to
+    still name, so a deleted or renamed entry never surfaces from a stale
+    index.
+
+    Returns an empty overlay when there is no index yet (no ``memoria
+    rebuild`` has run), the same no-index behaviour ``search`` and
+    ``gather`` already give. Returns ``None`` - never raises - when the
+    index exists but cannot be read right now: a schema older than this
+    build (``IndexSchemaError``) or a concurrent writer holding it locked
+    (``sqlite3.Error``). The overlay is best-effort decoration; the
+    paragraph's own verbatim text is never conditioned on it, so a caller
+    degrades to an undecorated read rather than losing the read entirely -
+    ``poc-plan.md`` §7's verbatim-text guarantee may not weaken, and
+    decorating it was never license to.
+    """
+    db_path = repository.root / INDEX_RELATIVE_PATH
+    if not db_path.exists():
+        return ReadOverlay(entry_links=[], exclusions=[], citing_settlements=[])
+    try:
+        con = connect(repository)
+        try:
+            excluded_rows = con.execute(
+                "SELECT entry_id FROM gather_overlay "
+                "WHERE anchor = ? AND action = 'exclude'",
+                (anchor,),
+            ).fetchall()
+        finally:
+            con.close()
+        entries = load_all_entries(repository)
+        entry_links = sorted(
+            entry_id
+            for entry_id in entries
+            if any(g.anchor == anchor for g in gather(repository, entry_id))
+        )
+    except (IndexSchemaError, sqlite3.Error):
+        return None
+    exclusions = sorted(
+        entry_id for (entry_id,) in excluded_rows if entry_id in entries
+    )
+    return ReadOverlay(
+        entry_links=entry_links, exclusions=exclusions, citing_settlements=[]
+    )
+
+
 # --- appearances, lexical engine only (#19, part 06 §8.11) ------------------
 
 

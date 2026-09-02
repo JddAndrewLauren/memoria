@@ -24,11 +24,20 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 import yaml
 
 from memoria import changes, manuscript, references, subjects
 from memoria.repository import Repository, require_evidence_root
+
+if TYPE_CHECKING:
+    # Deferred to a function-local import in ``read`` below: ``memoria.index``
+    # imports this module at the top level (for ``NormalizedRecord`` and
+    # ``real_paragraphs``), so importing it back here too would cycle. The
+    # same shape ``memoria.index`` already uses for its own reverse import
+    # of ``memoria.extraction``.
+    from memoria.index import ReadOverlay
 
 # Where normalized records live inside the book repository. Here rather than
 # in validate.py so that the module owning the record format owns the path to
@@ -674,6 +683,11 @@ class Read:
     record, and what keeps the superset-of-grep constraint checkable rather
     than merely asserted. Adapters shape; they do not fold anything into this
     field.
+
+    ``overlay`` is the curated overlay a decorated paragraph read carries
+    (#20) - ``None`` for every other reference shape, and for a paragraph
+    read with ``raw=True``. A new field with a default, so the return shape
+    changes additively rather than forcing #11's signature open again.
     """
 
     ref: str
@@ -681,6 +695,7 @@ class Read:
     text: str
     record: NormalizedRecord | None = None
     paragraph: int | None = None
+    overlay: "ReadOverlay | None" = None
 
 
 def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
@@ -694,18 +709,35 @@ def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
     path - returns the file exactly as it is on disk, which is what keeps
     reading through the tool from ever being worse than ``cat``.
 
-    ``raw=True`` goes one level further than that: for a whole ``SRC-``
-    record it serves the pre-normalization original at ``original_file``
-    through ``read_raw_source`` - the file grep would have found before a
-    normalizer ever ran (#113) - rather than the normalized record. It is
-    refused for anything else: a paragraph reference, a path, a subject, a
-    chapter, a section or a change carries no ``original_file`` to serve.
-    ``docs/tool-surface.md`` documents this as the ``raw`` parameter's shape,
-    for #20 to reuse rather than invent a second one.
+    ``raw=True`` goes one level further than that, in one of two shapes
+    depending on what it is given (#20 growing the shape #113 forced ahead
+    of schedule, rather than inventing a second parameter):
 
-    One thing this still deliberately does not do, so it is not later
-    mistaken for an omission: it does not decorate with the curated overlay
-    (#20). It resolves no reference kind but ``SRC-``, ``SUB-``, ``CHP-``,
+    - for a whole ``SRC-`` record, it serves the pre-normalization original
+      at ``original_file`` through ``read_raw_source`` - the file grep would
+      have found before a normalizer ever ran (#113) - rather than the
+      normalized record;
+    - for one paragraph of a ``SRC-`` record, it serves that paragraph
+      **undecorated** - the same text and header a plain read gives, with no
+      curated overlay appended, which is what keeps the raw undecorated read
+      explicitly reachable once decoration exists rather than reachable only
+      by accident (``docs/tool-surface.md``).
+
+    Refused for anything else: a path, a subject, a chapter, a section or a
+    change carries neither an ``original_file`` nor an overlay to strip.
+
+    An evidence paragraph read that is *not* ``raw`` carries the curated
+    overlay too (#20, part 06 §8.3): which entries this paragraph is linked
+    to, which have excluded it, and which settlements cite it
+    (``memoria.index.overlay_for_anchor``), on ``Read.overlay`` - appended
+    after the text, never folded into it, so ``Read.text`` stays
+    byte-identical between a decorated and an undecorated read of the same
+    paragraph. ``Read.overlay`` is also ``None`` when the index exists but
+    cannot be read right now - a schema older than this build, or a
+    concurrent writer holding it locked - because the overlay is best-effort
+    decoration and the verbatim text is not conditioned on it: a degraded
+    index still returns the paragraph, undecorated, rather than failing the
+    read. It resolves no reference kind but ``SRC-``, ``SUB-``, ``CHP-``,
     ``SEC-``, ``CHG-`` and repository paths - the rest exist as a named
     error, not as silence. Ledgering the served read is the caller's job
     (``memoria.ledger``, #13): this function has no session to ledger
@@ -727,20 +759,24 @@ def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
         raise ReadError(_unknown_kind_message(reference))
 
     if raw:
-        if not isinstance(reference, references.SourceReference) or (
-            reference.paragraph is not None
-        ):
+        if not isinstance(reference, references.SourceReference):
             raise ReadError(
-                f"raw only serves a whole SRC- record's pre-normalization "
-                f"original, not {citation!r} (see docs/tool-surface.md)"
+                f"raw only serves a SRC- reference - a whole record's "
+                f"pre-normalization original, or a paragraph's undecorated "
+                f"text - not {citation!r} (see docs/tool-surface.md)"
             )
-        raw_source = read_raw_source(repository, reference.record_id)
-        return Read(
-            ref=ref,
-            citation=f"{citation} raw",
-            text=raw_source.text,
-            record=load(repository, reference.record_id),
-        )
+        if reference.paragraph is None:
+            raw_source = read_raw_source(repository, reference.record_id)
+            return Read(
+                ref=ref,
+                citation=f"{citation} raw",
+                text=raw_source.text,
+                record=load(repository, reference.record_id),
+            )
+        # A paragraph: falls through to the ordinary paragraph read below,
+        # which skips the overlay when `raw` is set - #20's second meaning
+        # for the same flag to grow into (docs/tool-surface.md), not a
+        # second read path duplicating the paragraph lookup here.
 
     if isinstance(reference, references.PathReference):
         path = _confined(repository, reference.path)
@@ -827,12 +863,23 @@ def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
             f"{reference.record_id} has {len(reals)} paragraphs; "
             f"there is no ¶{reference.paragraph}"
         )
+    overlay = None
+    if not raw:
+        # Local import: `memoria.index` imports this module at the top
+        # level, so importing it back at this module's top level would
+        # cycle (see the `TYPE_CHECKING` note above `Read`).
+        from memoria.index import overlay_for_anchor
+
+        overlay = overlay_for_anchor(
+            repository, references.anchor(reference.record_id, reference.paragraph)
+        )
     return Read(
         ref=ref,
-        citation=citation,
+        citation=f"{citation} raw" if raw else citation,
         text=reals[reference.paragraph - 1],
         record=record,
         paragraph=reference.paragraph,
+        overlay=overlay,
     )
 
 

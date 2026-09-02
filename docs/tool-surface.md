@@ -260,6 +260,37 @@ Two properties of that header are contracts, not styling:
   read has no delimiter because it has no decoration — that is what makes it
   the raw one.
 
+**A non-raw paragraph read carries the curated overlay** (#20, part 06 §8.3),
+a second `---`-delimited block after the text: `entry links` (every entry
+whose `gather` result — the same word-, entry- and relation-shaped recall,
+and the same pin/exclude overlay, `gather` applies for a placement's own
+entry — currently includes this anchor, read backwards from the anchor
+rather than forward from one entry: the gathered-set-inverse, not a
+placements-only narrowing of it), `exclusions` (every entry that has
+excluded this anchor, whether or not it was otherwise gathered), and
+`citing settlements` (always `none` in this build — settlements are an M4
+concept with no durable storage yet, part 16). Both `entry links` and
+`exclusions` are scoped to entries `load_all_entries` finds on disk, so a
+deleted or renamed entry a stale index still names never surfaces. Every
+field is printed even when empty — `none` rather than an absent line — so a
+paragraph with no overlay comes back the same shape as one with one.
+`Read.text` stays byte-identical between a decorated and an undecorated read
+of the same paragraph: the overlay is a sibling field
+(`memoria.records.Read.overlay`), never folded into `text`.
+
+A degraded index — a schema older than this build, or a concurrent writer
+holding it locked — drops the overlay (`Read.overlay` is `None`, the same as
+a `raw=True` read) rather than failing the read: the verbatim text is never
+conditioned on the overlay being computable, so the constraint this section
+opens with does not weaken.
+
+`render_overlay`'s own output never contains a bare `---` line — every field
+it prints is an entry id or the literal `none` — so the *last* `---` in a
+decorated paragraph's rendering is always the true text/overlay boundary,
+even when the paragraph's own text happens to contain one; a caller splits
+from the end for that boundary, and from the start for the header/text one
+(the header is equally `---`-free by construction).
+
 `original_locator` is printed and never parsed. It is a pointer a person
 follows, not an offset — issue #25 depends on that staying true.
 
@@ -269,16 +300,31 @@ reason a full-source `SRC-` read is (issue #16). An entry read resolves by
 its frontmatter `id` rather than by filename, so a renamed entry file still
 answers to the `SUB-x/y` it was created with.
 
-**`raw=True` serves the pre-normalization original, not the record** — the
-file at the referenced record's `original_file`, through `read_raw_source`,
-confined to `MEMORIA_EVIDENCE_ROOT` the same way every evidence read is
-(#25's "Open original", already served by #64's
-`/api/sources/{id}/raw`). It is accepted for a bare `SRC-` ID only — never a
-paragraph, a `SUB-`, a `CHP-`/`SEC-`/`CHG-`, or a path, all of which carry no
-`original_file` — and refused otherwise, naming the reference it was given.
-The original is what grep could have found before a normalizer ever ran, so
-serving it is part of the superset-of-grep constraint, not an exception to
-it (#113).
+**`raw=True` serves the least-processed version of what it is given** — one
+parameter, two shapes, dispatched on whether the `SRC-` reference names a
+paragraph:
+
+- **A bare `SRC-` ID** serves the pre-normalization original, not the
+  record — the file at the referenced record's `original_file`, through
+  `read_raw_source`, confined to `MEMORIA_EVIDENCE_ROOT` the same way every
+  evidence read is (#25's "Open original", already served by #64's
+  `/api/sources/{id}/raw`). The original is what grep could have found
+  before a normalizer ever ran, so serving it is part of the
+  superset-of-grep constraint, not an exception to it (#113). Like the
+  full-source read, this shape is bare — no header, no delimiter — and is
+  ledgered like any other read, with its citation marked `SRC-000184 raw` so
+  the served line names it as the original rather than the record.
+- **A paragraph reference** serves that paragraph **undecorated** — the same
+  header-plus-text a plain read gives, with no curated overlay block
+  appended (#20). This is what keeps the raw undecorated read of a paragraph
+  explicitly reachable once decoration exists, rather than reachable only by
+  the accident of nothing decorating reads yet. Its citation is marked
+  ` raw` too, the same shape as the whole-record case, so the ledger line
+  distinguishes it from a decorated read of the same paragraph.
+
+Refused for anything else — a `SUB-`, a `CHP-`/`SEC-`/`CHG-`, or a path, all
+of which carry neither an `original_file` nor a curated overlay — naming the
+reference it was given.
 
 An original that does not decode as UTF-8 is refused too, rather than
 handed back as bytes: the payload here is text, and a `.docx`'s raw bytes
@@ -286,12 +332,9 @@ returned as if they were text would be worse than `cat`, not equal to it.
 The refusal names the file and its suffix and says what it could not do —
 it does not claim the file is binary, since a `.txt` in another encoding
 lands in the same branch.
-Without `MEMORIA_EVIDENCE_ROOT` configured, a raw read fails with the same
-`NoEvidenceRoot` message every other evidence read gives.
-
-Like the full-source read, a raw read is bare — no header, no delimiter. It
-is ledgered like any other read, with its citation marked `SRC-000184 raw`
-so the served line names it as the original rather than the record.
+Without `MEMORIA_EVIDENCE_ROOT` configured, a raw read of a whole record
+fails with the same `NoEvidenceRoot` message every other evidence read
+gives.
 
 ### What it refuses, and how
 
@@ -313,15 +356,9 @@ failure shape the model has to learn.
 
 ### What is deliberately still missing
 
-- **No overlay.** Decoration with entry links, exclusions and citing
-  settlements is issue #20, at M2.
-- **`raw` exists; #20 must share its shape.** #113 forced the parameter
-  ahead of schedule, for the pre-normalization original rather than the
-  overlay #20 will add — but it forced the *shape* #20 was already recorded
-  here as owing: a `raw` flag on `read`, not a second reference form or a
-  suffix on `ref`. When #20 adds decoration, "undecorated" is a second
-  meaning for the same parameter to grow into, not a reason to add a
-  different one.
+- **`citing settlements` is always empty.** The overlay (#20) prints the
+  field, but settlements are an M4 concept (part 16) with no durable storage
+  yet to query. The shape will not need to change again when M4 adds one.
 
 ## `search_text(query, filters)` — forced 2026-09-01, issue #12
 

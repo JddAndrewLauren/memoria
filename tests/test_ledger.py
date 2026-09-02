@@ -13,7 +13,7 @@ import json
 import re
 
 from memoria import ledger
-from memoria.index import SearchFilters, SearchResult
+from memoria.index import ReadOverlay, SearchFilters, SearchResult
 from memoria.records import Read
 from memoria.repository import Repository
 
@@ -61,6 +61,29 @@ def test_a_served_read_appends_one_line_naming_the_reference_and_session(tmp_pat
     assert event["ref"] == "SRC-000184"
     assert event["served"] == ["SRC-000184"]
     assert "timestamp" in event
+
+
+def test_a_decorated_read_is_ledgered_like_any_other_read(tmp_path):
+    """The curated overlay (#20) rides on `Read.overlay`; `append_read`
+    ledgers the reference and citation exactly as it does for an
+    undecorated read - decoration earns no separate code path here."""
+    repository = Repository(root=tmp_path)
+    decorated = _read(
+        ref="SRC-000184 P1",
+        citation="SRC-000184 ¶1",
+        text="A blue heron flew over.",
+        overlay=ReadOverlay(
+            entry_links=["SUB-people/bob"], exclusions=[], citing_settlements=[]
+        ),
+    )
+
+    ledger.append_read(repository, "SES-test", decorated)
+
+    path = tmp_path / "sessions" / "SES-test" / "events.jsonl"
+    (line,) = path.read_text(encoding="utf-8").splitlines()
+    event = json.loads(line)
+    assert event["ref"] == "SRC-000184 P1"
+    assert event["served"] == ["SRC-000184 ¶1"]
 
 
 def test_a_served_search_appends_a_line_naming_the_query_filters_and_hits(tmp_path):

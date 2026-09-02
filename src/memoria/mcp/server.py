@@ -45,7 +45,12 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 import memoria.extraction as extraction
-from memoria.index import SearchFilters, SearchResult, search as search_index
+from memoria.index import (
+    ReadOverlay,
+    SearchFilters,
+    SearchResult,
+    search as search_index,
+)
 from memoria.ledger import (
     append_extraction_batch,
     append_extraction_brief,
@@ -99,6 +104,28 @@ def session_id() -> str:
     return _session_id
 
 
+def render_overlay(overlay: ReadOverlay) -> str:
+    """Shape one curated overlay into what the model sees (#20).
+
+    Every field is printed, even when empty - ``"none"`` rather than an
+    absent line - so a paragraph with no overlay comes back the same shape
+    as one with one, per ``docs/tool-surface.md``'s "reads of paragraphs
+    with no overlay return ... an explicit empty overlay, not a different
+    shape".
+    """
+
+    def _list(items: list[str]) -> str:
+        return ", ".join(items) if items else "none"
+
+    return "\n".join(
+        [
+            f"entry links: {_list(overlay.entry_links)}",
+            f"exclusions: {_list(overlay.exclusions)}",
+            f"citing settlements: {_list(overlay.citing_settlements)}",
+        ]
+    )
+
+
 def render(result: Read) -> str:
     """Shape one read into what the model sees.
 
@@ -119,8 +146,20 @@ def render(result: Read) -> str:
     header are contracts rather than styling, and ``docs/tool-surface.md``
     states them: the verbatim text appears **contiguously and unmodified** -
     never wrapped, re-indented or escaped - and there is exactly one
-    delimiter convention, which the curated overlay (#20) must reuse by
-    appending after the text rather than interleaving.
+    delimiter convention. **The curated overlay (#20) reuses it**, appending
+    a second ``---``-delimited block after the text rather than interleaving
+    with it. ``render_overlay``'s own output never contains a bare ``---``
+    line - every field it prints is an entry id or the literal ``none`` -
+    so the *last* ``\\n---\\n`` in a decorated paragraph's rendering is
+    always the true text/overlay boundary, even if the paragraph's own
+    verbatim text happens to contain one: split from the end, not the
+    start, the way ``tests/test_read_ref.py`` and ``tests/test_mcp_server.py``
+    do. (The header, symmetrically, never contains one either, so the
+    *first* ``\\n---\\n`` is always the header/text boundary.) A
+    ``raw=True`` paragraph read, or one whose index could not be read,
+    carries no ``overlay`` (``memoria.records.read``), so it stays a bare
+    header-plus-text pair, the same shape a plain read had before this
+    issue.
 
     ``original_locator`` is printed and never parsed: it is a pointer a person
     follows, not an offset (#25).
@@ -138,7 +177,10 @@ def render(result: Read) -> str:
         f"original_locator: {record.original_locator}",
         f"paragraphs_in_record: {len(real_paragraphs(record))}",
     ]
-    return "\n".join(header) + "\n---\n" + result.text
+    rendered = "\n".join(header) + "\n---\n" + result.text
+    if result.overlay is not None:
+        rendered += "\n---\n" + render_overlay(result.overlay)
+    return rendered
 
 
 @mcp.tool()
@@ -156,10 +198,19 @@ def read(ref: str, raw: bool = False) -> str:
     full-source read. Evidence text is never summarized, abridged or
     reformatted.
 
-    `raw=True`, for a bare record ID only, serves the pre-normalization
-    original behind that record instead - the file the normalizer read, not
-    what it produced. Refused for anything else, and for an original that
-    does not decode as UTF-8, rather than handed back as bytes.
+    A paragraph read also carries the curated overlay: which entries it is
+    linked to, which have excluded it, and which settlements cite it - a
+    second `---`-delimited block after the text, never mixed into it. A
+    degraded index (stale schema, or locked by a concurrent rebuild) drops
+    only the overlay; the paragraph itself still comes back undecorated
+    rather than failing.
+
+    `raw=True` serves the least-processed version of what it is given,
+    refused for anything but a SRC- reference: for a bare record ID, the
+    pre-normalization original behind it - the file the normalizer read, not
+    what it produced, refused too for an original that does not decode as
+    UTF-8 rather than handed back as bytes; for one paragraph, that
+    paragraph with no curated overlay appended.
 
     Reference kinds the archive defines but this build does not resolve yet -
     SES-, CHG-, CLM-, RES-, DEC- - return an error naming the kind.
