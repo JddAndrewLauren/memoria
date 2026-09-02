@@ -141,6 +141,32 @@ def append_search(
     )
 
 
+def append_search_semantic(
+    repository: Repository,
+    session_id: str,
+    query: str,
+    filters: SearchFilters | None,
+    results: list[SearchResult],
+) -> None:
+    """Ledger one served ``search_semantic(query, filters)`` call (#81).
+
+    Same shape as ``append_search`` - ``served`` names each hit by its
+    paragraph anchor - with its own ``tool`` name so a reader of
+    ``events.jsonl`` can tell a lexical hit from a semantic one; the two
+    never share a ledger line even when the same query text produced both.
+    """
+    _append(
+        repository,
+        session_id,
+        {
+            "tool": "search_semantic",
+            "query": query,
+            "filters": _filters_dict(filters),
+            "served": [result.anchor for result in results],
+        },
+    )
+
+
 def append_search_global(
     repository: Repository,
     session_id: str,

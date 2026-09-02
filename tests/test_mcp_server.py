@@ -44,6 +44,7 @@ ALLOWED_IMPORTS = {
     "memoria.index",      # #12: search_text calls memoria.index.search
     "memoria.ledger",      # #13: every served call is ledgered
     "memoria.extraction",  # #17: the extraction pass's tools
+    "memoria.embeddings",  # #81: the local embedder search_semantic wires in
 }
 
 FILE_OPENING_CALLS = {"open", "read_text", "read_bytes", "write_text", "write_bytes"}
@@ -385,7 +386,8 @@ def test_the_tool_surface_is_the_read_tools_and_the_extraction_tools():
     """Part 11 §25 withdrew the per-type read tools; there is no read_source.
 
     #12 adds exactly one more read tool, search_text - not one per filter or
-    one per source type. #74 adds search_global, the one global tool over the
+    one per source type. #81 adds search_semantic, the nearest-neighbour half
+    beside it. #74 adds search_global, the one global tool over the
     extraction's clusters. #17 adds the extraction pass's tools, which are a
     second class on the same server: they write, and they are driven by the
     `extraction` skill rather than reached for by a writing session.
@@ -396,6 +398,7 @@ def test_the_tool_surface_is_the_read_tools_and_the_extraction_tools():
     assert names == {
         "read",
         "search_text",
+        "search_semantic",
         "search_global",
         "extraction_brief",
         "extraction_next_paragraphs",
@@ -576,6 +579,120 @@ def test_search_text_ledgers_the_header_filters_exactly_as_the_existing_four(
     event = json.loads(line)
     assert event["filters"]["from_"] == "perrino"
     assert event["filters"]["to"] == "scholtes"
+
+
+# --- search_semantic (#81, ADR-0007) -----------------------------------------
+
+
+def _basis_vector(index, dim=384):
+    """A unit vector along axis ``index`` - see ``tests/test_index.py``'s
+    version of the same helper for why."""
+    vector = [0.0] * dim
+    vector[index % dim] = 1.0
+    return vector
+
+
+def _semantic_index(tmp_path, records, vectors):
+    """Like ``_index``, but also populates the vector table from a
+    caller-supplied ``{text: vector}`` mapping - the fake ``EmbedFn`` this
+    also returns, for ``monkeypatch.setattr(server, "default_embed_fn",
+    ...)`` to stand in for the real one (never exercised by this file: it
+    would need network)."""
+    from memoria.index import build_index
+
+    repository = Repository(root=tmp_path)
+
+    def embed_fn(texts):
+        return [vectors[text] for text in texts]
+
+    build_index(repository, records, embed_fn=embed_fn)
+    return repository, embed_fn
+
+
+def test_search_semantic_returns_the_src_id_and_anchor_of_each_hit(tmp_path, monkeypatch):
+    records = [
+        _record(paragraphs=["A blue heron flew over.", "Nothing to do with birds."])
+    ]
+    repository, embed_fn = _semantic_index(
+        tmp_path,
+        records,
+        {
+            "A blue heron flew over.": _basis_vector(0),
+            "Nothing to do with birds.": _basis_vector(1),
+            "a wading bird by the water": _basis_vector(0),
+        },
+    )
+    server._repository = repository
+    monkeypatch.setattr(server, "default_embed_fn", embed_fn)
+
+    rendered = server.search_semantic("a wading bird by the water")
+
+    assert "SRC-000184" in rendered
+    assert "src-000184-p1" in rendered
+
+
+def test_search_semantic_carries_a_scope_line_naming_what_was_embedded(
+    tmp_path, monkeypatch
+):
+    """§33.1: the one place a session can say what the semantic index
+    covered, since a nearest-neighbour hit says nothing about its own
+    recall on its own."""
+    records = [_record(paragraphs=["A blue heron flew over."])]
+    repository, embed_fn = _semantic_index(
+        tmp_path,
+        records,
+        {"A blue heron flew over.": _basis_vector(0), "heron": _basis_vector(0)},
+    )
+    server._repository = repository
+    monkeypatch.setattr(server, "default_embed_fn", embed_fn)
+
+    rendered = server.search_semantic("heron")
+
+    assert "embedded 1 paragraph" in rendered
+    assert "1 semantic hit" in rendered
+
+
+def test_search_semantic_over_an_unbuilt_index_never_calls_the_embedder(
+    tmp_path, monkeypatch
+):
+    from memoria.embeddings import EMBEDDING_MODEL_NAME
+
+    server._repository = Repository(root=tmp_path)
+
+    def _must_not_run(texts):
+        raise AssertionError("embed_fn must not run against an unbuilt index")
+
+    monkeypatch.setattr(server, "default_embed_fn", _must_not_run)
+
+    rendered = server.search_semantic("anything")
+
+    assert rendered == (
+        f"embedded 0 paragraphs with {EMBEDDING_MODEL_NAME}; "
+        "filters: none; 0 semantic hits"
+    )
+
+
+def test_search_semantic_is_ledgered_with_its_own_tool_name(tmp_path, monkeypatch):
+    from memoria.ledger import event_path
+
+    records = [_record(paragraphs=["A blue heron flew over."])]
+    repository, embed_fn = _semantic_index(
+        tmp_path,
+        records,
+        {"A blue heron flew over.": _basis_vector(0), "heron": _basis_vector(0)},
+    )
+    server._repository = repository
+    server._session_id = "SES-test"
+    monkeypatch.setattr(server, "default_embed_fn", embed_fn)
+
+    server.search_semantic("heron")
+
+    (line,) = (
+        event_path(repository, "SES-test").read_text(encoding="utf-8").splitlines()
+    )
+    event = json.loads(line)
+    assert event["tool"] == "search_semantic"
+    assert event["served"] == ["src-000184-p1"]
 
 
 # --- the ledger (#13) -------------------------------------------------------

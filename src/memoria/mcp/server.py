@@ -4,9 +4,9 @@ The second adapter over the core, after the CLI and before the FastAPI app
 (#64). §40.1 asks that business logic not be duplicated between them, and
 this module is where that stops being an aspiration: it holds no rule the
 other two lack, it imports only ``memoria.records``, ``memoria.repository``,
-(#12) ``memoria.index`` and (#13) ``memoria.ledger``, and it opens no file
-and speaks to no database itself. Everything it does is call one core
-function and render what comes back.
+``memoria.embeddings`` (#81), (#12/#81) ``memoria.index`` and (#13)
+``memoria.ledger``, and it opens no file and speaks to no database itself.
+Everything it does is call one core function and render what comes back.
 
 `read(ref)` is the single read tool (part 11 §25). Dispatch is read off the
 reference, because the ID scheme already names the type; there are no
@@ -24,14 +24,24 @@ retrospective - plus #111's `from`/`to` header filters, are implemented in
 computes them, so the same filters reach #64's web layer without a second,
 divergent copy.
 
+`search_semantic(query, filters)` (#81, ADR-0007) is the nearest-neighbour
+half, over the `sqlite-vec` table `memoria rebuild` populates. It reuses the
+same `SearchFilters` and the same core predicate builder as `search_text` -
+see ``memoria.index.search_semantic``.
+
 The ``extraction_*`` tools (#17) are a second class on the same server, and
 they are here because there is nowhere else: no model-driving service
-(``docs/poc-plan.md`` §3), and the session agent is the only model in the
-system. The server is still an adapter - **it cannot call a model and does
-not** - so the pass is a conversation: the tools hand paragraphs out, and
-every model output arrives back as tool arguments. There is no ``generate_``
-anything here, and ``extraction_derive`` and ``extraction_finish`` are local
-computation over rows.
+(``docs/poc-plan.md`` §3), and the session agent is the only *generative*
+model in the system. The server is still an adapter - **it cannot call a
+generative model and does not** - so the pass is a conversation: the tools
+hand paragraphs out, and every model output arrives back as tool arguments.
+There is no ``generate_`` anything here, and ``extraction_derive`` and
+``extraction_finish`` are local computation over rows. `search_semantic` is
+the one narrow exception the rule was always going to have: it runs a small,
+local, CPU embedding model (``memoria.embeddings``) to turn the query into a
+vector, never to generate text, needs no driving service because it needs no
+conversation, and costs no metered spend - the distinction ADR-0007 draws
+between this and the kind of model call §12.1 forbids running unasked.
 
 See ``docs/tool-surface.md`` for the forced signatures and what is still open.
 """
@@ -45,11 +55,14 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 import memoria.extraction as extraction
+from memoria.embeddings import default_embed_fn
 from memoria.index import (
     ReadOverlay,
     SearchFilters,
     SearchResult,
+    SemanticSearchResult,
     search as search_index,
+    search_semantic as search_index_semantic,
 )
 from memoria.ledger import (
     append_extraction_batch,
@@ -58,6 +71,7 @@ from memoria.ledger import (
     append_read,
     append_search,
     append_search_global,
+    append_search_semantic,
     session_id_from_env,
 )
 from memoria.records import Read, ReadError, read as read_ref, real_paragraphs
@@ -70,7 +84,9 @@ mcp = MCPServer(
         "read(ref): a SRC- record ID, a paragraph of one, or a repository "
         "path. Evidence comes back verbatim, never summarized. Find text "
         "with search_text(query, filters); each hit's anchor feeds straight "
-        "into read(ref). search_global(query, filters, summarize) returns "
+        "into read(ref). search_semantic(query, filters) finds text by "
+        "meaning instead of wording, over the same filters and the same "
+        "anchor references. search_global(query, filters, summarize) returns "
         "references grouped by the extraction's clusters instead of a flat "
         "list - with summarize=true it also serves each cluster's memoized "
         "[inferred] summary, never evidence. The extraction_* tools run the "
@@ -276,6 +292,47 @@ def search_text(query: str, filters: SearchFilters | None = None) -> str:
     results = search_index(repository(), query, filters)
     append_search(repository(), session_id(), query, filters, results)
     return render_search(results)
+
+
+@mcp.tool()
+def search_semantic(query: str, filters: SearchFilters | None = None) -> str:
+    """Nearest-neighbour search the evidence archive by meaning, ranked
+    nearest first (#81, ADR-0007).
+
+    Finds a paragraph whose wording differs from `query` but whose meaning
+    is close to it - `search_text`'s FTS5 match cannot. Returns each hit's
+    `SRC-` ID and paragraph anchor, exactly like `search_text`: the anchor
+    feeds straight into `read(ref)` with no reconstruction, and no result
+    carries paragraph text of its own.
+
+    `filters` is the same `SearchFilters` `search_text` takes, and composes
+    the same way.
+
+    Every reply ends with a scope line naming how many paragraphs were
+    embedded, which filters were applied, and how many this call matched -
+    `search_semantic` is an index, and §33.1 is explicit that an index
+    reports nothing about its own recall on its own; this is the one place a
+    session can say what the semantic index actually covered. An archive
+    with no semantic index built yet (`memoria rebuild` has not populated
+    it) answers with 0 embedded and 0 matched, the same "not built" shape
+    `search_text` gives for a missing index, rather than an error.
+    """
+    result = search_index_semantic(
+        repository(), query, filters, embed_fn=default_embed_fn
+    )
+    results = list(result.results)
+    append_search_semantic(repository(), session_id(), query, filters, results)
+    return render_semantic(result)
+
+
+def render_semantic(result: SemanticSearchResult) -> str:
+    """Shape one `search_semantic` result: `render_search`'s hit lines, then
+    the scope line naming what was embedded and what was searched (§33.1) -
+    always printed, even with no hits, so a caller never mistakes "the index
+    has nothing" for "the call failed silently"."""
+    if not result.results:
+        return result.scope
+    return render_search(list(result.results)) + "\n\n" + result.scope
 
 
 @mcp.tool()

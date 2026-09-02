@@ -35,8 +35,10 @@ python3 -m venv .venv
 the MCP server, the FastAPI app below, the docx/pdf converters and the
 extraction's clustering are all importable and their tests run. `pip install
 memoria` on its own installs the core and the CLI only — the core's own
-runtime dependency is PyYAML alone, and an extraction on a core-only install
-produces candidates and placements but no clusters, and says so.
+runtime dependencies are PyYAML, `sqlite-vec` and `fastembed` (the semantic
+index, #81, ADR-0007; installing the latter pulls in `onnxruntime` but
+downloads no model weights by itself), and an extraction on a core-only
+install produces candidates and placements but no clusters, and says so.
 
 `[graph]` is networkx. `graspologic-native` (Leiden, and the preferred backend)
 is deliberately not in any extra: if `[dev]` pulled it, the suite would only

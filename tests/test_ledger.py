@@ -111,6 +111,25 @@ def test_a_served_search_appends_a_line_naming_the_query_filters_and_hits(tmp_pa
     assert event["served"] == ["src-000184-p1"]
 
 
+def test_a_served_semantic_search_appends_a_line_with_its_own_tool_name(tmp_path):
+    """#81: a semantic hit and a lexical hit never share a ledger line, even
+    over the same query text - `append_search_semantic` is a separate
+    function from `append_search` for exactly this reason."""
+    repository = Repository(root=tmp_path)
+    filters = SearchFilters(source_type="journal")
+    results = [SearchResult(src_id="SRC-000184", anchor="src-000184-p1", source_type="journal")]
+
+    ledger.append_search_semantic(repository, "SES-test", "heron", filters, results)
+
+    path = tmp_path / "sessions" / "SES-test" / "events.jsonl"
+    (line,) = path.read_text(encoding="utf-8").splitlines()
+    event = json.loads(line)
+    assert event["tool"] == "search_semantic"
+    assert event["query"] == "heron"
+    assert event["filters"]["source_type"] == "journal"
+    assert event["served"] == ["src-000184-p1"]
+
+
 def test_the_ledger_is_append_only_existing_lines_are_never_rewritten(tmp_path):
     repository = Repository(root=tmp_path)
     path = tmp_path / "sessions" / "SES-test" / "events.jsonl"
