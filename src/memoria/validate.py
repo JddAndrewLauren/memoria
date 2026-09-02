@@ -192,8 +192,11 @@ def _validate_normalized_src_ids(repo_root: Path) -> list[str]:
 
 
 def _validate_subjects(repo_root: Path) -> list[str]:
-    """Every subject prompt carries its four required declarations, and
-    every entry's match terms are one of the three shapes (issue #16)."""
+    """Every subject prompt carries its four required declarations, every
+    entry's match terms are one of the three shapes (issue #16), and - #91's
+    three gaps found reviewing that fix - a subject directory has a prompt at
+    all, an entry's frontmatter ``id`` agrees with the directory it sits in,
+    and a relation match term is diagnosed as one even without a verb."""
     subjects_dir = repo_root / SUBJECTS_RELATIVE_PATH
     if not subjects_dir.is_dir():
         return []
@@ -209,13 +212,29 @@ def _validate_subjects(repo_root: Path) -> list[str]:
                 )
             except SubjectError as exc:
                 errors.append(str(exc))
+        else:
+            # A subject whose prompt was never written, or was deleted, used
+            # to be invisible to `validate` rather than an error - the
+            # directory's entries were still checked below, but nothing said
+            # the subject itself was missing.
+            errors.append(f"{subject_prompt}: missing subject prompt")
 
+        expected_subject_id = f"SUB-{subject_dir.name}"
         for entry_path in sorted(subject_dir.glob("*.md")):
             if entry_path.name == "_subject.md":
                 continue
             try:
-                parse_entry(entry_path.read_text(encoding="utf-8"), source=str(entry_path))
+                entry = parse_entry(
+                    entry_path.read_text(encoding="utf-8"), source=str(entry_path)
+                )
             except SubjectError as exc:
                 errors.append(str(exc))
+                continue
+            entry_subject_id = entry.id.split("/", 1)[0]
+            if entry_subject_id != expected_subject_id:
+                errors.append(
+                    f"{entry_path}: entry id {entry.id!r} does not match its "
+                    f"directory - expected subject {expected_subject_id!r}"
+                )
 
     return errors

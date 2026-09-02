@@ -232,6 +232,17 @@ def classify_match_term(term: str) -> str:
                 "be entry references (SUB-x/y)"
             )
         return "relation"
+    if "->" in term:
+        # An attempted relation missing its required spaces. Falling through
+        # to the "SUB-" check below would diagnose this as a malformed
+        # entry-reference when it starts with one - sending the author to
+        # look at the wrong declaration - so a bare '->' is always a relation
+        # complaint: part 06 §8.4 requires the spaced 'entry -> verb -> entry'
+        # form, and this module does not invent a second, unspaced one.
+        raise SubjectError(
+            f"malformed relation match term: {term!r} - relations need "
+            "spaces around '->': 'entry -> verb -> entry'"
+        )
     if term.startswith("SUB-"):
         if not _ENTRY_REF_RE.match(term):
             raise SubjectError(
