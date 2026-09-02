@@ -65,6 +65,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read
+         * @description Resolve one reference - the slide-over citation panel's read (§19.9).
+         *
+         *     Wraps ``memoria.records.read`` exactly, the same composed core the MCP
+         *     tool surface's ``read(ref)`` calls: a ``SRC-`` paragraph anchor (a search
+         *     hit's or a paragraph's own ``anchor``) serves the cited text, its record
+         *     and its curated-overlay backlinks (#20); a ``SUB-x/y`` entry reference -
+         *     an overlay's own ``entry_links``/``exclusions`` - serves the entry's raw
+         *     text, so a backlink is clickable into the same panel in both directions
+         *     (#25's acceptance criteria) without a second read shape. Ledgering the
+         *     served read is the caller's job (``memoria.records.read``'s own
+         *     docstring) - this route never imports ``memoria.ledger``, so an author's
+         *     own read here writes nothing to ``events.jsonl``.
+         */
+        get: operations["read_api_read_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/subjects": {
         parameters: {
             query?: never;
@@ -143,6 +174,57 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * CitationOut
+         * @description One resolved reference - the slide-over citation panel's read (§19.9).
+         *
+         *     The single generic read the panel uses in both directions: a ``SRC-``
+         *     paragraph anchor serves the cited text, its record and its backlinks
+         *     (``overlay``); a ``SUB-x/y`` entry reference serves the entry's own text,
+         *     with ``record``/``paragraph``/``overlay`` all ``None`` - a backlink is
+         *     clickable into the same panel, and the panel does not need a second shape
+         *     to render it (#25's "traverse in both directions"). Wraps
+         *     ``memoria.records.read`` exactly - the same core function the MCP tool
+         *     surface calls - so this is the one generic reference read the viewer has,
+         *     never a second one duplicating ``/sources/{id}``.
+         */
+        CitationOut: {
+            /** Ref */
+            ref: string;
+            /** Citation */
+            citation: string;
+            /** Text */
+            text: string;
+            record?: components["schemas"]["SourceSummary"] | null;
+            /** Paragraph */
+            paragraph?: number | null;
+            overlay?: components["schemas"]["ReadOverlayOut"] | null;
+        };
+        /**
+         * EditorialRecordOut
+         * @description One piece of editorial apparatus, linked to the paragraph it
+         *     annotates (#25's "what the data actually is").
+         *
+         *     ``editorial_type`` is one of ``footnote``, ``bracketed-span``,
+         *     ``interpolation`` or ``introduction``; a consumer renders whatever value
+         *     is actually present rather than assuming that list is closed, the same
+         *     posture ``SourceSummary.source_type`` already takes. ``retrospective``
+         *     marks apparatus added after the fact, distinct from the evidence it
+         *     annotates. ``linked_record_id``/``linked_anchor`` name the paragraph it
+         *     attaches to - never inline in that paragraph's own text (§6).
+         */
+        EditorialRecordOut: {
+            /** Editorial Type */
+            editorial_type: string;
+            /** Retrospective */
+            retrospective: boolean;
+            /** Linked Record Id */
+            linked_record_id: string;
+            /** Linked Anchor */
+            linked_anchor: string;
+            /** Text */
+            text: string;
+        };
         /** EntryListResponse */
         EntryListResponse: {
             /** Items */
@@ -189,6 +271,22 @@ export interface components {
             text: string;
             /** Original Locator */
             original_locator: string;
+        };
+        /**
+         * ReadOverlayOut
+         * @description The curated overlay a decorated paragraph read carries (#20):
+         *     mirrors ``memoria.index.ReadOverlay`` field for field. ``citing_settlements``
+         *     is always empty in this build - settlements have no durable storage yet
+         *     (#20's own docstring) - and stays on the shape rather than being dropped,
+         *     the same forward-compatibility call ``ReadOverlay`` itself makes.
+         */
+        ReadOverlayOut: {
+            /** Entry Links */
+            entry_links: string[];
+            /** Exclusions */
+            exclusions: string[];
+            /** Citing Settlements */
+            citing_settlements: string[];
         };
         /** SearchResponse */
         SearchResponse: {
@@ -261,7 +359,7 @@ export interface components {
              * Apparatus
              * @default []
              */
-            apparatus: components["schemas"]["SourceSummary"][];
+            apparatus: components["schemas"]["EditorialRecordOut"][];
         };
         /**
          * SourceListResponse
@@ -428,6 +526,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RawSourceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_api_read_get: {
+        parameters: {
+            query: {
+                ref: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CitationOut"];
                 };
             };
             /** @description Validation Error */
