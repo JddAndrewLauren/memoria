@@ -9,6 +9,7 @@ from memoria.index import INDEX_RELATIVE_PATH, IndexSchemaError, rebuild
 from memoria.normalize import normalize as run_normalize
 from memoria.records import NORMALIZED_RELATIVE_PATH
 from memoria.repository import NoEvidenceRoot, from_env, require_evidence_root
+from memoria.subjects import write_builtin_subjects
 from memoria.validate import validate
 from memoria.write import Checkpointed, checkpoint
 
@@ -89,6 +90,13 @@ def main(argv=None):
     subparsers.add_parser(
         "checkpoint",
         help="Commit any outside edits to durable files under one CHG- id",
+    )
+    subparsers.add_parser(
+        "seed-subjects",
+        help=(
+            "Write the five built-in subjects into the repository, skipping "
+            "any that already exist"
+        ),
     )
     normalize_parser = subparsers.add_parser(
         "normalize",
@@ -184,6 +192,18 @@ def main(argv=None):
             print(f"checkpoint: committed {len(result.files)} file(s) as {result.change_id}")
         else:
             print("checkpoint: nothing to checkpoint, tree is clean")
+        return 0
+
+    if args.command == "seed-subjects":
+        written = write_builtin_subjects(repository)
+        if written:
+            for path in written:
+                print(f"seed-subjects: wrote {path}")
+        else:
+            print(
+                "seed-subjects: nothing to write, all five built-in subjects "
+                "already exist"
+            )
         return 0
 
     parser.print_help()
