@@ -17,6 +17,119 @@ a gap nobody noticed.
 | `search_semantic(query, filters)` | Open — issue #81, scheduled for M2 (ADR-0007): a `sqlite-vec` table in the index file, a local CPU model at rebuild |
 | `expand`, `timeline`, `grep_repo`, `trace`, `backlinks`, `list` | Open; §25 does not commit to shipping them |
 
+## Maintainer-class tools (ADR-0005, issue #17)
+
+A second class on the same server, and a different kind of thing from the
+table above. The read tools are what a *writing* session reaches for. These
+are the extraction pass: they are driven by the `extraction` skill, they
+write, and they exist because there is nowhere else to put them.
+
+| Tool | State |
+|---|---|
+| `extraction_brief()` | **Forced** — issue #17 |
+| `extraction_next_paragraphs(limit)` | **Forced** — issue #17 |
+| `extraction_record(results)` | **Forced** — issue #17 |
+| `extraction_derive(recurrence_threshold)` | **Forced** — issue #17 |
+| `extraction_next_summary()` | **Forced** — issue #17 |
+| `extraction_record_summary(cluster_id, membership, summary)` | **Forced** — issue #17 |
+| `extraction_status()` | **Forced** — issue #17 |
+| `extraction_finish(recurrence_threshold)` | **Forced** — issue #17 |
+
+### Why they are on this server
+
+Because there is no other model in the system. `poc-plan.md` §3 forbids a
+model-driving service, and part 08 §12.1 forbids anything needing a model
+from running unasked, so the extraction is an author-launched act inside a
+Claude Code session — and the session's only route to the archive is this
+server.
+
+### The rule that shapes every signature
+
+**No adapter can call a model**, and this one does not. Every tool is one of
+three things: it *serves* (paragraphs, prompts, a summary task), it *records*
+what the model produced, or it is local computation over rows
+(`extraction_derive`, `extraction_finish`). There is no `generate_` anything.
+This is the same finding that decided `search_global(summarize=true)` serves a
+memoized summary rather than composing one (#74).
+
+### What the model sends back
+
+`extraction_record` takes a list of `RecordedParagraph`, each carrying an
+`anchor`, its `placements` (entry reference + the surface form in *this*
+paragraph that placed it), its `unplaced` surface forms, and its `relations`.
+
+Two rules are held by the **type** rather than by the prompt:
+
+- a `RecordedRelation` has no second anchor field, so a relation spanning two
+  paragraphs cannot be expressed at all;
+- both its ends are entry references, checked against that same paragraph's
+  placements, so a relation to an unplaced form is refused.
+
+The core validates and re-encodes before caching. That is deliberate: what is
+written survives every rebuild, so a malformed reading cached is a bad reading
+no `memoria rebuild` will ever clear, and an adapter is the wrong place to be
+the last line of defence for something that permanent.
+
+### Batch in, per-element out
+
+`extraction_record` takes a whole batch and reports **per element**: a
+malformed reading names its reason and its siblings are still kept.
+
+This is the one tool on this server with two failure channels — per-element in
+the rendered result, whole-call as a `ToolError` — and it is worth stating
+because it is unlike everything else here. The reason is that the failure atom
+and the call atom are different sizes. One call per paragraph would spend a
+tool-call envelope on every paragraph in the archive, which is a large amount
+of pure framing; a batch that dies on one bad element throws away nineteen good
+ones. Splitting them buys both.
+
+### The prompt is a package constant
+
+`memoria.extraction.EXTRACTION_PROMPT` and `CLUSTER_SUMMARY_PROMPT` are module
+constants, and `extraction_brief` serves the first one verbatim. Its hash is in
+every memo key, so **editing it re-reads every archive** — which is why it lives
+where a change to it is a reviewed commit, rather than under `subjects/` where
+an author's editor could invalidate the whole cache without anyone deciding to.
+
+The skill holds no copy of it. Two copies would mean the hash covers the one
+nobody read.
+
+### What is ledgered
+
+`memoria.ledger` records what the surface **served to a session**, so:
+
+- `extraction_brief` — it serves every subject prompt verbatim, which is the
+  same category of thing as `read("SUB-people")`;
+- `extraction_next_paragraphs` — across a pass this is the largest delivery of
+  evidence into a model's context anywhere in the system;
+- `extraction_next_summary` — naming the member anchors it served, which is
+  empty for a parent cluster, because a parent is served its children's
+  summaries and no evidence at all.
+
+Not ledgered: `extraction_record`, `extraction_record_summary`,
+`extraction_derive`, `extraction_finish` and `extraction_status`. They supply
+nothing to the model; they take from it or compute. An account of *acts* rather
+than reads would be a second, broader ledger — the same call this document
+already makes about failed reads.
+
+One property falls out rather than being arranged: **a memo hit is never
+ledgered**, because the batch only ever carries paragraphs with no cached
+reading. A re-run over an extracted corpus appends nothing.
+
+**Cluster ids are deliberately not `read(ref)`-resolvable.** `served` names
+things `read(ref)` accepts, and a cluster id is not one — cluster identity does
+not survive re-clustering (ADR-0005 decision 6), so it rides in its own field.
+
+### These tools write
+
+`read` and `search_text` write nothing but the ledger, and a test asserts it.
+The extraction tools write derived rows to `.memoria/index.db`, and
+`extraction_finish` writes durable entry files under `subjects/` through
+`memoria.write`. The read tools' no-write test is scoped to the read tools for
+that reason; the narrowing is a decision, not drift.
+
+---
+
 ## The constraint that binds all of it
 
 From `poc-plan.md` §7, and it **may not be weakened**:

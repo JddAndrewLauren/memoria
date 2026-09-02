@@ -14,7 +14,15 @@ import pytest
 
 from memoria import write
 from memoria.repository import Repository
-from memoria.write import Actor, Checkpointed, NoChanges, Rejected, Written
+from memoria.write import (
+    Actor,
+    Checkpointed,
+    NoChanges,
+    Rejected,
+    WriteError,
+    Written,
+    create,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = REPO_ROOT / "src" / "memoria"
@@ -590,3 +598,59 @@ def test_the_write_path_refuses_a_path_outside_the_durable_classes(tmp_path, rel
     with pytest.raises(write.WriteError, match="not a durable"):
         write.write(repository, relative_path, "any", "x\n", AUTHOR)
     assert (tmp_path / relative_path).read_text() == "not ours\n"
+
+
+# --- create (#17) ------------------------------------------------------------
+
+
+def test_create_brings_a_new_durable_file_into_being_and_commits_it(tmp_path):
+    """Promotion creates entries, and `write` cannot: its token is minted from
+    a file that exists. `create` is the second door, in this module rather
+    than around it, so a promotion is still confined, replaced atomically,
+    committed and attributed."""
+    repository = _repo(tmp_path, {"subjects/people/_subject.md": "seed\n"})
+    actor = Actor(name="Memoria", email="curator@memoria.local", human=False)
+
+    result = create(repository, "subjects/people/bob.md", "new entry\n", actor)
+
+    assert isinstance(result, Written)
+    assert (tmp_path / "subjects" / "people" / "bob.md").read_text() == "new entry\n"
+    author = subprocess.run(
+        ["git", "log", "-1", "--format=%an <%ae>"],
+        cwd=tmp_path, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    assert author == "Memoria <curator@memoria.local>"
+
+
+def test_create_rejects_a_path_that_already_exists(tmp_path):
+    """Not an overwrite, and not an exception: the same shape a stale token
+    has, because it is the same kind of thing - a normal outcome the caller
+    handles. It is also what makes running a pass twice create nothing new
+    rather than flatten an entry the author has since edited."""
+    repository = _repo(tmp_path, {"subjects/people/bob.md": "mine\n"})
+    actor = Actor(name="Memoria", email="curator@memoria.local", human=False)
+
+    result = create(repository, "subjects/people/bob.md", "theirs\n", actor)
+
+    assert isinstance(result, Rejected)
+    assert result.outcome == "exists"
+    assert (tmp_path / "subjects" / "people" / "bob.md").read_text() == "mine\n"
+
+
+def test_create_refuses_a_path_outside_the_durable_classes(tmp_path):
+    repository = _repo(tmp_path, {"book.md": "seed\n"})
+    actor = Actor(name="Memoria", email="curator@memoria.local", human=False)
+
+    with pytest.raises(WriteError, match="durable state class"):
+        create(repository, "sources/normalized/SRC-000001.md", "x\n", actor)
+
+
+def test_create_makes_the_parent_directory(tmp_path):
+    """A subject the author added has a directory; a brand new one may not."""
+    repository = _repo(tmp_path, {"book.md": "seed\n"})
+    actor = Actor(name="Memoria", email="curator@memoria.local", human=False)
+
+    result = create(repository, "subjects/locations/capital.md", "x\n", actor)
+
+    assert isinstance(result, Written)
+    assert (tmp_path / "subjects" / "locations" / "capital.md").is_file()

@@ -31,10 +31,17 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 ```
 
-`[dev]` pulls in the `[mcp]` and `[web]` extras, so the MCP server and the
-FastAPI app below are both importable and their tests run. `pip install
-memoria` on its own installs the core and the CLI only — the core's own
-runtime dependency is PyYAML alone.
+`[dev]` pulls in the `[mcp]`, `[web]` and `[graph]` extras, so the MCP server,
+the FastAPI app and the extraction's clustering are all importable and their
+tests run. `pip install memoria` on its own installs the core and the CLI only
+— the core's own runtime dependency is PyYAML alone, and an extraction on a
+core-only install produces candidates and placements but no clusters, and says
+so.
+
+`[graph]` is networkx. `graspologic-native` (Leiden, and the preferred backend)
+is deliberately not in any extra: if `[dev]` pulled it, the suite would only
+ever exercise Leiden and never the networkx fallback most installs actually
+run. Install it by hand for Leiden.
 
 ## Running the tests
 
@@ -132,6 +139,8 @@ compile error in `ui/`, not a runtime surprise nobody sees.
 .venv/bin/memoria validate
 .venv/bin/memoria normalize
 .venv/bin/memoria rebuild
+.venv/bin/memoria rebuild --recurrence-threshold 3
+.venv/bin/memoria rebuild --reset-cache
 .venv/bin/memoria checkpoint
 ```
 
@@ -152,6 +161,47 @@ are already on disk; producing those records is `memoria normalize`'s job, and
 the two stay separate so a reindex never rewrites evidence-derived records. On
 an empty corpus `rebuild` indexes nothing and says so — choosing a corpus is
 what fills it, not a gap to patch.
+
+It also recomputes the extraction's derived rows: placements, candidates and
+their recurrence ranking, relations, clusters and proposed match terms (#17).
+That step calls **no model** — accepting a proposed match term and rebuilding
+moves what is placed without re-reading a single paragraph. `--recurrence-threshold`
+sets the filter a candidate must clear (default 5); rejected candidates are kept
+and stay listable either way.
+
+**One table survives a rebuild: the extraction's memo cache.** It holds what a
+model read, paragraph by paragraph, and a rebuild has no model to regenerate it
+with — so `rebuild` drops and rewrites everything else in `.memoria/index.db`
+and leaves that alone. `--reset-cache` discards it too, and is the only way to;
+the next extraction then re-reads the whole archive.
+
+**`rebuild` never promotes.** Auto-promotion creates durable, committed entry
+files, and it belongs to the author-launched extraction pass, never to a
+command whose whole contract is that everything it touches is disposable.
+
+## The extraction
+
+The extraction is the subject system's one candidate engine (part 06 §8.4,
+`docs/adr/0005-extraction-is-the-candidate-engine.md`). A model reads every
+paragraph of the archive for what it mentions, and from that Memoria proposes
+candidates under every subject, clusters offered under Themes and Arcs, and
+match terms on the entries that already exist.
+
+It is **author-launched and runs nowhere else**: there is no scheduler and no
+model-driving service (`docs/poc-plan.md` §3), and nothing that needs a model
+runs unasked (part 08 §12.1). Run it from a Claude Code session in the
+repository with the `extraction` skill:
+
+```
+/extraction
+```
+
+The skill drives the `extraction_*` tools on the MCP server, which hand
+paragraphs out and take structured readings back — the server itself calls no
+model and cannot. A pass that runs out of capacity stops cleanly and resumes
+where it stopped; nothing is lost and nothing repeats, because what is left to
+do is a query over what has no cached reading rather than a cursor to keep.
+`docs/tool-surface.md` records the tools and why they are shaped as they are.
 
 `memoria checkpoint` commits tracked, durable files with uncommitted
 modifications — outside edits made in Obsidian or another editor, never

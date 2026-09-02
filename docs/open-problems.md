@@ -245,7 +245,14 @@ Build detail rather than open decisions, from `poc-plan.md` §7:
   (part 05 §5.1-5.4, `normalized-record-schema.md`, ADR-0006); how editorial apparatus
   is represented is still open, and so is whether the extraction (ADR-0005) is handed a
   record's frontmatter — sender, recipient, date — alongside each paragraph, which
-  email paragraphs need to be placeable;
+  email paragraphs need to be placeable. **Deliberately still open after #17 built the
+  extraction (2026-09-01):** it is not handed the frontmatter, and the memo key is over
+  the paragraph text alone. There is no email normalizer yet (#78), so there is no
+  archive against which to decide what a placeable email paragraph actually needs, and
+  widening the key for a case nothing can exercise would only make the first real
+  decision more expensive. The key composition carries a version tag
+  (`memoria-extraction-v1`) precisely so this can change: adding frontmatter moves every
+  key, which is a full re-read and the honest price of the change;
 - how images, charts and spreadsheets are handled — written down, not built: a deep
   read of a spreadsheet is unlikely to be worth it, surfacing that one was attached to
   a message may be (part 05 §5.4);
