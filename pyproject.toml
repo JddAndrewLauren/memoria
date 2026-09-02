@@ -38,11 +38,13 @@ memoria-mcp = "memoria.mcp.server:main"
 [project.optional-dependencies]
 # The MCP server (issue #11) is an adapter over the core, not part of it. The
 # SDK pulls in a web-server stack - pydantic, starlette, uvicorn, httpx2,
-# pyjwt, opentelemetry - and the core's only runtime dependency is PyYAML, so
-# it rides in an extra rather than in `dependencies`. `dev` depends on the
-# extra, which means the documented install (`pip install -e ".[dev]"`, used by
-# the README and by orca.yaml) always yields an importable server and no test
-# needs `importorskip` - a skipped test in this repo is a failed one.
+# pyjwt, opentelemetry - and the core's own runtime dependencies are PyYAML,
+# `sqlite-vec` and `fastembed` (the semantic index, #81, ADR-0007) and
+# nothing else, so it rides in an extra rather than in `dependencies`. `dev`
+# depends on the extra, which means the documented install (`pip install -e
+# ".[dev]"`, used by the README and by orca.yaml) always yields an importable
+# server and no test needs `importorskip` - a skipped test in this repo is a
+# failed one.
 # The FastAPI adapter (#64) takes the same shape when it lands.
 #
 # Major pinned: mcp 2.0 was a breaking rename (FastMCP -> MCPServer,
@@ -51,18 +53,21 @@ mcp = [
     "mcp>=2.1,<3",
 ]
 # The FastAPI adapter (#64), the third over the core. Same reasoning as
-# `mcp` above: the core stays PyYAML-only, and `dev` pulling this extra in
-# is what keeps a route importable in every test rather than skipped.
+# `mcp` above: the core's own runtime dependencies stay PyYAML plus the
+# semantic index's `sqlite-vec` and `fastembed` (#81, ADR-0007) and nothing
+# else, and `dev` pulling this extra in is what keeps a route importable in
+# every test rather than skipped.
 web = [
     "fastapi>=0.115,<1",
     "uvicorn>=0.30",
 ]
 # The docx/pdf normalizer (#77, part 05 §5.4): MarkItDown for docx, pdfplumber
 # for pdf, read directly by memoria.normalize's converter seam. Same
-# reasoning as mcp/web above - the core stays PyYAML-only, and `dev` pulling
-# this extra in is what keeps `memoria normalize` exercising a real converter
-# in every test rather than a skip. `docx` is MarkItDown's own extra for its
-# mammoth-based docx path.
+# reasoning as mcp/web above - the core's own runtime dependencies stay
+# PyYAML plus the semantic index's `sqlite-vec` and `fastembed` (#81,
+# ADR-0007) and nothing else, and `dev` pulling this extra in is what keeps
+# `memoria normalize` exercising a real converter in every test rather than
+# a skip. `docx` is MarkItDown's own extra for its mammoth-based docx path.
 #
 # Pinned exactly, not a range (#79, part 05 §5.4): the paragraph hash is the
 # extraction's memo key, so a converter version a bare range could silently
@@ -77,8 +82,9 @@ convert = [
 ]
 # The extraction's clustering (#17). Unlike `mcp` and `web` this is not an
 # adapter - it is core index-maintainer logic - but it takes the same shape
-# for the same reason: the core's own runtime dependency stays PyYAML, and
-# `dev` pulls the extra so the clustering tests never skip.
+# for the same reason: the core's own runtime dependencies stay PyYAML plus
+# the semantic index's `sqlite-vec` and `fastembed` (#81, ADR-0007) and
+# nothing else, and `dev` pulls the extra so the clustering tests never skip.
 #
 # `graspologic-native` (ADR-0005 build shape 1's preferred Leiden backend) is
 # deliberately NOT here. If `dev` pulled it, the suite would only ever

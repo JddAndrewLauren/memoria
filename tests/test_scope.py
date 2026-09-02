@@ -1,10 +1,13 @@
 """The one scope resolver (#36): a brief's declared scope, resolved through
 the subjects into a set of entries, deterministically and with no model
-call. `test_the_isolation_test_would_catch_a_second_resolver` and its
+call. `test_no_module_but_scope_resolves_a_briefs_text_against_the_entries` and its
 neighbour are the guard against assembly (#38), the audit's bounding (#40)
-or drift detection (#41) - none of which exist yet - growing their own copy
-instead of calling `resolve_scope` when one of them lands, the same shape as
-`test_manuscript.py`'s "no module but manuscript knows a brief's filename".
+or drift detection (#41) growing their own copy instead of calling
+`resolve_scope`. The memoized judgements and staleness map (#37) and drift
+detection (#41) have since landed, and both import `resolve_scope`;
+assembly (#38) and the audit's own run (#40) are still to come. The same
+shape as `test_manuscript.py`'s "no module but manuscript knows a brief's
+filename".
 """
 
 import ast
@@ -223,9 +226,12 @@ def test_no_module_but_scope_resolves_a_briefs_text_against_the_entries():
     one, and calls the functions `resolve_scope` calls to build the terms it
     scans for. That combination is the resolution itself, under whatever
     name a reimplementation gave its function - the divergence bug #36
-    exists to rule out. Assembly, the audit's bounding and drift detection
-    (#38, #40, #41) do not exist yet, so today this only fails for a future
-    module that rebuilds the resolution instead of importing this one."""
+    exists to rule out. The memoized judgements and staleness map (#37) and
+    drift detection (#41) have since landed, and both take their bounding by
+    importing `resolve_scope` rather than rebuilding it - which is what this
+    guard asks for. Assembly (#38) and the audit's own run (#40) are still
+    to come, so for those this still only fails a future module that
+    rebuilds the resolution instead of importing this one."""
     for path in _package_sources():
         names = _names_in(path)
         if "Brief" not in names or "text" not in names:
