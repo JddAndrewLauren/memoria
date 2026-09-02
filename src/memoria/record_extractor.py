@@ -42,17 +42,39 @@ something or only wonder is the model judgement above. Choosing
 either function is reached; this module guarantees only that nothing the
 assistant said is ever badged ``[author]``.
 
-**The dirty-tree guard is pass-level, not per-write** (part 08 §14.2):
-"the Curator never writes into a file with uncommitted human modifications
-... the pass waits." ``memoria.write``'s general write path absorbs a dirty
-tree instead, via an automatic checkpoint (ADR-0008) - right for an
-ordinary machine write, because the checkpoint commits the author's
-in-progress edit as theirs before anything else touches the file. The
-record extractor is held to the stricter, older rule instead: it refuses to
-run at all against any uncommitted human modification, anywhere in the
-repository, rather than checkpointing one out of the way and proceeding.
-``ensure_clean_tree`` is that refusal, and every public write in this
-module calls it first.
+**The dirty-tree guard is per-write, and it is an early refusal rather
+than an opt-out** (part 08 §14.2): "the Curator never writes into a file
+with uncommitted human modifications ... the pass waits." The invariant
+binds each write - "never writes into a file" - and waiting is its
+consequence, which is why ``ensure_clean_tree`` is called at the top of
+every public write here (#32's own acceptance criterion states the rule the
+same way). A single check at the start of a multi-write pass would be the
+weaker reading, not the stricter one: it would let the second and third
+writes land into a tree that went dirty after it.
+
+What the guard does *not* do is take this module off ``memoria.write``'s
+automatic checkpoint (ADR-0008). Every write here goes through
+``write.write``/``write.create`` as ``CURATOR``, a non-human actor, so a
+checkpoint runs before the bytes are replaced, exactly as it does for any
+other machine write. The guard normally makes it a no-op by refusing first;
+in the window between the guard and the write, ADR-0008 governs, and it
+says so deliberately - that is "the moment the dirty-tree rule (#32) stops
+protecting a file and the human-touched flag has to take over". The flag is
+#32's, and it is not built yet, so that window is currently protected by
+nothing on the far side of the checkpoint. Closing it belongs to #32, which
+owns the dirty-tree rule outright and should absorb or replace
+``ensure_clean_tree`` rather than sit beside it.
+
+**A pass that refuses part way through leaves a partial extraction, and
+that is accepted.** There is no rollback and no all-or-nothing scope: each
+record is its own path-scoped commit appending to its own file, so the
+records already written are individually valid and individually cited. It
+is safe because the pass is re-runnable, not because a half-pass is
+harmless - ids are minted one more than the highest already on disk, and
+``write.create`` rejects an existing file rather than flattening it, so
+re-running writes the missing records and nothing twice. If a record write
+ever stops being independently valid, that reasoning goes with it and this
+module needs real atomicity instead.
 """
 
 from __future__ import annotations

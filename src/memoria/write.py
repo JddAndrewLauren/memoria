@@ -350,7 +350,7 @@ def dirty_tracked_paths(
 
     Shared by `checkpoint` - scoped to `DURABLE_PATHS`, so Evidence,
     Interaction record and Derived state never appear in its result no
-    matter how dirty they are - and the record extractor's own pass-level
+    matter how dirty they are - and the record extractor's own per-write
     guard (#30, part 08 §14.2), which is deliberately unscoped: "the
     extractor never runs against a repository with uncommitted human
     modifications" names the whole repository, not just the classes this
