@@ -65,6 +65,18 @@ class NormalizedRecord:
     # otherwise.
     work: str | None = None
     chapter: str | None = None
+    # Email-specific fields (#78). None for records that are not one message
+    # inside an email export; always set for those. `email_from`/`email_to`/
+    # `email_cc` rather than `from`/`to`/`cc`: `from` is a reserved word and
+    # cannot be a dataclass field, so the frontmatter key and the attribute
+    # name part ways here (record_to_markdown/parse_record map between them).
+    thread_id: str | None = None
+    email_from: str | None = None
+    email_to: str | None = None
+    email_cc: str | None = None
+    in_reply_to: str | None = None
+    quoted_excised: bool | None = None
+    attachments: list[dict] | None = None
 
     def anchor_id(self, paragraph_number: int) -> str:
         """The stable anchor id for this record's Nth paragraph (1-based).
@@ -128,6 +140,20 @@ def record_to_markdown(record: NormalizedRecord) -> str:
         frontmatter["work"] = record.work
     if record.chapter is not None:
         frontmatter["chapter"] = record.chapter
+    if record.thread_id is not None:
+        frontmatter["thread_id"] = record.thread_id
+    if record.email_from is not None:
+        frontmatter["from"] = record.email_from
+    if record.email_to is not None:
+        frontmatter["to"] = record.email_to
+    if record.email_cc is not None:
+        frontmatter["cc"] = record.email_cc
+    if record.in_reply_to is not None:
+        frontmatter["in_reply_to"] = record.in_reply_to
+    if record.quoted_excised is not None:
+        frontmatter["quoted_excised"] = record.quoted_excised
+    if record.attachments is not None:
+        frontmatter["attachments"] = record.attachments
     # Paragraph anchors (part 05 §5.3): stable across re-runs because they
     # are positional within a record whose own ID is itself stable.
     body = "\n\n".join(
@@ -183,7 +209,17 @@ _REQUIRED_FIELDS = (
     "raw_sha256",
     "converter",
 )
-_OPTIONAL_FIELDS = ("recipient", "dateline", "salutation", "work", "chapter")
+_OPTIONAL_FIELDS = (
+    "recipient", "dateline", "salutation", "work", "chapter",
+    "thread_id", "in_reply_to",
+)
+# Frontmatter keys whose attribute name differs (#78's email fields): `from`
+# is a reserved word and cannot be a dataclass field / constructor kwarg.
+_ALIASED_OPTIONAL_FIELDS = {"from": "email_from", "to": "email_to", "cc": "email_cc"}
+# Non-scalar optional fields, handled outside the generic `_as_text` path:
+# `quoted_excised` is a bool like `contemporaneous`, and `attachments` is a
+# list of `{filename, type}` mappings the schema does not render as text.
+_STRUCTURED_OPTIONAL_FIELDS = ("quoted_excised", "attachments")
 
 
 class ReadError(Exception):
@@ -239,8 +275,17 @@ def parse_record(text: str, *, source: str = "<string>") -> NormalizedRecord:
     for name in _OPTIONAL_FIELDS:
         if name in frontmatter:
             fields[name] = frontmatter[name]
+    for key, attr in _ALIASED_OPTIONAL_FIELDS.items():
+        if key in frontmatter:
+            fields[attr] = frontmatter[key]
 
-    unexpected = set(frontmatter) - set(_REQUIRED_FIELDS) - set(_OPTIONAL_FIELDS)
+    unexpected = (
+        set(frontmatter)
+        - set(_REQUIRED_FIELDS)
+        - set(_OPTIONAL_FIELDS)
+        - set(_ALIASED_OPTIONAL_FIELDS)
+        - set(_STRUCTURED_OPTIONAL_FIELDS)
+    )
     if unexpected:
         # Explicit rather than NormalizedRecord(**frontmatter), which would
         # raise a bare TypeError naming neither the file nor the schema.
@@ -249,10 +294,19 @@ def parse_record(text: str, *, source: str = "<string>") -> NormalizedRecord:
             + ", ".join(sorted(unexpected))
         )
 
+    quoted_excised = frontmatter.get("quoted_excised")
+    if quoted_excised is not None:
+        quoted_excised = _as_bool(quoted_excised, source)
+    attachments = frontmatter.get("attachments")
+    if attachments is not None:
+        attachments = _as_attachments(attachments, source)
+
     body = text[end + len("\n---\n") :]
     record = NormalizedRecord(
         contemporaneous=_as_bool(fields.pop("contemporaneous"), source),
         paragraphs=_parse_paragraphs(body, source),
+        quoted_excised=quoted_excised,
+        attachments=attachments,
         **{
             name: _as_text(value, name, source, required=name in _REQUIRED_FIELDS)
             for name, value in fields.items()
@@ -303,6 +357,23 @@ def _as_bool(value: object, source: str) -> bool:
     raise ReadError(
         f"{source}: 'contemporaneous' must be a YAML boolean, got {value!r}"
     )
+
+
+def _as_attachments(value: object, source: str) -> list[dict]:
+    """``attachments``: a list of ``{filename, type}`` mappings (#78), listed
+    by filename and type per the schema - not text, so it does not go
+    through ``_as_text`` with the rest of the optional fields."""
+    if not isinstance(value, list):
+        raise ReadError(
+            f"{source}: 'attachments' must be a list, got {type(value).__name__}"
+        )
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {"filename", "type"}:
+            raise ReadError(
+                f"{source}: each attachment must be a mapping with 'filename' "
+                f"and 'type', got {item!r}"
+            )
+    return value
 
 
 def _parse_paragraphs(body: str, source: str) -> list[str]:

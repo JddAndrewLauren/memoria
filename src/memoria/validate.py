@@ -55,6 +55,15 @@ def validate(
     for entry in entries:
         if entry.deleted:
             continue
+        if "email_message_index" in entry.extra:
+            # A message inside an email export (#78, part 05 §5.1) shares
+            # its `path` with the export file - that is what lets `sync`'s
+            # per-entry file check keep resolving it - but its `sha256` is
+            # the one message's own bytes, not the whole file's, so there is
+            # nothing at `path` to hash a whole-file match against here.
+            # The export's own entry (present alongside these) is what
+            # covers presence/hash of the file itself.
+            continue
         # path: entries are relative to the evidence repo root, not the
         # manifest's own directory.
         file_path = evidence_root / entry.path
