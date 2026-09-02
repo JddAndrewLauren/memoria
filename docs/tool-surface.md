@@ -505,12 +505,30 @@ states for assembly.
 ADR-0005 decision 6 (part 06 §8.4): a cluster promoted into a Theme or Arc is
 never pointed at by the entry it became — cluster identity does not survive
 re-clustering, and match terms do, so the link cannot be stored either way.
-`memoria.extraction.search_global` reads it forward instead: a cluster whose own
-entry- and relation-shaped members still cover a promoted entry's current match
-terms is grouped under that entry rather than under the cluster's own
-auto-generated label. Editing a Theme's match terms past what its origin cluster
-still defines quietly loses the route — the declared cost of ADR-0005 rejecting a
-durable pointer, not a bug in this tool.
+`memoria.extraction.search_global` reads it forward instead, and the check is
+**two-way, not one-way**: a promoted entry's match terms must be a subset of the
+cluster's own entry- and relation-shaped members, *and* the cluster must define
+nothing beyond what the entry names. One-way containment alone both matches a
+hand-authored Theme whose terms merely happen to overlap an unrelated cluster's
+larger membership, and matches every coarser ancestor of the cluster an entry
+was actually promoted from (a coarser level's members are always a superset of
+a finer one's).
+
+The "nothing beyond" side allows two bounded slacks, both sized to how
+`promote_cluster` actually seeds an entry: the cap on how many terms it seeds
+at all (`MAX_SEEDED_MATCH_TERMS`), and the cluster's own candidate-shaped
+member count. The second slack exists because `cluster_members` orders by
+`member_ref` and `CAND:` sorts ahead of `SUB-`, so on a cluster mixing entries
+and candidates, candidate label words can crowd a real entry member out of the
+seed before the cap is even reached — a large promoted cluster with enough
+candidates would otherwise stop routing at all. A cluster small enough —
+entries, relations, and candidates together — to have been seeded in full must
+still match in full.
+
+A route can still be lost two ways: editing a Theme's match terms past what its
+origin cluster still defines (the declared cost of ADR-0005 rejecting a durable
+pointer, not a bug in this tool), or the cluster re-clustering into a shape
+whose own terms no longer sit within the two-way bound above.
 
 ### `summarize=true` serves; it never generates
 

@@ -2178,7 +2178,9 @@ def _theme_routes(repository: Repository) -> dict[frozenset[str], str]:
     return routes
 
 
-def _route_for(terms: frozenset[str], routes: dict[frozenset[str], str]) -> str | None:
+def _route_for(
+    terms: frozenset[str], routes: dict[frozenset[str], str], candidate_count: int = 0
+) -> str | None:
     """The entry ``terms`` (one cluster's own entry- and relation-shaped
     members) routes to, if a Theme's or Arc's own seeded set still defines
     it - see ``_theme_routes``.
@@ -2190,11 +2192,26 @@ def _route_for(terms: frozenset[str], routes: dict[frozenset[str], str]) -> str 
     actually promoted from, since a coarser level's members are always a
     superset of a finer one's (``clustering.py``'s nesting). So the cluster
     must also define nothing beyond what the entry names - checked the other
-    way, ``terms - seed`` - with one deliberate slack: ``promote_cluster``
-    caps what it seeds at ``MAX_SEEDED_MATCH_TERMS``, so a cluster whose own
-    term count exceeds the cap is allowed exactly that many terms missing
-    from the entry, no more. A cluster small enough to have been seeded in
-    full must match in full.
+    way, ``terms - seed`` - with two deliberate slacks, both bounded by how
+    ``promote_cluster`` actually seeds:
+
+    - the cap. ``promote_cluster`` seeds at most ``MAX_SEEDED_MATCH_TERMS``
+      terms, so a cluster whose own term count already exceeds the cap is
+      allowed exactly that many terms missing from the entry, no more.
+    - candidate-shaped members. ``cluster_members`` orders by ``member_ref``,
+      and ``CAND:`` sorts ahead of ``SUB-``, so on a cluster that mixes
+      entries and candidates, ``promote_cluster`` fills the seed with
+      candidate label words *before* entry references - a real entry member
+      can be displaced from the seed by the cap even when the cluster's own
+      entry-shaped term count alone never exceeded it. ``candidate_count``
+      (the cluster's candidate-shaped member count, which ``terms`` never
+      includes - see ``_cluster_terms``) is added to that count before the
+      cap is applied, so the slack only grows when the two together could
+      actually have crowded a real member out, not merely because a cluster
+      happens to contain some candidates.
+
+    A cluster small enough - entries, relations, and candidates together -
+    to have been seeded in full must still match in full.
 
     This still cannot tell a hand-authored Theme from a promoted one when
     the two are indistinguishable by construction - an entry whose terms
@@ -2205,7 +2222,9 @@ def _route_for(terms: frozenset[str], routes: dict[frozenset[str], str]) -> str 
     for seed, entry_id in routes.items():
         if not seed or not seed <= terms:
             continue
-        allowed_missing = max(0, len(terms) - MAX_SEEDED_MATCH_TERMS)
+        allowed_missing = max(
+            0, len(terms) + candidate_count - MAX_SEEDED_MATCH_TERMS
+        )
         if len(terms - seed) <= allowed_missing:
             return entry_id
     return None
@@ -2362,13 +2381,17 @@ def search_global(
 
     groups = []
     for cluster_id in cluster_ids:
-        terms = _cluster_terms(members.get(cluster_id, ()), relations.get(cluster_id, ()))
+        cluster_members = members.get(cluster_id, ())
+        terms = _cluster_terms(cluster_members, relations.get(cluster_id, ()))
+        candidate_count = sum(
+            1 for ref in cluster_members if ref.startswith(CANDIDATE_REF_PREFIX)
+        )
         groups.append(
             ClusterGroup(
                 cluster_id=cluster_id,
                 level=level,
                 label=labels.get(cluster_id, ""),
-                entry_id=_route_for(terms, routes),
+                entry_id=_route_for(terms, routes, candidate_count),
                 results=tuple(
                     SearchResult(src_id=src_id, anchor=anchor, source_type=source_type)
                     for src_id, anchor, source_type, _ in by_cluster[cluster_id]

@@ -1316,6 +1316,39 @@ def test_search_global_a_promoted_cluster_does_not_leak_to_its_coarser_ancestor(
     assert coarse_group.entry_id is None, "the ancestor must not inherit the route"
 
 
+def test_search_global_a_large_promoted_cluster_with_candidates_still_routes(
+    tmp_path,
+):
+    """Review round 2. `cluster_members` orders by `member_ref`, and
+    `CAND:` sorts ahead of `SUB-` - so on a cluster over
+    `MAX_SEEDED_MATCH_TERMS` that mixes entries and candidates,
+    `promote_cluster` fills the seed with candidate-shaped words first and
+    drops real entry members, even though the cluster's own entry-shaped
+    term count never exceeded the cap. The cap-only slack in `_route_for`
+    does not forgive that: it must also forgive exactly as many missing
+    terms as the cluster has candidate-shaped members, no more."""
+    names = [f"person{n:02d}" for n in range(ex.MAX_SEEDED_MATCH_TERMS)]
+    entries = [Entry(id=f"SUB-people/{n}", match_terms=[n], body="") for n in names]
+    candidate_words = ["candalpha", "candbeta"]
+    paragraph = " ".join(names + candidate_words) + " gathered."
+    repository = _repo(tmp_path, [paragraph] * 3, entries=entries)
+    for number in (1, 2, 3):
+        _memo(
+            repository,
+            f"src-000001-p{number}",
+            placements=tuple(_place(f"SUB-people/{n}", n) for n in names),
+            unplaced=tuple(_form(word) for word in candidate_words),
+        )
+    ex.derive(repository, recurrence_threshold=1)
+    (cluster_id,) = {row[0] for row in _rows(repository, "clusters")}
+    promotion = ex.promote_cluster(repository, cluster_id, ex.CURATOR)
+
+    result = ex.search_global(repository, "person00")
+
+    assert len(result.groups) == 1
+    assert result.groups[0].entry_id == promotion.entry_id
+
+
 def test_search_global_summarize_false_never_carries_a_summary(tmp_path):
     """AC 3: `summarize=false` returns none, even when one has been written."""
     repository = _repo(tmp_path, ["Bob and the acquisition."] * 3)
