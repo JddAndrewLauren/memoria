@@ -52,6 +52,7 @@ from memoria.ledger import (
     append_extraction_summary_task,
     append_read,
     append_search,
+    append_search_global,
     session_id_from_env,
 )
 from memoria.records import Read, ReadError, read as read_ref, real_paragraphs
@@ -64,9 +65,12 @@ mcp = MCPServer(
         "read(ref): a SRC- record ID, a paragraph of one, or a repository "
         "path. Evidence comes back verbatim, never summarized. Find text "
         "with search_text(query, filters); each hit's anchor feeds straight "
-        "into read(ref). The extraction_* tools run the archive-wide "
-        "extraction pass, and are driven by the `extraction` skill rather "
-        "than reached for directly."
+        "into read(ref). search_global(query, filters, summarize) returns "
+        "references grouped by the extraction's clusters instead of a flat "
+        "list - with summarize=true it also serves each cluster's memoized "
+        "[inferred] summary, never evidence. The extraction_* tools run the "
+        "archive-wide extraction pass, and are driven by the `extraction` "
+        "skill rather than reached for directly."
     ),
 )
 
@@ -221,6 +225,85 @@ def search_text(query: str, filters: SearchFilters | None = None) -> str:
     results = search_index(repository(), query, filters)
     append_search(repository(), session_id(), query, filters, results)
     return render_search(results)
+
+
+@mcp.tool()
+def search_global(
+    query: str | None = None,
+    filters: SearchFilters | None = None,
+    summarize: bool = False,
+) -> str:
+    """The global tool over the extraction's clusters (part 11 §25, #74).
+
+    Returns paragraph references grouped by cluster rather than `search_text`'s
+    flat ranked list, each group labelled by the entries and relations that
+    define it - a cluster already promoted into a Theme or Arc is labelled by
+    that entry instead. Every reference is an anchor that `read(ref)` accepts
+    verbatim, exactly like a `search_text` hit; no reference carries text.
+
+    `query` is optional: given, it full-text searches like `search_text` and
+    groups the hits by cluster; omitted, it returns every paragraph of every
+    matched cluster - the whole-corpus map step, most useful with
+    `filters.level` set. A paragraph nests inside a cluster at every level of
+    the hierarchy at once, so exactly one level is grouped per call - the
+    level used is always named in the returned scope line, whether or not
+    `filters.level` set it.
+
+    `summarize=true` also serves each matched cluster's memoized `[inferred]`
+    text - never generated on this call, only served - or says none has been
+    written yet. `summarize=false` (the default) never returns cluster text
+    at all: a summary is a compression, never evidence, and is served only
+    when explicitly asked for.
+    """
+    result = extraction.search_global(
+        repository(), query, filters, summarize=summarize
+    )
+    clusters = [group.cluster_id for group in result.groups]
+    served = [r.anchor for group in result.groups for r in group.results]
+    append_search_global(
+        repository(),
+        session_id(),
+        query,
+        filters,
+        summarize,
+        result.summary_served,
+        clusters,
+        served,
+    )
+    return render_global(result)
+
+
+def render_global(result: extraction.GlobalSearchResult) -> str:
+    """Shape one `search_global` result into what the model sees: one block
+    per matched cluster, then the §33-style scope line naming what ran.
+
+    A cluster routed to a promoted entry (`ClusterGroup.entry_id`) is headed
+    by that entry rather than by its own auto-generated label - #74's "a
+    promoted cluster routes to the entry, not to its stale label". A summary
+    line appears only when the call asked for one (`result.summarize`), and
+    says so explicitly when none has been written yet - it is never left
+    silent, which would read as "no summary exists" when it may simply not
+    have been asked for.
+    """
+    if not result.groups:
+        return result.scope
+    blocks = []
+    for group in result.groups:
+        header = (
+            f"entry: {group.entry_id}"
+            if group.entry_id
+            else f"cluster: {group.cluster_id}  label: {group.label}"
+        )
+        lines = [header, f"level: {group.level}"]
+        if result.summarize:
+            lines.append(
+                f"summary: [inferred] {group.summary}"
+                if group.summary
+                else "summary: not yet written"
+            )
+        lines += [f"{r.src_id} {r.anchor}" for r in group.results]
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks) + "\n\n" + result.scope
 
 
 # --- the extraction (#17) ----------------------------------------------------

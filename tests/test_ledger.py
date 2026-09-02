@@ -83,6 +83,7 @@ def test_a_served_search_appends_a_line_naming_the_query_filters_and_hits(tmp_pa
         "contemporaneous": None,
         "from_": None,
         "to": None,
+        "level": None,
     }
     assert event["served"] == ["src-000184-p1"]
 

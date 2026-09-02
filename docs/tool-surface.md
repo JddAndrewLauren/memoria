@@ -13,7 +13,7 @@ a gap nobody noticed.
 |---|---|
 | `read(ref)` | **Forced** — issue #11, below |
 | `search_text(query, filters)` | **Forced** — issue #12, below |
-| `search_global(query, filters, summarize)` | Open — issue #74, scheduled for M2 (ADR-0005). Settled 2026-09-01: `query` optional, a `level` filter, summaries served from the extraction pass and never generated on the call |
+| `search_global(query, filters, summarize)` | **Forced** — issue #74, below |
 | `search_semantic(query, filters)` | Open — issue #81, scheduled for M2 (ADR-0007): a `sqlite-vec` table in the index file, a local CPU model at rebuild |
 | `expand`, `timeline`, `grep_repo`, `trace`, `backlinks`, `list` | Open; §25 does not commit to shipping them |
 
@@ -463,6 +463,86 @@ answers "the corpus is not built" rather than raising
 
 Search over the full corpus returns in well under a second — a test asserts
 it against a synthetic multi-thousand-paragraph index.
+
+## `search_global(query, filters, summarize)` — forced 2026-09-01, issue #74
+
+```
+search_global(query: str | None, filters: SearchFilters | None = None, summarize: bool = False) -> str
+```
+
+The one global tool over the extraction's clusters (part 11 §25, ADR-0005 "Build
+shape" 4). Where `search_text` returns a flat, ranked list of hits, this returns
+paragraph references **grouped by cluster**, each group labelled by the entries
+and relations that define it, under a §33-style scope line — *"clustered 1,842
+paragraphs across 2009–2014; 3 clusters matched at level 2"*. It is a superset of
+`grep` in the same sense `search_text` is: every reference is an anchor `read(ref)`
+accepts verbatim, and no group carries paragraph text of its own — the search over
+derived state rejected for `search_text` (above, "full paragraph hydration was
+rejected") is not repeated here either.
+
+### `query` is optional
+
+Given, `search_global` full-text searches the archive exactly like `search_text`
+and groups the hits by cluster. `None` returns every paragraph of every matched
+cluster instead — the map step of ADR-0005's "Build shape" 4: with no model in the
+server, the session agent does the reduce itself through part 11 §28's loop, and
+this is the one call that hands it the map.
+
+### One level per call
+
+`SearchFilters` gained a seventh field, `level`, for this tool alone —
+`search_text` never consults it (`memoria.index.SearchFilters`, above). A
+paragraph nests inside a cluster at every level of the hierarchy at once
+(ADR-0005 build shape 1), so grouping across every level in one call would show
+the same paragraph again under each of its ancestors. `filters.level` picks the
+grain; left unset, `memoria.extraction.search_global` resolves the finest level
+the corpus currently has. Either way the level actually used is named in the
+returned scope line — never left for a caller to infer, the same discipline §33.1
+states for assembly.
+
+### A promoted cluster routes to its entry, not to its stale label
+
+ADR-0005 decision 6 (part 06 §8.4): a cluster promoted into a Theme or Arc is
+never pointed at by the entry it became — cluster identity does not survive
+re-clustering, and match terms do, so the link cannot be stored either way.
+`memoria.extraction.search_global` reads it forward instead: a cluster whose own
+entry- and relation-shaped members still cover a promoted entry's current match
+terms is grouped under that entry rather than under the cluster's own
+auto-generated label. Editing a Theme's match terms past what its origin cluster
+still defines quietly loses the route — the declared cost of ADR-0005 rejecting a
+durable pointer, not a bug in this tool.
+
+### `summarize=true` serves; it never generates
+
+The same rule that shapes every tool on this server (above, "The rule that shapes
+every signature"): `search_global(summarize=true)` can only *serve* a cluster's
+memoized `[inferred]` text — leaves from their member paragraphs, parents from
+their children's summaries, written by the extraction's own summary loop
+(`extraction_next_summary` / `extraction_record_summary`), never composed on this
+call. A cluster with no summary yet says so rather than making one. `summarize=false`,
+the default, never returns cluster text at all, marked or not: a summary is a
+compression under part 02 §1.5, never evidence, and it is served only when
+explicitly asked for — never handed to a caller who did not request it, and never
+substituted for a `read(ref)` result, which touches no cluster row.
+
+### What is ledgered
+
+Every call is ledgered (`memoria.ledger.append_search_global`), naming the mode
+that ran (`summarize`) and whether a summary was actually served
+(`summary_served`) — `summarize=true` over freshly-clustered paragraphs with no
+summary yet still ran in that mode and served none, and the ledger says so rather
+than collapsing the two. Matched cluster ids ride in their own `clusters` field,
+the same call `extraction_next_summary`'s ledger line makes: a cluster id is not
+`read(ref)`-resolvable (below, "Cluster ids are deliberately not…"), so it does not
+belong beside the anchors in `served`.
+
+### Reachable without the MCP server
+
+`memoria.extraction.search_global` is a plain core function over
+`memoria.index.connect` and `memoria.index.filter_predicate`, exercised directly
+by `tests/test_extraction.py` — the same shape `search_text`'s core function has,
+and for the same reason (§16's "the `SUBJECTS` tree needs the same grouping to
+show a cluster before the author promotes it").
 
 ## `events.jsonl` — the read ledger, forced 2026-09-01, issue #13
 

@@ -301,7 +301,8 @@ def test_the_tool_surface_is_the_read_tools_and_the_extraction_tools():
     """Part 11 §25 withdrew the per-type read tools; there is no read_source.
 
     #12 adds exactly one more read tool, search_text - not one per filter or
-    one per source type. #17 adds the extraction pass's tools, which are a
+    one per source type. #74 adds search_global, the one global tool over the
+    extraction's clusters. #17 adds the extraction pass's tools, which are a
     second class on the same server: they write, and they are driven by the
     `extraction` skill rather than reached for by a writing session.
 
@@ -311,6 +312,7 @@ def test_the_tool_surface_is_the_read_tools_and_the_extraction_tools():
     assert names == {
         "read",
         "search_text",
+        "search_global",
         "extraction_brief",
         "extraction_next_paragraphs",
         "extraction_record",

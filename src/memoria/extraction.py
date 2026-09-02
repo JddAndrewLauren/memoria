@@ -44,7 +44,13 @@ from typing import Iterable, Sequence
 
 from memoria import clustering
 from memoria.clustering import ClusteringUnavailable, CoOccurrence
-from memoria.index import connect
+from memoria.index import (
+    INDEX_RELATIVE_PATH,
+    SearchFilters,
+    SearchResult,
+    connect,
+    filter_predicate,
+)
 from memoria.records import read_all
 from memoria.repository import Repository
 from memoria.subjects import (
@@ -2058,6 +2064,298 @@ def cluster_members(repository: Repository, cluster_id: str) -> ClusterMembers:
         anchors=tuple(anchors),
         children=tuple(children),
         summary=cluster_summary(repository, cluster_id),
+    )
+
+
+# --- search_global (#74) ------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ClusterGroup:
+    """One matched cluster, as ``search_global`` groups paragraph references.
+
+    ``entry_id`` names the Theme or Arc this cluster routes to, when one has
+    been promoted from it (ADR-0005 decision 6, part 06 §8.4: "a cluster that
+    has been promoted routes to the entry, not to its stale label"). A
+    promoted entry never points back at its origin cluster - cluster identity
+    does not survive re-clustering - so this is read the only way it can be:
+    forward, off the entry's own current match terms (``_route_for``). It is
+    ``None`` before any promotion, and again after one whose match terms have
+    since been edited past what this cluster still defines.
+
+    ``summary`` is the cluster's memoized ``[inferred]`` text - never
+    generated here, only served (ADR-0005 build shape 3) - and is ``None``
+    both when the call did not ask for one and when nothing has been written
+    for this membership yet; ``GlobalSearchResult.summarize`` is how a caller
+    tells the two apart.
+    """
+
+    cluster_id: str
+    level: int
+    label: str
+    entry_id: str | None
+    results: tuple[SearchResult, ...]
+    summary: str | None
+
+
+@dataclass(frozen=True)
+class GlobalSearchResult:
+    """What one ``search_global`` call returns: cluster groups, and the
+    §33-style scope line naming what ran (part 11 §25, §33.1)."""
+
+    groups: tuple[ClusterGroup, ...]
+    level: int
+    scope: str
+    summarize: bool
+    summary_served: bool
+
+
+_YEAR_RE = re.compile(r"(1[6-9]\d{2}|20\d{2})")
+
+
+def _year_range(dates: Iterable[str]) -> str | None:
+    """A best-effort ``YYYY`` or ``YYYY``-``YYYY`` span for the scope line.
+
+    ``event_date`` is a verbatim frontmatter string with no sortable value
+    (docs/tool-surface.md's ``SearchFilters`` note) - this is a display aid
+    for the scope line, never a filter, so a plain four-digit year is pulled
+    out of whatever string is there and a date carrying none contributes
+    nothing rather than breaking the scan.
+    """
+    years = []
+    for date in dates:
+        if not date:
+            continue
+        match = _YEAR_RE.search(date)
+        if match:
+            years.append(int(match.group(0)))
+    if not years:
+        return None
+    lo, hi = min(years), max(years)
+    return str(lo) if lo == hi else f"{lo}–{hi}"
+
+
+def _scope_line(paragraphs: int, clusters: int, level: int, year_range: str | None) -> str:
+    """The part 11 §25 scope line - *"clustered 1,842 paragraphs across
+    2009-2014; 3 clusters matched"* - always naming the level actually used
+    (#74's acceptance criteria), since a query with no ``level`` filter
+    resolves one silently and §33's discipline is that assembly reports what
+    it resolved rather than leaving it implicit."""
+    across = f" across {year_range}" if year_range else ""
+    paragraph_word = "paragraph" if paragraphs == 1 else "paragraphs"
+    cluster_word = "cluster" if clusters == 1 else "clusters"
+    return (
+        f"clustered {paragraphs} {paragraph_word}{across}; {clusters} "
+        f"{cluster_word} matched at level {level}"
+    )
+
+
+def _theme_routes(repository: Repository) -> dict[frozenset[str], str]:
+    """Every promoted Theme's or Arc's entry- and relation-shaped match terms,
+    as a set, mapped back to its entry id - the routing table ``search_global``
+    checks a matched cluster's own defining terms against (see ``ClusterGroup``).
+    Sorted by entry id first, so a cluster more than one entry's terms fit
+    routes to the earliest one deterministically."""
+    routes: dict[frozenset[str], str] = {}
+    for entry_id, entry in sorted(load_all_entries(repository).items()):
+        if entry_id.split("/", 1)[0] not in CO_OCCURRENCE_SUBJECTS:
+            continue
+        terms = frozenset(
+            term for term in entry.match_terms if classify_match_term(term) != "word"
+        )
+        if terms:
+            routes[terms] = entry_id
+    return routes
+
+
+def _route_for(terms: frozenset[str], routes: dict[frozenset[str], str]) -> str | None:
+    """The entry ``terms`` (one cluster's own entry- and relation-shaped
+    members) routes to, if any promoted entry's seeded set still fits inside
+    it - see ``_theme_routes``."""
+    for seed, entry_id in routes.items():
+        if seed and seed <= terms:
+            return entry_id
+    return None
+
+
+def _cluster_terms(
+    members: Sequence[str], relations: Sequence[tuple[str, str, str]]
+) -> frozenset[str]:
+    """One cluster's defining terms in match-term form - the same shapes
+    ``promote_cluster`` seeds an entry with - over its entry-shaped members
+    and the relations whose ends are both entries. Candidate-shaped members
+    and candidate-touching relations are excluded: a candidate has no match
+    term of its own to route through."""
+    entry_terms = {ref for ref in members if not ref.startswith(CANDIDATE_REF_PREFIX)}
+    relation_terms = {
+        f"{from_ref} -> {verb} -> {to_ref}"
+        for from_ref, verb, to_ref in relations
+        if not from_ref.startswith(CANDIDATE_REF_PREFIX)
+        and not to_ref.startswith(CANDIDATE_REF_PREFIX)
+    }
+    return frozenset(entry_terms | relation_terms)
+
+
+def search_global(
+    repository: Repository,
+    query: str | None,
+    filters: SearchFilters | None = None,
+    *,
+    summarize: bool = False,
+) -> GlobalSearchResult:
+    """The global tool over the extraction's clusters (part 11 §25, #74).
+
+    Returns paragraph references **grouped by cluster** rather than the flat,
+    ranked list ``search`` (#12) gives - GraphRAG's global-search map step,
+    handed to the session agent, which reduces it itself through part 11
+    §28's loop (ADR-0005 "Build shape" 4). Every reference is a
+    ``SearchResult`` carrying no text, exactly like ``search``: it feeds
+    straight into ``read(ref)``, with no reconstruction and no evidence read
+    out of derived state.
+
+    ``query`` is optional (ADR-0005 "Build shape" 4). Given, it full-text
+    searches the archive like ``search`` and groups the hits by the cluster
+    each matched paragraph belongs to. ``None`` returns every paragraph of
+    every matched cluster instead - the whole-corpus map step, most useful
+    with ``filters.level`` set and ``summarize=True``.
+
+    **One level per call.** A paragraph nests inside a cluster at every level
+    of the hierarchy at once (ADR-0005 build shape 1), so grouping across all
+    of them at once would show the same paragraph again under each of its
+    ancestors. ``filters.level`` picks which grain to group at; left unset,
+    the finest level the corpus currently has is used, and the level actually
+    used is always named in the scope line - never left for a caller to
+    infer (§33.1).
+
+    The other six ``SearchFilters`` narrow the matched paragraphs exactly as
+    they narrow ``search`` (#12); they have nothing to say about a cluster
+    that query mode does not already start from a paragraph.
+
+    **A promoted cluster routes to its entry, not to its stale label**
+    (``ClusterGroup``, ADR-0005 decision 6, part 06 §8.4).
+
+    **Summaries are served, never generated** (ADR-0005 build shape 3). With
+    ``summarize=True`` each group carries the memoized ``[inferred]`` text for
+    its cluster, or ``None`` when nothing has been written for it yet -
+    ``summarize=False`` leaves ``ClusterGroup.summary`` at ``None``
+    unconditionally, so a summary is never handed to a caller who did not ask.
+    Nothing here calls a model; ``cluster_summary`` only reads the memo cache.
+
+    A missing index - every fresh clone - returns no groups rather than
+    raising or creating the database file, matching ``search`` and ``gather``.
+    """
+    db_path = repository.root / INDEX_RELATIVE_PATH
+    if not db_path.exists():
+        scope = _scope_line(0, 0, 0, None)
+        return GlobalSearchResult(
+            groups=(), level=0, scope=scope, summarize=summarize, summary_served=False
+        )
+
+    con = connect(repository)
+    try:
+        available_levels = [
+            row[0] for row in con.execute("SELECT DISTINCT level FROM clusters")
+        ]
+        requested_level = filters.level if filters is not None else None
+        level = (
+            requested_level
+            if requested_level is not None
+            else (max(available_levels) if available_levels else 0)
+        )
+
+        predicate, predicate_params = filter_predicate(filters)
+        if query:
+            sql = (
+                "SELECT records.src_id, records.anchor, records.source_type, "
+                "paragraphs.event_date, cluster_paragraphs.cluster_id "
+                "FROM records "
+                "JOIN paragraphs ON paragraphs.anchor = records.anchor "
+                "JOIN cluster_paragraphs ON cluster_paragraphs.anchor = records.anchor "
+                "JOIN clusters ON clusters.cluster_id = cluster_paragraphs.cluster_id "
+                "WHERE records MATCH ? AND clusters.level = ?"
+            )
+            params: list = [query, level]
+        else:
+            sql = (
+                "SELECT paragraphs.src_id, cluster_paragraphs.anchor, "
+                "paragraphs.source_type, paragraphs.event_date, "
+                "cluster_paragraphs.cluster_id "
+                "FROM cluster_paragraphs "
+                "JOIN paragraphs ON paragraphs.anchor = cluster_paragraphs.anchor "
+                "JOIN clusters ON clusters.cluster_id = cluster_paragraphs.cluster_id "
+                "WHERE clusters.level = ?"
+            )
+            params = [level]
+        if predicate:
+            sql += f" AND {predicate}"
+            params += predicate_params
+        sql += " ORDER BY cluster_paragraphs.cluster_id, paragraphs.anchor"
+        rows = con.execute(sql, params).fetchall()
+
+        cluster_ids = sorted({row[4] for row in rows})
+        labels: dict[str, str] = {}
+        members: dict[str, list[str]] = {}
+        relations: dict[str, list[tuple[str, str, str]]] = {}
+        if cluster_ids:
+            placeholders = ",".join("?" for _ in cluster_ids)
+            labels = dict(
+                con.execute(
+                    f"SELECT cluster_id, label FROM clusters "
+                    f"WHERE cluster_id IN ({placeholders})",
+                    cluster_ids,
+                )
+            )
+            for cluster_id, member_ref in con.execute(
+                f"SELECT cluster_id, member_ref FROM cluster_members "
+                f"WHERE cluster_id IN ({placeholders})",
+                cluster_ids,
+            ):
+                members.setdefault(cluster_id, []).append(member_ref)
+            for cluster_id, from_ref, verb, to_ref in con.execute(
+                f"SELECT cluster_id, from_ref, verb, to_ref FROM cluster_relations "
+                f"WHERE cluster_id IN ({placeholders})",
+                cluster_ids,
+            ):
+                relations.setdefault(cluster_id, []).append((from_ref, verb, to_ref))
+    finally:
+        con.close()
+
+    routes = _theme_routes(repository) if cluster_ids else {}
+    by_cluster: dict[str, list[tuple[str, str, str, str]]] = {}
+    for src_id, anchor, source_type, event_date, cluster_id in rows:
+        by_cluster.setdefault(cluster_id, []).append(
+            (src_id, anchor, source_type, event_date)
+        )
+
+    groups = []
+    for cluster_id in cluster_ids:
+        terms = _cluster_terms(members.get(cluster_id, ()), relations.get(cluster_id, ()))
+        groups.append(
+            ClusterGroup(
+                cluster_id=cluster_id,
+                level=level,
+                label=labels.get(cluster_id, ""),
+                entry_id=_route_for(terms, routes),
+                results=tuple(
+                    SearchResult(src_id=src_id, anchor=anchor, source_type=source_type)
+                    for src_id, anchor, source_type, _ in by_cluster[cluster_id]
+                ),
+                summary=cluster_summary(repository, cluster_id) if summarize else None,
+            )
+        )
+
+    scope = _scope_line(
+        paragraphs=len({row[1] for row in rows}),
+        clusters=len(cluster_ids),
+        level=level,
+        year_range=_year_range(row[3] for row in rows),
+    )
+    return GlobalSearchResult(
+        groups=tuple(groups),
+        level=level,
+        scope=scope,
+        summarize=summarize,
+        summary_served=summarize and any(group.summary for group in groups),
     )
 
 

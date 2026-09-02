@@ -12,6 +12,7 @@ from memoria import extraction as ex
 from memoria.index import (
     DERIVED_TABLES,
     INDEX_RELATIVE_PATH,
+    SearchFilters,
     build_index,
     rebuild,
 )
@@ -32,12 +33,12 @@ SRC_ROOT = pathlib.Path(__file__).resolve().parents[1] / "src" / "memoria"
 # --- helpers -----------------------------------------------------------------
 
 
-def _record(paragraphs, record_id="SRC-000001"):
+def _record(paragraphs, record_id="SRC-000001", event_date="Oct. 22."):
     return NormalizedRecord(
         id=record_id,
         source_type="journal",
-        recorded_date="Oct. 22.",
-        event_date="Oct. 22.",
+        recorded_date=event_date,
+        event_date=event_date,
         date_confidence="exact",
         contemporaneous=True,
         original_file="raw/vol-01/text.txt",
@@ -46,7 +47,7 @@ def _record(paragraphs, record_id="SRC-000001"):
     )
 
 
-def _repo(tmp_path, paragraphs, entries=(), auto_promote=()):
+def _repo(tmp_path, paragraphs, entries=(), auto_promote=(), event_date="Oct. 22."):
     """A repository with the built-in subjects, an index, and some entries."""
     repository = Repository(root=tmp_path)
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
@@ -71,7 +72,7 @@ def _repo(tmp_path, paragraphs, entries=(), auto_promote=()):
         ],
         check=True,
     )
-    record = _record(paragraphs)
+    record = _record(paragraphs, event_date=event_date)
     write_normalized_records([record], tmp_path / NORMALIZED_RELATIVE_PATH)
     build_index(repository, [record])
     return repository
@@ -1061,3 +1062,232 @@ def test_the_pass_runs_on_a_repository_with_no_index_built(tmp_path):
 
     assert counts.candidates_above_threshold == 1
     assert ex.pending_cluster_summaries(repository)
+
+
+# --- #74: search_global -------------------------------------------------------
+
+
+def test_search_global_groups_matched_paragraphs_by_cluster_with_a_scope_line(tmp_path):
+    """AC 1 and AC 5: references grouped by cluster, feeding `read(ref)`
+    verbatim, under a §33-style scope line - exercised over the core alone,
+    with no MCP server in the loop."""
+    entries = [
+        Entry(id="SUB-people/bob", match_terms=["Bob"], body=""),
+        Entry(id="SUB-events/acquisition", match_terms=["the acquisition"], body=""),
+    ]
+    repository = _repo(
+        tmp_path,
+        ["Bob pressed about the acquisition."] * 3,
+        entries=entries,
+        event_date="2011-06-01",
+    )
+    for number in (1, 2, 3):
+        _memo(
+            repository,
+            f"src-000001-p{number}",
+            placements=(
+                _place("SUB-people/bob", "Bob"),
+                _place("SUB-events/acquisition", "the acquisition"),
+            ),
+        )
+    ex.derive(repository, recurrence_threshold=1)
+    (cluster_id, level, *_rest) = _rows(repository, "clusters")[0]
+    assert len(_rows(repository, "clusters")) == 1, "two nodes nest no further"
+
+    result = ex.search_global(repository, "acquisition")
+
+    assert len(result.groups) == 1
+    group = result.groups[0]
+    assert group.cluster_id == cluster_id
+    assert {(r.src_id, r.anchor) for r in group.results} == {
+        ("SRC-000001", f"src-000001-p{n}") for n in (1, 2, 3)
+    }
+    assert result.scope == (
+        f"clustered 3 paragraphs across 2011; 1 cluster matched at level {level}"
+    )
+
+
+def test_search_global_a_promoted_cluster_routes_to_the_entry_not_its_stale_label(
+    tmp_path,
+):
+    """AC 2, part 06 §8.4 and ADR-0005 decision 6."""
+    entries = [
+        Entry(id="SUB-people/bob", match_terms=["Bob"], body=""),
+        Entry(id="SUB-events/acquisition", match_terms=["the acquisition"], body=""),
+    ]
+    repository = _repo(tmp_path, ["Bob pressed about the acquisition."] * 3, entries=entries)
+    for number in (1, 2, 3):
+        _memo(
+            repository,
+            f"src-000001-p{number}",
+            placements=(
+                _place("SUB-people/bob", "Bob"),
+                _place("SUB-events/acquisition", "the acquisition"),
+            ),
+            relations=(
+                ex.ProposedRelation(
+                    "SUB-people/bob", "presses", "SUB-events/acquisition"
+                ),
+            ),
+        )
+    ex.derive(repository, recurrence_threshold=1)
+    cluster_id = _rows(repository, "clusters")[0][0]
+    promotion = ex.promote_cluster(repository, cluster_id, ex.CURATOR)
+
+    result = ex.search_global(repository, "acquisition")
+
+    assert len(result.groups) == 1
+    assert result.groups[0].entry_id == promotion.entry_id
+
+
+def test_search_global_an_unpromoted_cluster_shows_its_own_label(tmp_path):
+    """The common case, and every case before the first promotion."""
+    entries = [Entry(id="SUB-people/bob", match_terms=["Bob"], body="")]
+    repository = _repo(tmp_path, ["Bob and the acquisition."] * 3, entries=entries)
+    for number in (1, 2, 3):
+        _memo(
+            repository,
+            f"src-000001-p{number}",
+            placements=(_place("SUB-people/bob", "Bob"),),
+            unplaced=(_form("the acquisition", "SUB-events"),),
+        )
+    ex.derive(repository, recurrence_threshold=1)
+
+    result = ex.search_global(repository, "acquisition")
+
+    assert result.groups[0].entry_id is None
+    assert result.groups[0].label
+
+
+def test_search_global_routing_degrades_once_the_entrys_terms_are_edited_away(
+    tmp_path,
+):
+    """Documented rather than hidden: ADR-0005 decision 6 says a promoted
+    entry never points back at its cluster, so once the author tunes the
+    Theme past what the cluster itself still defines, `search_global` can no
+    longer read the link back off its terms - the declared cost of rejecting
+    a durable pointer."""
+    entries = [
+        Entry(id="SUB-people/bob", match_terms=["Bob"], body=""),
+        Entry(id="SUB-events/acquisition", match_terms=["the acquisition"], body=""),
+    ]
+    repository = _repo(tmp_path, ["Bob pressed about the acquisition."] * 3, entries=entries)
+    for number in (1, 2, 3):
+        _memo(
+            repository,
+            f"src-000001-p{number}",
+            placements=(
+                _place("SUB-people/bob", "Bob"),
+                _place("SUB-events/acquisition", "the acquisition"),
+            ),
+        )
+    ex.derive(repository, recurrence_threshold=1)
+    cluster_id = _rows(repository, "clusters")[0][0]
+    promotion = ex.promote_cluster(repository, cluster_id, ex.CURATOR)
+    (tmp_path / promotion.path).write_text(
+        entry_to_markdown(
+            Entry(id=promotion.entry_id, match_terms=["a new idea"], body="")
+        )
+    )
+
+    result = ex.search_global(repository, "acquisition")
+
+    assert result.groups[0].entry_id is None
+
+
+def test_search_global_summarize_false_never_carries_a_summary(tmp_path):
+    """AC 3: `summarize=false` returns none, even when one has been written."""
+    repository = _repo(tmp_path, ["Bob and the acquisition."] * 3)
+    for number in (1, 2, 3):
+        _memo(repository, f"src-000001-p{number}", unplaced=(_form("Bob"),))
+    ex.derive(repository, recurrence_threshold=1)
+    task = ex.pending_cluster_summaries(repository)[0]
+    ex.record_summary(repository, task.cluster_id, task.memo_key, "A summary.")
+
+    result = ex.search_global(repository, "Bob", summarize=False)
+
+    assert all(group.summary is None for group in result.groups)
+    assert result.summary_served is False
+
+
+def test_search_global_summarize_true_serves_memoized_text_or_says_none_yet(
+    tmp_path,
+):
+    """AC 3 and AC 8: served, never generated - a cluster with no summary
+    says so, and there is no model anywhere in this call to make one."""
+    repository = _repo(tmp_path, ["Bob and the acquisition."] * 3)
+    for number in (1, 2, 3):
+        _memo(repository, f"src-000001-p{number}", unplaced=(_form("Bob"),))
+    ex.derive(repository, recurrence_threshold=1)
+
+    unsummarized = ex.search_global(repository, "Bob", summarize=True)
+    assert unsummarized.groups[0].summary is None
+    assert unsummarized.summary_served is False
+
+    task = ex.pending_cluster_summaries(repository)[0]
+    ex.record_summary(repository, task.cluster_id, task.memo_key, "A summary.")
+
+    summarized = ex.search_global(repository, "Bob", summarize=True)
+    assert summarized.groups[0].summary == "A summary."
+    assert summarized.summary_served is True
+
+
+def test_search_global_with_no_query_returns_every_cluster_at_the_requested_level(
+    tmp_path,
+):
+    """AC 6 and AC 7: `search_global(query=None, filters={level: n})` is the
+    map step - every cluster at that level, with its summary, under a scope
+    line naming the level."""
+    repository = _nested_repo(tmp_path)
+    ex.derive(repository, recurrence_threshold=1)
+    rows = _rows(repository, "clusters")
+    finest = max(row[1] for row in rows)
+    expected = {row[0] for row in rows if row[1] == finest}
+
+    result = ex.search_global(
+        repository, None, SearchFilters(level=finest), summarize=True
+    )
+
+    assert {group.cluster_id for group in result.groups} == expected
+    assert f"level {finest}" in result.scope
+    assert all(group.level == finest for group in result.groups)
+
+
+def test_search_global_defaults_to_the_finest_level_and_always_names_it(tmp_path):
+    """§33.1's discipline applied here: a call that leaves `level` unset still
+    resolves one, and it is never left for the caller to infer."""
+    repository = _nested_repo(tmp_path)
+    ex.derive(repository, recurrence_threshold=1)
+    finest = max(row[1] for row in _rows(repository, "clusters"))
+
+    result = ex.search_global(repository, None)
+
+    assert result.level == finest
+    assert f"level {finest}" in result.scope
+
+
+def test_search_global_filters_narrow_the_matched_paragraphs(tmp_path):
+    """The other six `SearchFilters` narrow query mode exactly as they narrow
+    `search` (#12) - proven with one guaranteed to exclude everything, since
+    the compose logic itself is `index.filter_predicate`'s own test coverage."""
+    repository = _repo(tmp_path, ["Bob and the acquisition."] * 3)
+    for number in (1, 2, 3):
+        _memo(repository, f"src-000001-p{number}", unplaced=(_form("Bob"),))
+    ex.derive(repository, recurrence_threshold=1)
+
+    result = ex.search_global(repository, "Bob", SearchFilters(contemporaneous=False))
+
+    assert result.groups == ()
+
+
+def test_search_global_over_a_missing_index_returns_no_groups(tmp_path):
+    """Matches `search` and `gather`: the corpus not being built is an
+    answer, not a driver exception, and nothing here creates the file."""
+    repository = Repository(root=tmp_path)
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+
+    result = ex.search_global(repository, "anything")
+
+    assert result.groups == ()
+    assert "0 clusters matched" in result.scope
+    assert not (tmp_path / INDEX_RELATIVE_PATH).exists()
