@@ -9,6 +9,7 @@ verdicts (never the engagement judgements sharing the same paragraph), and
 """
 
 import ast
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -405,3 +406,59 @@ def test_rebuild_derives_the_staleness_map(tmp_path):
 
     report = rebuild(repository)
     assert report.staleness.not_current == ()
+
+
+# --- an index built before #37 ------------------------------------------------
+
+
+def test_a_memo_table_built_before_37_is_migrated_not_refused(tmp_path):
+    """`memo` is preserved across rebuilds and created with `IF NOT EXISTS`,
+    so an index from before #37 keeps the old two-kind CHECK constraint
+    forever unless something rewrites the table. Recording a judgement
+    against it must succeed, and the extraction's paid-for rows must
+    survive the rewrite untouched."""
+    from memoria.index import INDEX_RELATIVE_PATH
+
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    repository = _basic_repo(
+        tmp_path, entry=entry, brief_text="About Bob.", draft="Bob went to town."
+    )
+    build_index(repository, [])
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.execute("DROP INDEX IF EXISTS memo_kind_anchor")
+    con.execute("DROP TABLE memo")
+    con.execute(
+        "CREATE TABLE memo("
+        "key TEXT PRIMARY KEY, "
+        "kind TEXT NOT NULL CHECK (kind IN ('paragraph', 'cluster_summary')), "
+        "anchor TEXT NOT NULL DEFAULT '', "
+        "value TEXT NOT NULL, "
+        "written_at TEXT NOT NULL"
+        ")"
+    )
+    con.execute("CREATE INDEX memo_kind_anchor ON memo(kind, anchor)")
+    con.execute(
+        "INSERT INTO memo (key, kind, anchor, value, written_at) "
+        "VALUES ('old-key', 'paragraph', 'src-000001-p1', '{}', '2026-01-01T00:00:00')"
+    )
+    con.commit()
+    con.close()
+    paragraph = manuscript_paragraphs(repository)[0]
+
+    record_engagement(repository, paragraph, "SUB-people/bob", {"engages": True})
+    record_audit_verdict(repository, paragraph, "SUB-people/bob", {"clear": True})
+
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    try:
+        assert con.execute(
+            "SELECT value FROM memo WHERE key = 'old-key'"
+        ).fetchone() == ("{}",)
+        kinds = {row[0] for row in con.execute("SELECT kind FROM memo")}
+        assert kinds == {"paragraph", "engagement", "audit_verdict"}
+        assert con.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' "
+            "AND name = 'memo_kind_anchor'"
+        ).fetchone() is not None
+    finally:
+        con.close()
+    assert compute_staleness_map(repository).not_current == ()

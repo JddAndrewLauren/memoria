@@ -139,6 +139,18 @@ DERIVED_TABLES = (
 # miss rather than a corruption, and the old rows sit inert.
 MEMO_SCHEMA_VERSION = "1"
 
+# The column list `memo` is created with, and the one `_widen_memo_kinds`
+# rewrites a pre-#37 table into - one definition, so they cannot drift.
+_MEMO_COLUMNS = (
+    "key TEXT PRIMARY KEY, "
+    "kind TEXT NOT NULL CHECK (kind IN ("
+    "'paragraph', 'cluster_summary', 'engagement', 'audit_verdict'"
+    ")), "
+    "anchor TEXT NOT NULL DEFAULT '', "
+    "value TEXT NOT NULL, "
+    "written_at TEXT NOT NULL"
+)
+
 _PRESERVED_DDL = (
     "CREATE TABLE IF NOT EXISTS memoria_schema("
     "key TEXT PRIMARY KEY, value TEXT NOT NULL"
@@ -149,15 +161,7 @@ _PRESERVED_DDL = (
     # membership, and what makes an orphaned row (a paragraph that was
     # renormalized out from under it) inert rather than wrong - nothing ever
     # looks a row up by `anchor`.
-    "CREATE TABLE IF NOT EXISTS memo("
-    "key TEXT PRIMARY KEY, "
-    "kind TEXT NOT NULL CHECK (kind IN ("
-    "'paragraph', 'cluster_summary', 'engagement', 'audit_verdict'"
-    ")), "
-    "anchor TEXT NOT NULL DEFAULT '', "
-    "value TEXT NOT NULL, "
-    "written_at TEXT NOT NULL"
-    ")",
+    "CREATE TABLE IF NOT EXISTS memo(" + _MEMO_COLUMNS + ")",
     "CREATE INDEX IF NOT EXISTS memo_kind_anchor ON memo(kind, anchor)",
 )
 
@@ -556,6 +560,7 @@ def _ensure_preserved(con: sqlite3.Connection) -> None:
     """
     for statement in _PRESERVED_DDL:
         con.execute(statement)
+    _widen_memo_kinds(con)
     row = con.execute(
         "SELECT value FROM memoria_schema WHERE key = 'memo_version'"
     ).fetchone()
@@ -573,6 +578,36 @@ def _ensure_preserved(con: sqlite3.Connection) -> None:
             "automatically - rebuild with --reset-cache to throw it away and "
             "re-run the extraction, or use a build that reads this version."
         )
+
+
+def _widen_memo_kinds(con: sqlite3.Connection) -> None:
+    """Rewrite a ``memo`` table built before #37 so it accepts the two
+    judgement kinds, keeping every row.
+
+    ``memo`` is preserved, so ``rebuild`` never drops it, and ``CREATE TABLE
+    IF NOT EXISTS`` leaves an existing table exactly as it is - which means
+    the old two-kind CHECK constraint would otherwise survive forever and
+    the first ``memoria.audit`` write would fail with a bare
+    ``sqlite3.IntegrityError``. The rows are model output the author paid
+    for, so this is not a ``MEMO_SCHEMA_VERSION`` bump (that forces
+    ``--reset-cache``): it is a lossless copy into the current DDL. SQLite
+    cannot alter a CHECK in place, hence create-copy-drop-rename.
+    """
+    row = con.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memo'"
+    ).fetchone()
+    if row is None or "'engagement'" in row[0]:
+        return
+    con.execute("DROP TABLE IF EXISTS memo_widened")
+    con.execute("CREATE TABLE memo_widened(" + _MEMO_COLUMNS + ")")
+    con.execute(
+        "INSERT INTO memo_widened (key, kind, anchor, value, written_at) "
+        "SELECT key, kind, anchor, value, written_at FROM memo"
+    )
+    con.execute("DROP TABLE memo")
+    con.execute("ALTER TABLE memo_widened RENAME TO memo")
+    con.execute("CREATE INDEX IF NOT EXISTS memo_kind_anchor ON memo(kind, anchor)")
+    con.commit()
 
 
 def _check_paragraphs_shape(con: sqlite3.Connection) -> None:
