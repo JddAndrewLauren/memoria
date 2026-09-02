@@ -1,5 +1,6 @@
-"""The reads #64 and #24 build: list sources, read one source, raw source,
-search, list subjects, list one subject's entries.
+"""The HTTP surface #64, #24, #25 and #65 build: list sources, read one source,
+raw source, resolve a reference to a citation, search, list subjects, list one
+subject's entries - plus one connection fact (locality) and one action (reveal).
 
 Each route calls ``memoria.*`` and shapes the result into a typed response
 model - it holds no rule the CLI or the MCP server does not, opens no

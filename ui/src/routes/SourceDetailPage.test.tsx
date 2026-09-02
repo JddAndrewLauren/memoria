@@ -133,6 +133,45 @@ describe("the source viewer (§19.4)", () => {
     );
   });
 
+  it("KNOWN LIMITATION: drops apparatus whose linked_anchor names no paragraph in the record", async () => {
+    // Pinned, not endorsed. groupApparatusByAnchor buckets apparatus by
+    // `linked_anchor` and the render only reads the buckets belonging to
+    // paragraphs that exist, so an orphaned note vanishes silently. Whether
+    // such a note should instead surface somewhere is a design decision this
+    // test does not make - it only makes the current behaviour visible.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            ...SOURCE_DETAIL,
+            apparatus: [
+              ...SOURCE_DETAIL.apparatus,
+              {
+                editorial_type: "headnote",
+                retrospective: false,
+                linked_record_id: "SRC-000184",
+                linked_anchor: "src-000184-p9",
+                text: "Orphaned: no paragraph carries this anchor.",
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    renderAt("/sources/SRC-000184");
+
+    // The anchored note still renders...
+    expect(await screen.findByText("Added by the editor in 2019.")).toBeInTheDocument();
+    // ...and the orphan is dropped without a trace.
+    expect(
+      screen.queryByText("Orphaned: no paragraph carries this anchor."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("headnote")).not.toBeInTheDocument();
+  });
+
   it("shows a distinct failure line, not silence, when the cited paragraph's backlinks can't be read", async () => {
     vi.stubGlobal(
       "fetch",
@@ -157,10 +196,16 @@ describe("the source viewer (§19.4)", () => {
     expect(screen.queryByText("Cited by")).not.toBeInTheDocument();
   });
 
-  it("gives inferred, published and unresolved distinguishable tones, not just different text", async () => {
+  it("gives all five date_confidence values distinguishable tones, not just different text", async () => {
+    // The tone, not the word, is what a reader sees first: every one of the
+    // five values must reach the badge as its own color. Asserted by class,
+    // because asserting the text would still pass with every tone collapsed
+    // into one.
     const cases: Array<[confidence: string, expectedClass: string]> = [
+      ["exact", "text-sources"],
       ["inferred", "text-amber"],
       ["published", "text-subjects"],
+      ["chapter-only", "text-secondary"],
       ["unresolved", "text-manuscript"],
     ];
 

@@ -9,11 +9,9 @@ import {
   ApiError,
   type EditorialRecordOut,
 } from "../api/client";
-import { Badge } from "../components/Badge";
+import { Badge, type Tone } from "../components/Badge";
 import { Backlinks } from "../components/CitationPanel";
 import { useCitationPanel } from "../lib/citationPanel";
-
-type Tone = "green" | "amber" | "blue" | "red" | "neutral";
 
 // Five values, all of which must render distinguishably
 // (docs/normalized-record-schema.md's `date_confidence`) - not just as

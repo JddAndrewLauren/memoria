@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-type Tone = "green" | "amber" | "blue" | "red" | "neutral";
+export type Tone = "green" | "amber" | "blue" | "red" | "neutral";
 
 const TONE_CLASSES: Record<Tone, string> = {
   green: "bg-sources-tint text-sources",
