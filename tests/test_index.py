@@ -689,10 +689,44 @@ def test_validate_fails_a_pin_lacking_attribution(tmp_path):
     assert any("attribution" in error for error in errors)
 
 
+def test_gather_and_validate_do_not_crash_on_an_index_predating_the_overlay_table(
+    tmp_path,
+):
+    """`gather_overlay` did not exist before this issue's index. An index
+    built by an older version of `memoria rebuild` still has every other
+    table, and `list_overlay`/`gather` must create the missing table on the
+    fly (through `connect`, not a bare `sqlite3.connect`) rather than raise
+    `sqlite3.OperationalError: no such table`."""
+    from memoria.validate import validate
+
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    repository = _gather_repo(tmp_path, ["Bob went to town."], [entry])
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.execute("DROP TABLE gather_overlay")
+    con.commit()
+    con.close()
+    (tmp_path / "raw").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "raw" / "manifest.yaml").write_text("units: []\n")
+
+    assert list_overlay(repository) == []
+    assert [g.anchor for g in gather(repository, "SUB-people/bob")] == [
+        "src-000001-p1"
+    ]
+    # `validate` returns rather than raising - it may still report unrelated
+    # findings (e.g. from other validators), but never "no such table".
+    errors = validate(evidence_root=tmp_path, repo_root=tmp_path)
+    assert not any("gather_overlay" in error or "no such table" in error for error in errors)
+
+
 def test_a_theme_gathers_exactly_where_its_match_terms_co_occur(tmp_path):
     """AC 8: a Theme promoted from a cluster - match terms naming two
     entries and the relation between them - gathers the paragraph where
     they co-occur, and nothing else, with no model call in `gather` itself.
+
+    A solo appearance of one of the named entries, without the other, is
+    not co-occurrence and must not be gathered - the entry-shaped match
+    terms are intersected with each other and with the relation, not
+    unioned.
     """
     bob = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
     carol = Entry(id="SUB-people/carol", match_terms=["Carol"], body="")
@@ -707,7 +741,7 @@ def test_a_theme_gathers_exactly_where_its_match_terms_co_occur(tmp_path):
     )
     repository = _gather_repo(
         tmp_path,
-        ["Bob pressures Carol.", "Something else entirely."],
+        ["Bob pressures Carol.", "Bob walked alone."],
         [bob, carol, tension],
     )
     _memo(
@@ -716,7 +750,11 @@ def test_a_theme_gathers_exactly_where_its_match_terms_co_occur(tmp_path):
         placements=[_place("SUB-people/bob", "Bob"), _place("SUB-people/carol", "Carol")],
         relations=[ex.ProposedRelation("SUB-people/bob", "pressures", "SUB-people/carol")],
     )
-    _memo(repository, "src-000001-p2")
+    _memo(
+        repository,
+        "src-000001-p2",
+        placements=[_place("SUB-people/bob", "Bob")],
+    )
     ex.derive(repository)
 
     result = gather(repository, "SUB-themes/tension")

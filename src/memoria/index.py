@@ -704,7 +704,7 @@ def list_overlay(repository: Repository) -> list[OverlayEntry]:
     db_path = repository.root / INDEX_RELATIVE_PATH
     if not db_path.exists():
         return []
-    con = sqlite3.connect(db_path)
+    con = connect(repository)
     try:
         rows = con.execute(
             "SELECT entry_id, anchor, action, actor_name, actor_email, at "
@@ -746,13 +746,22 @@ def gather(repository: Repository, entry_id: str) -> list[GatheredSource]:
       match terms, the deterministic pass that gathering "stays" as (§8.3) -
       catching a literal mention the model missed, which is the recall this
       module's docstring calls the design's central risk;
-    - for an ``entry``- or ``relation``-shaped match term, the placements or
-      relations rows it names. This is how a Theme or Arc promoted from a
-      cluster gathers (ADR-0005, 2026-09-01 amendment): its match terms are
-      the entries and relations that defined the cluster, and this is the
-      join over placements. ``extraction.read_placements`` deliberately does
-      not consult these two shapes - a Theme is never itself placed - so
-      this function is the only place they are.
+    - for the ``entry``- and ``relation``-shaped match terms together, the
+      **intersection** of what each one names - the placements rows for
+      every named entry and the relations rows for every named relation.
+      This is how a Theme or Arc promoted from a cluster gathers (ADR-0005,
+      2026-09-01 amendment): its match terms are the entries and relations
+      that defined the cluster, and the intersection is what makes the
+      result "exactly the paragraphs where those co-occur" rather than
+      every paragraph any one of them appears in alone. A Theme with only
+      one such match term still gets that term's own anchors, since an
+      intersection of one set is itself. ``extraction.read_placements``
+      deliberately does not consult these two shapes - a Theme is never
+      itself placed - so this function is the only place they are.
+
+    Word-shaped match terms stay unioned in, both with each other and with
+    the entry/relation intersection above: they are a separate recall
+    mitigation (the literal mention above), not a claim about co-occurrence.
 
     Then the overlay: an excluded anchor is dropped even if matched above,
     and a pinned one is added even if nothing above found it.
@@ -765,7 +774,7 @@ def gather(repository: Repository, entry_id: str) -> list[GatheredSource]:
     db_path = repository.root / INDEX_RELATIVE_PATH
     if not db_path.exists():
         return []
-    con = sqlite3.connect(db_path)
+    con = connect(repository)
     try:
         anchors: set[str] = {
             row[0]
@@ -773,27 +782,43 @@ def gather(repository: Repository, entry_id: str) -> list[GatheredSource]:
                 "SELECT anchor FROM placements WHERE entry_id = ?", (entry_id,)
             )
         }
+        # Entry/relation-shaped match terms are intersected with each other
+        # (co-occurrence), then unioned into `anchors` alongside the
+        # word-shaped terms' lexical matches - see the docstring.
+        cooccurrence: set[str] | None = None
         for term in entry.match_terms:
             kind = classify_match_term(term)
             if kind == "word":
                 anchors.update(_lexical_match(con, term))
             elif kind == "entry":
-                anchors.update(
+                term_anchors = {
                     row[0]
                     for row in con.execute(
                         "SELECT anchor FROM placements WHERE entry_id = ?", (term,)
                     )
+                }
+                cooccurrence = (
+                    term_anchors
+                    if cooccurrence is None
+                    else cooccurrence & term_anchors
                 )
             else:  # "relation"
                 left, verb, right = (part.strip() for part in term.split(" -> "))
-                anchors.update(
+                term_anchors = {
                     row[0]
                     for row in con.execute(
                         "SELECT anchor FROM relations "
                         "WHERE from_ref = ? AND verb = ? AND to_ref = ?",
                         (left, verb, right),
                     )
+                }
+                cooccurrence = (
+                    term_anchors
+                    if cooccurrence is None
+                    else cooccurrence & term_anchors
                 )
+        if cooccurrence:
+            anchors.update(cooccurrence)
 
         overlay = dict(
             con.execute(
