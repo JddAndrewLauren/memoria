@@ -222,6 +222,43 @@ def test_normalize_converts_a_new_plain_text_unit(tmp_path):
     assert len(record.raw_sha256) == 64
 
 
+def test_a_non_utf8_plain_text_unit_converts_instead_of_stopping_the_pass(tmp_path):
+    """One Windows-1252 file must not stop the whole pass. Found on the
+    Enron slice (#15): a .txt attachment carried 0x82, the UTF-8 decode
+    raised, and every unit after it stayed unwritten."""
+    evidence_root = tmp_path / "evidence"
+    full = evidence_root / "raw" / "a.txt"
+    full.parent.mkdir(parents=True)
+    full.write_bytes("He said \u201cno\u201d.\n\nSecond.".encode("cp1252"))
+    _write_raw_file(evidence_root, "b.txt", "After it.")
+    repository = Repository(root=tmp_path / "repo")
+
+    report = normalize(repository, evidence_root)
+
+    assert report.converted == ["SRC-000001", "SRC-000002"]
+    first, second = read_all(repository)
+    assert first.paragraphs == ["He said \u201cno\u201d.", "Second."]
+    assert second.paragraphs == ["After it."]
+
+
+def test_a_unit_whose_converter_raises_is_reported_and_the_pass_goes_on(tmp_path):
+    """A corrupt pdf attachment stopped a whole Enron normalize run (#106).
+    The failed unit gets no record and is named in the report; the units
+    after it are still converted."""
+    evidence_root = tmp_path / "evidence"
+    _write_raw_file(evidence_root, "a.pdf", "not a pdf at all")
+    _write_raw_file(evidence_root, "b.txt", "After it.")
+    repository = Repository(root=tmp_path / "repo")
+
+    report = normalize(repository, evidence_root)
+
+    assert list(report.failed) == ["SRC-000001"]
+    assert "SRC-000001" not in report.converted
+    assert report.converted == ["SRC-000002"]
+    (record,) = read_all(repository)
+    assert record.id == "SRC-000002"
+
+
 def test_a_run_over_unchanged_input_produces_no_diff(tmp_path):
     evidence_root = tmp_path / "evidence"
     _write_raw_file(evidence_root, "a.txt", "Hello.\n\nWorld.")

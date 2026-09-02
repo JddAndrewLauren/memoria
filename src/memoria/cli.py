@@ -147,6 +147,14 @@ def main(argv=None):
                 f"normalize: {len(report.unconvertible)} unit(s) have no "
                 "converter registered for their format yet"
             )
+        if report.failed:
+            print(
+                f"normalize: {len(report.failed)} unit(s) failed to convert "
+                "and have no record - each is retried on the next run:",
+                file=sys.stderr,
+            )
+            for unit_id, reason in report.failed.items():
+                print(f"  {unit_id}: {reason}", file=sys.stderr)
         return 0
 
     if args.command == "rebuild":

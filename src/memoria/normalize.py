@@ -99,6 +99,23 @@ Converter = Callable[[bytes], ConversionDraft]
 _BLANK_LINE = re.compile(r"\n[ \t]*\n+")
 
 
+def _decode_text(raw_bytes: bytes) -> str:
+    """UTF-8, or cp1252 when the bytes are not UTF-8.
+
+    Found walking the M1 gate (#15) over the Enron slice: one ``.txt``
+    attachment was Windows-1252 (byte 0x82, a smart quote), the decode
+    raised, and the whole pass stopped with every unit after it unwritten.
+    cp1252 is what a Windows-era text file that is not UTF-8 almost always
+    is, and ``errors="replace"`` means a stray byte costs one character, not
+    the corpus. Every input that decoded before decodes identically, so the
+    converter pin is unchanged.
+    """
+    try:
+        return raw_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw_bytes.decode("cp1252", errors="replace")
+
+
 def convert_plain_text(raw_bytes: bytes) -> ConversionDraft:
     """The plain-text converter this issue ships.
 
@@ -108,7 +125,7 @@ def convert_plain_text(raw_bytes: bytes) -> ConversionDraft:
     whitespace policy applies to every converter alike, not only the richer
     ones #77/#78 add.
     """
-    text = raw_bytes.decode("utf-8").replace("\r\n", "\n")
+    text = _decode_text(raw_bytes).replace("\r\n", "\n")
     paragraphs = [p.strip() for p in _BLANK_LINE.split(text) if p.strip()]
     return ConversionDraft(
         source_type="document",
@@ -284,6 +301,12 @@ class NormalizeReport:
     # ``sum(...values())`` is "how many paragraph hashes changed" - the
     # two numbers the drift report gates a converter bump on.
     paragraph_drift: dict[str, int] = field(default_factory=dict)
+    # Units whose converter raised, by ID, with the exception's text. The
+    # pass goes on past them (found on the Enron slice, #106: a corrupt pdf
+    # attachment stopped the whole run and left every later record
+    # unwritten). No record is written for a failed unit, and it is retried
+    # on the next run because nothing on disk says it was skipped.
+    failed: dict[str, str] = field(default_factory=dict)
 
 
 def normalize(
@@ -326,6 +349,7 @@ def normalize(
     skipped = []
     unconvertible = []
     paragraph_drift: dict[str, int] = {}
+    failed: dict[str, str] = {}
     for entry in entries:
         if entry.deleted:
             continue
@@ -357,7 +381,11 @@ def normalize(
             skipped.append(entry.id)
             continue
 
-        draft = get_draft()
+        try:
+            draft = get_draft()
+        except Exception as exc:  # noqa: BLE001 - one bad unit must not end the pass
+            failed[entry.id] = f"{type(exc).__name__}: {exc}"
+            continue
         record = NormalizedRecord(
             id=entry.id,
             source_type=draft.source_type,
@@ -397,6 +425,7 @@ def normalize(
         skipped=skipped,
         unconvertible=unconvertible,
         paragraph_drift=paragraph_drift,
+        failed=failed,
     )
 
 
