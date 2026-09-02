@@ -23,6 +23,18 @@ with a direct lexical match against an entry's own word-shaped match terms,
 and ``pin``/``exclude`` record the author's attributed overlay in the
 preserved ``gather_overlay`` table - the second thing in this file, beside
 the memo cache, that a rebuild does not throw away.
+
+**And appearances, lexical engine only** (#19, part 06 §8.11): the manuscript
+passages an entry turns out to touch, with a short note on how - kept in the
+derived ``appearances`` table, separate from the gathered set on purpose
+(§8.8's reason: a gathered set is evidence to write from, an appearance is
+prose already written, and merging them would let the book cite itself).
+``compute_appearances`` runs at every ``memoria rebuild`` and is the only
+writer; there is no overlay and no author act against a row, because an
+author act against one passage would be a durable pointer into mutable prose
+(§4.1). Themes and Arcs cannot appear this way - manuscript prose is never
+extracted, so there are no placements over it to intersect - and are skipped
+rather than silently returning nothing (``AppearancesReport``).
 """
 
 from __future__ import annotations
@@ -33,7 +45,7 @@ from datetime import datetime, timezone
 
 from memoria.records import NormalizedRecord, real_paragraphs, read_all
 from memoria.repository import Repository
-from memoria.subjects import classify_match_term, load_entry
+from memoria.subjects import classify_match_term, load_all_entries, load_entry
 from memoria.write import Actor
 
 INDEX_RELATIVE_PATH = ".memoria/index.db"
@@ -85,6 +97,7 @@ DERIVED_TABLES = (
     "cluster_relations",
     "cluster_paragraphs",
     "extraction_meta",
+    "appearances",
 )
 
 # Bumped when the *shape* of a memo row changes in a way that makes an
@@ -230,6 +243,17 @@ _DERIVED_DDL = (
     # raw/filtered counts. A surface reporting a candidate list has to be
     # able to say what produced it.
     "CREATE TABLE IF NOT EXISTS extraction_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+    # One row per (entry, passage) an entry's lexical match terms find among
+    # the audit targets (#19, part 06 §8.11). `note` names the term that
+    # matched - the "short note on how it appears" the acceptance criteria
+    # ask for, the same shape as `placements.licensed_by`. Unlike the memo
+    # cache and the gather overlay this is plain derived state: it carries no
+    # author act, so it is dropped and recomputed like everything else here.
+    "CREATE TABLE IF NOT EXISTS appearances("
+    "entry_id TEXT NOT NULL, anchor TEXT NOT NULL, note TEXT NOT NULL, "
+    "PRIMARY KEY (entry_id, anchor)"
+    ")",
+    "CREATE INDEX IF NOT EXISTS appearances_entry ON appearances(entry_id)",
 )
 
 
@@ -308,10 +332,14 @@ class RebuildReport:
     candidate counts be *reported* - so there has to be something to report
     them in. ``counts`` is ``extraction.DerivedCounts``, typed loosely here
     only to keep this module's imports one-way.
+
+    ``appearances`` is ``AppearancesReport`` (#19) - what the appearances
+    pass produced, and what it skipped.
     """
 
     records: list[NormalizedRecord]
     counts: object
+    appearances: AppearancesReport
 
 
 def build_index(
@@ -615,7 +643,8 @@ def rebuild(
         counts = extraction.derive(
             repository, recurrence_threshold=recurrence_threshold
         )
-    return RebuildReport(records=records, counts=counts)
+    appearances_report = compute_appearances(repository)
+    return RebuildReport(records=records, counts=counts, appearances=appearances_report)
 
 
 # --- the gathered set and its pin/exclude overlay (#18, part 06 §8.3) -------
@@ -720,12 +749,22 @@ def _lexical_match(con: sqlite3.Connection, term: str) -> list[str]:
     lexical pass part 06 §8.3 says gathering "stays" as, over and above
     whatever the extraction placed. Quoted as an FTS5 phrase so a term with
     more than one word, or one that happens to collide with FTS5 query
-    syntax, is still matched literally."""
+    syntax, is still matched literally.
+
+    Scoped away from ``source_type: book`` paragraphs - the inverse of
+    ``_lexical_match_book``'s scoping - because those are audit targets
+    (docs/normalized-record-schema.md: "never evidence to write from"), and
+    §8.11 keeps the gathered set and appearances "separately queryable and
+    never cross": a book paragraph an appearance names must not also surface
+    through gather's own lexical pass."""
     query = '"' + term.replace('"', '""') + '"'
     return [
         row[0]
         for row in con.execute(
-            "SELECT anchor FROM records WHERE records MATCH ?", (query,)
+            "SELECT records.anchor FROM records "
+            "JOIN paragraphs ON paragraphs.anchor = records.anchor "
+            "WHERE records MATCH ? AND paragraphs.source_type != 'book'",
+            (query,),
         )
     ]
 
@@ -745,7 +784,10 @@ def gather(repository: Repository, entry_id: str) -> list[GatheredSource]:
     - a direct lexical match against each of the entry's own word-shaped
       match terms, the deterministic pass that gathering "stays" as (§8.3) -
       catching a literal mention the model missed, which is the recall this
-      module's docstring calls the design's central risk;
+      module's docstring calls the design's central risk. Scoped away from
+      ``source_type: book`` paragraphs (``_lexical_match``): those are audit
+      targets, appearances' side of the §8.11 separation, and must never
+      cross into the gathered set;
     - for the ``entry``- and ``relation``-shaped match terms together, the
       **intersection** of what each one names - the placements rows for
       every named entry and the relations rows for every named relation.
@@ -850,3 +892,172 @@ def gather(repository: Repository, entry_id: str) -> list[GatheredSource]:
         ),
         key=lambda gathered: gathered.anchor,
     )
+
+
+# --- appearances, lexical engine only (#19, part 06 §8.11) ------------------
+
+
+@dataclass(frozen=True)
+class Appearance:
+    """One manuscript passage an entry turns out to touch, with a short note
+    on how (part 06 §8.11). ``note`` names the match term that found it -
+    ``placements.licensed_by``'s shape, not a model judgement: there is no
+    model in this engine.
+
+    Carries no pin/exclude flag - unlike ``GatheredSource`` - because
+    appearances take no overlay at all (§8.11's third property: an author act
+    against one passage would be a durable pointer into mutable prose)."""
+
+    src_id: str
+    anchor: str
+    note: str
+
+
+@dataclass(frozen=True)
+class AppearancesReport:
+    """What one ``compute_appearances`` pass produced, and what it could not.
+
+    Themes and Arcs cannot appear yet (§8.11: manuscript prose is never
+    extracted, so there is nothing to intersect their entry/relation match
+    terms against), and #19's seventh acceptance criterion is that this gap
+    is *reported*, not folded silently into an empty result - a caller adds
+    ``entries_skipped`` and ``skipped_subjects`` to a candidate list report
+    the same way ``DerivedCounts`` already reports the recurrence filter's
+    cost.
+    """
+
+    appearances: int
+    entries_computed: int
+    entries_skipped: int
+    skipped_subjects: tuple[str, ...]
+
+
+def _appearance_note(term: str) -> str:
+    return f'matched "{term}"'
+
+
+def _lexical_match_book(con: sqlite3.Connection, term: str) -> list[str]:
+    """Anchors among the audit targets (``source_type: book``) whose
+    paragraph text contains ``term`` verbatim - ``_lexical_match``'s FTS5
+    phrase query, scoped to book paragraphs the way ``paragraphs.source_type``
+    already lets ``search`` scope by kind (docs/normalized-record-schema.md:
+    ``book`` marks an audit target)."""
+    query = '"' + term.replace('"', '""') + '"'
+    return [
+        row[0]
+        for row in con.execute(
+            "SELECT records.anchor FROM records "
+            "JOIN paragraphs ON paragraphs.anchor = records.anchor "
+            "WHERE records MATCH ? AND paragraphs.source_type = 'book'",
+            (query,),
+        )
+    ]
+
+
+def compute_appearances(repository: Repository) -> AppearancesReport:
+    """Recompute the ``appearances`` table: every audit-target passage a
+    lexically-matchable entry's word-shaped match terms - or its own
+    implicit name - find, stored with a note naming the term.
+
+    This is the lexical engine part 06 §8.11 says appearances share with the
+    gathered set - "an appearance is a match... using the same lexical
+    machinery" - but it cannot reuse ``gather``'s ``placements``/``relations``
+    union, because the extraction never reads audit targets (only evidence
+    records), so those tables carry no rows for a book paragraph to begin
+    with. What is left is the deterministic lexical pass alone, run directly
+    against book paragraphs.
+
+    Entries under ``memoria.extraction.CO_OCCURRENCE_SUBJECTS`` (Themes,
+    Arcs) are skipped rather than matched on nothing: their match terms name
+    entries and relations, and appearances has no placements over the
+    manuscript to intersect those against (the same reason ``gather``'s
+    co-occurrence branch cannot run here either). The skip is counted and
+    named in the returned report - #19's seventh acceptance criterion - not
+    silently absorbed into zero appearances.
+
+    Stored in the ``appearances`` table and never merged into the gathered
+    set (§8.11): the two stay separately queryable by construction, since
+    nothing here writes to ``placements``, ``relations`` or
+    ``gather_overlay``, and ``gather`` never reads this table. Nothing here
+    writes to an entry file either - appearances are read-only about the
+    manuscript, never fed back into it.
+
+    Regenerated identically on every call: existing rows are dropped and
+    recomputed from the entries and audit-target paragraphs currently on
+    disk, the same throwaway contract every other derived table in this file
+    keeps (§42).
+    """
+    # Imported here, not at module scope, for the same reason `rebuild` does
+    # it: `memoria.extraction` imports this module, so the reverse import
+    # must stay local to avoid a cycle.
+    from memoria.extraction import CO_OCCURRENCE_SUBJECTS, implicit_name_term
+
+    entries = load_all_entries(repository)
+    con = connect(repository)
+    try:
+        con.execute("DELETE FROM appearances")
+        computed = 0
+        skipped = 0
+        skipped_subjects: set[str] = set()
+        for entry_id, entry in sorted(entries.items()):
+            subject_id = entry_id.split("/", 1)[0]
+            if subject_id in CO_OCCURRENCE_SUBJECTS:
+                skipped += 1
+                skipped_subjects.add(subject_id)
+                continue
+
+            terms = {implicit_name_term(entry_id)}
+            for term in entry.match_terms:
+                if classify_match_term(term) == "word":
+                    terms.add(term)
+
+            # Each anchor gets one note, from the first (alphabetically) term
+            # that matched it - deterministic, and enough to say how it was
+            # found without a row per matching term.
+            matched: dict[str, str] = {}
+            for term in sorted(terms):
+                for anchor in _lexical_match_book(con, term):
+                    matched.setdefault(anchor, term)
+
+            for anchor, term in matched.items():
+                con.execute(
+                    "INSERT INTO appearances (entry_id, anchor, note) "
+                    "VALUES (?, ?, ?)",
+                    (entry_id, anchor, _appearance_note(term)),
+                )
+                computed += 1
+        con.commit()
+    finally:
+        con.close()
+
+    return AppearancesReport(
+        appearances=computed,
+        entries_computed=len(entries) - skipped,
+        entries_skipped=skipped,
+        skipped_subjects=tuple(sorted(skipped_subjects)),
+    )
+
+
+def list_appearances(repository: Repository, entry_id: str) -> list[Appearance]:
+    """One entry's appearances, read back from the ``appearances`` table -
+    the query side of ``compute_appearances``. Ordered by anchor, matching
+    ``gather``'s ordering.
+
+    A missing index - every fresh clone - returns no results, matching
+    ``gather`` and ``search``."""
+    db_path = repository.root / INDEX_RELATIVE_PATH
+    if not db_path.exists():
+        return []
+    con = connect(repository)
+    try:
+        rows = con.execute(
+            "SELECT paragraphs.src_id, appearances.anchor, appearances.note "
+            "FROM appearances JOIN paragraphs "
+            "ON paragraphs.anchor = appearances.anchor "
+            "WHERE appearances.entry_id = ? "
+            "ORDER BY appearances.anchor",
+            (entry_id,),
+        ).fetchall()
+    finally:
+        con.close()
+    return [Appearance(src_id=src_id, anchor=anchor, note=note) for src_id, anchor, note in rows]
