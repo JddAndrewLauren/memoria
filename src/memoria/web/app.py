@@ -12,11 +12,21 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from memoria.repository import Repository, from_env
 from memoria.web.routes import router
+
+# `ui/`'s build output, gitignored (docs/adr/0002-ui-is-a-react-client.md's
+# "Layout" consequence). Mounted only when it exists, so `create_app` still
+# works with no `npm run build` having ever run - the API-only tests never
+# need it - and README.md's one-command run gets a single process serving
+# both the API and the client from one origin.
+_UI_DIST = Path(__file__).resolve().parents[3] / "ui" / "dist"
 
 
 def create_app(repository: Repository | None = None) -> FastAPI:
@@ -42,4 +52,26 @@ def create_app(repository: Repository | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.include_router(router, prefix="/api")
+    if _UI_DIST.is_dir():
+        # The hashed JS/CSS bundle serves as plain static files...
+        app.mount("/assets", StaticFiles(directory=_UI_DIST / "assets"), name="ui-assets")
+
+        # ...but every other path - "/", "/sources/SRC-000184", anything
+        # React Router owns - has no file on disk of its own, so it falls
+        # back to `index.html` and the client resolves the route. This is
+        # the SPA fallback `StaticFiles(html=True)` does not provide by
+        # itself: it 404s a path with no matching file or directory rather
+        # than serving the app shell for it. Registered after the API
+        # router, so an unmatched `/api/...` path still 404s as an API
+        # error rather than being served the app shell.
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def spa_fallback(full_path: str) -> FileResponse:
+            # An unmatched `/api/...` path is a real 404, not a client
+            # route to hand the app shell to - otherwise a typo'd or
+            # removed endpoint would come back 200 with HTML and confuse
+            # whatever called it far more than a clean 404 would.
+            if full_path.startswith("api/"):
+                raise HTTPException(status_code=404, detail=f"no such route: /{full_path}")
+            return FileResponse(_UI_DIST / "index.html")
+
     return app

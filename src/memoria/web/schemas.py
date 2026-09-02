@@ -76,6 +76,34 @@ class RawSourceResponse(BaseModel):
     original_locator: str
 
 
+class SubjectSummary(BaseModel):
+    """One subject - the `SUBJECTS` tree's top level (#24).
+
+    ``entry_count`` is computed from the entries actually on disk, never
+    hardcoded (#24's acceptance criteria) - the same discipline
+    ``SourceListResponse.total`` keeps for sources.
+    """
+
+    id: str
+    entry_count: int
+
+
+class SubjectListResponse(BaseModel):
+    items: list[SubjectSummary]
+
+
+class EntrySummary(BaseModel):
+    """One entry under a subject - CONTEXT.md's vocabulary, not "item" or
+    "record" (#24's acceptance criteria)."""
+
+    id: str
+    match_terms: list[str]
+
+
+class EntryListResponse(BaseModel):
+    items: list[EntrySummary]
+
+
 class SearchResultOut(BaseModel):
     """One search hit: the ``SRC-`` ID, the paragraph anchor, and a snippet.
 

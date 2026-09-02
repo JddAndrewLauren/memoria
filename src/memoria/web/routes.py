@@ -1,11 +1,10 @@
-"""The four reads #64 builds: list sources, read one source, raw source,
-search.
+"""The reads #64 and #24 build: list sources, read one source, raw source,
+search, list subjects, list one subject's entries.
 
 Each route calls ``memoria.*`` and shapes the result into a typed response
 model - it holds no rule the CLI or the MCP server does not, opens no
 SQLite database and reads no evidence file itself
-(``test_web_app.py``'s isolation test). Subjects and entries (#24) are not
-here: they wait on #16.
+(``test_web_app.py``'s isolation test).
 """
 
 from __future__ import annotations
@@ -20,8 +19,11 @@ from memoria.records import load as load_source
 from memoria.records import read_raw_source as read_raw_source_core
 from memoria.records import real_paragraphs
 from memoria.repository import NoEvidenceRoot, Repository
+from memoria.subjects import load_all_entries, load_all_subjects
 from memoria.web.dependencies import get_repository
 from memoria.web.schemas import (
+    EntryListResponse,
+    EntrySummary,
     Paragraph,
     RawSourceResponse,
     SearchResponse,
@@ -29,6 +31,8 @@ from memoria.web.schemas import (
     SourceDetail,
     SourceListResponse,
     SourceSummary,
+    SubjectListResponse,
+    SubjectSummary,
 )
 
 router = APIRouter()
@@ -109,6 +113,44 @@ def raw_source(
     except (ReadError, NoEvidenceRoot) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return RawSourceResponse(text=raw.text, original_locator=raw.original_locator)
+
+
+@router.get("/subjects")
+def list_subjects(repository: Repository = Depends(get_repository)) -> SubjectListResponse:
+    """The `SUBJECTS` tree's top level: the subjects on disk, each with its
+    entry count computed from the entries actually there (#24) - an
+    un-seeded repository (`memoria seed-subjects` never run) is an empty
+    list, not an error, the same honesty ``list_sources`` keeps for an
+    un-normalized one.
+    """
+    subjects = load_all_subjects(repository)
+    counts: dict[str, int] = {}
+    for entry_id in load_all_entries(repository):
+        subject_id = entry_id.split("/", 1)[0]
+        counts[subject_id] = counts.get(subject_id, 0) + 1
+    return SubjectListResponse(
+        items=[
+            SubjectSummary(id=subject.id, entry_count=counts.get(subject.id, 0))
+            for subject in subjects
+        ]
+    )
+
+
+@router.get("/subjects/{subject_id}/entries")
+def list_entries(
+    subject_id: str, repository: Repository = Depends(get_repository)
+) -> EntryListResponse:
+    """One subject's entries, for the `SUBJECTS` tree's second level."""
+    known_ids = {subject.id for subject in load_all_subjects(repository)}
+    if subject_id not in known_ids:
+        raise HTTPException(status_code=404, detail=f"no such subject: {subject_id}")
+    entries = load_all_entries(repository)
+    items = [
+        EntrySummary(id=entry.id, match_terms=entry.match_terms)
+        for entry_id, entry in sorted(entries.items())
+        if entry_id.split("/", 1)[0] == subject_id
+    ]
+    return EntryListResponse(items=items)
 
 
 @router.get("/search")

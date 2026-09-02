@@ -65,6 +65,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/subjects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Subjects
+         * @description The `SUBJECTS` tree's top level: the subjects on disk, each with its
+         *     entry count computed from the entries actually there (#24) - an
+         *     un-seeded repository (`memoria seed-subjects` never run) is an empty
+         *     list, not an error, the same honesty ``list_sources`` keeps for an
+         *     un-normalized one.
+         */
+        get: operations["list_subjects_api_subjects_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/subjects/{subject_id}/entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Entries
+         * @description One subject's entries, for the `SUBJECTS` tree's second level.
+         */
+        get: operations["list_entries_api_subjects__subject_id__entries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/search": {
         parameters: {
             query?: never;
@@ -99,6 +143,22 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** EntryListResponse */
+        EntryListResponse: {
+            /** Items */
+            items: components["schemas"]["EntrySummary"][];
+        };
+        /**
+         * EntrySummary
+         * @description One entry under a subject - CONTEXT.md's vocabulary, not "item" or
+         *     "record" (#24's acceptance criteria).
+         */
+        EntrySummary: {
+            /** Id */
+            id: string;
+            /** Match Terms */
+            match_terms: string[];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -243,6 +303,25 @@ export interface components {
             /** Original Locator */
             original_locator: string;
         };
+        /** SubjectListResponse */
+        SubjectListResponse: {
+            /** Items */
+            items: components["schemas"]["SubjectSummary"][];
+        };
+        /**
+         * SubjectSummary
+         * @description One subject - the `SUBJECTS` tree's top level (#24).
+         *
+         *     ``entry_count`` is computed from the entries actually on disk, never
+         *     hardcoded (#24's acceptance criteria) - the same discipline
+         *     ``SourceListResponse.total`` keeps for sources.
+         */
+        SubjectSummary: {
+            /** Id */
+            id: string;
+            /** Entry Count */
+            entry_count: number;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -349,6 +428,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RawSourceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_subjects_api_subjects_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectListResponse"];
+                };
+            };
+        };
+    };
+    list_entries_api_subjects__subject_id__entries_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subject_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntryListResponse"];
                 };
             };
             /** @description Validation Error */
