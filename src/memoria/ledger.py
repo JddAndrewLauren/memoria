@@ -41,6 +41,20 @@ from memoria.repository import Repository
 SESSION_ID_ENV_VAR = "MEMORIA_SESSION_ID"
 
 
+def estimate_tokens(text: str) -> int:
+    """A rough token count for one served item (#29, ADR-0001).
+
+    Four characters per token is the usual rule of thumb for English prose
+    under a GPT-family tokenizer. Exactness is not the point - what this
+    number feeds is a hypothetical budget cap (``poc-plan.md`` §6 risk 1),
+    not a bill - and a fixed, dependency-free heuristic keeps the core's
+    only runtime dependency PyYAML (``pyproject.toml``), consistent across
+    every item it is measured on rather than exact for any one of them.
+    """
+    stripped = text.strip()
+    return (len(stripped) + 3) // 4 if stripped else 0
+
+
 def session_id_from_env() -> str:
     """The session this process's served calls belong to.
 
@@ -108,11 +122,22 @@ def event_path(repository: Repository, session_id: str) -> Path:
 
 
 def append_read(repository: Repository, session_id: str, result: Read) -> None:
-    """Ledger one served ``read(ref)`` call."""
+    """Ledger one served ``read(ref)`` call, and its size.
+
+    ``tokens`` (#29) is measured here, from the text actually served, rather
+    than re-derived later from whatever the evidence looks like by the time
+    a manifest is built - the count this way always describes what this
+    session was actually given, not a later edit of the same record.
+    """
     _append(
         repository,
         session_id,
-        {"tool": "read", "ref": result.ref, "served": [result.citation]},
+        {
+            "tool": "read",
+            "ref": result.ref,
+            "served": [result.citation],
+            "tokens": estimate_tokens(result.text),
+        },
     )
 
 

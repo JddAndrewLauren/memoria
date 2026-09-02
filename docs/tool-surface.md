@@ -192,7 +192,7 @@ enumeration of kinds, and had already drifted.
 | `CHP-0001` | that chapter's brief, verbatim | part 04 §2.1 / #35 |
 | `SEC-0001` | that section's brief, verbatim | part 04 §2.1 / #35 |
 | `CHG-20261014-003` | the §11 projection of that human-authored commit | part 04 §4 / ADR-0008 |
-| `SES-20260912-1432` | that session's whole transcript, verbatim | part 04 §4 / #28 |
+| `SES-20260912-1432` | that session's whole transcript, verbatim, plus its context manifest | part 04 §4 / #28, #29 |
 | `SES-20260912-1432#T017` | that transcript turn's text alone | part 04 §4 / #28 |
 
 The bare anchor is accepted deliberately. `SearchResult` carries
@@ -302,11 +302,19 @@ reason a full-source `SRC-` read is (issue #16). An entry read resolves by
 its frontmatter `id` rather than by filename, so a renamed entry file still
 answers to the `SUB-x/y` it was created with.
 
-**A bare `SES-` read is bare too** — the whole `transcript.md`, verbatim
-(#28). **A `SES-...#T017` read returns just that turn's text** — the same
-"a paragraph read gives back the paragraph, not the record" split a `SRC-`
-paragraph reference makes, without the curated overlay a `SRC-` paragraph
-carries: a transcript turn has none to append.
+**A bare `SES-` read carries the whole `transcript.md`, verbatim** (#28),
+**plus its context manifest** (#29) — a second `---`-delimited block
+appended after the text, the same convention the curated overlay (#20)
+established for a `SRC-` paragraph. Built live from `events.jsonl`, not from
+a prior derivation of `context-manifest.json` having run: which records were
+loaded, which entries were resolved, which searches ran and which of their
+hits were also read, and a token count per item (ADR-0001) — never rendered
+by this tool as an author-facing figure, because the model reading its own
+session is not one of the surfaces part 14 §40 bans them from. **A
+`SES-...#T017` read returns just that turn's text** — the same "a paragraph
+read gives back the paragraph, not the record" split a `SRC-` paragraph
+reference makes, and carries no manifest: a turn cites what was said, not
+what was supplied.
 
 **`raw=True` serves the least-processed version of what it is given** — one
 parameter, two shapes, dispatched on whether the `SRC-` reference names a
@@ -732,9 +740,14 @@ alongside this, deliberately appends nothing — author reads are out of scope,
 below.) Each line carries the
 reference or query, the filters, the records served (by `SRC-` ID or
 paragraph anchor — the same identifier `read(ref)` accepts verbatim), a
-timestamp, and the session it belongs to. The file is opened in append mode
-and written one line at a time; nothing here ever reads it back to rewrite
-it.
+timestamp, and the session it belongs to. A `read` line also carries
+`tokens` (#29) — measured from the text actually served, at the moment it
+is served, rather than re-derived later from whatever the evidence looks
+like by then — the development instrument behind `poc-plan.md` §6 risk 1's
+budget-capping experiment (ADR-0001); a `search_text`/`search_global` line
+carries none, since a search serves references, not evidence text. The
+file is opened in append mode and written one line at a time; nothing here
+ever reads it back to rewrite it.
 
 **The path nests by year and month, matching part 04 §2's tree exactly:**
 `sessions/<YYYY>/<MM>/<session_id>/events.jsonl` — the directory #29's

@@ -44,11 +44,19 @@ conversation, and costs no metered spend - the distinction ADR-0007 draws
 between this and the kind of model call §12.1 forbids running unasked.
 
 See ``docs/tool-surface.md`` for the forced signatures and what is still open.
+
+A bare ``SES-`` read's context manifest (#29) carries a token count per item
+(ADR-0001), and this server renders it verbatim. That is not the ban part 14
+§40 amends (ADR-0001): §40 bans token figures from the **author-facing**
+surfaces - Source viewer, Section view, and the rest #61 will eventually add
+- never from this tool, which speaks to the model and to `trace()` (part 04
+§4.1), not to the author directly.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from mcp.server import MCPServer
@@ -146,6 +154,20 @@ def render_overlay(overlay: ReadOverlay) -> str:
     )
 
 
+def render_context_manifest(manifest: dict) -> str:
+    """Shape one session's context manifest (#29) into what the model sees.
+
+    Pretty-printed JSON, not prose: the manifest is a machine record - what
+    was loaded, searched and resolved, with a token count per item (#29's
+    development instrument, ADR-0001) - and re-rendering that as sentences
+    would either drop fields or invent a summary of its own. This tool is
+    not one of the author-facing surfaces part 14 §40 bans token figures
+    from (see the module docstring's `#61` note); it is the same kind of
+    reader `trace()` (part 04 §4.1) is meant to be.
+    """
+    return json.dumps(manifest, indent=2, sort_keys=False, ensure_ascii=False)
+
+
 def render(result: Read) -> str:
     """Shape one read into what the model sees.
 
@@ -185,6 +207,8 @@ def render(result: Read) -> str:
     follows, not an offset (#25).
     """
     record = result.record
+    if result.context_manifest is not None:
+        return result.text + "\n---\n" + render_context_manifest(result.context_manifest)
     if record is None or result.paragraph is None:
         return result.text
     header = [
@@ -224,6 +248,11 @@ def read(ref: str, raw: bool = False) -> str:
     degraded index (stale schema, or locked by a concurrent rebuild) drops
     only the overlay; the paragraph itself still comes back undecorated
     rather than failing.
+
+    A bare `SES-` reference also carries its context manifest (#29): the
+    records it loaded, the entries it resolved, and the searches it ran,
+    with which of a search's hits were also read - as a third
+    `---`-delimited block, appended the same way.
 
     `raw=True` serves the least-processed version of what it is given,
     refused for anything but a SRC- reference: for a bare record ID, the

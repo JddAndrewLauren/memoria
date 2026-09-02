@@ -430,3 +430,51 @@ def test_read_ref_names_a_session_with_no_transcript(tmp_path):
     repository = Repository(root=tmp_path)
     with pytest.raises(ReadError, match="no such session"):
         read(repository, "SES-20260912-1432")
+
+
+def test_read_ref_on_a_whole_session_surfaces_its_context_manifest(tmp_path):
+    """#29: a bare `SES-` read carries its manifest, built live from
+    `events.jsonl` - no prior `derive-context-manifest` run required."""
+    from memoria import ledger
+    from memoria.records import Read as _Read
+
+    jsonl_path = tmp_path / "claude-code-session.jsonl"
+    _write_jsonl(jsonl_path, _TWO_TURNS)
+    repository = Repository(root=tmp_path)
+    derive_session(repository, "SES-20260912-1432", jsonl_path)
+    ledger.append_read(
+        repository,
+        "SES-20260912-1432",
+        _Read(ref="SRC-000184", citation="SRC-000184", text="A blue heron flew over."),
+    )
+
+    result = read(repository, "SES-20260912-1432")
+
+    assert result.context_manifest is not None
+    assert result.context_manifest["records_loaded"] == [
+        {"ref": "SRC-000184", "tokens": ledger.estimate_tokens("A blue heron flew over.")}
+    ]
+
+
+def test_read_ref_on_one_turn_carries_no_context_manifest(tmp_path):
+    """A `#T` turn cites what was said, not what was supplied - the
+    manifest belongs to the bare session reference alone."""
+    jsonl_path = tmp_path / "claude-code-session.jsonl"
+    _write_jsonl(jsonl_path, _TWO_TURNS)
+    repository = Repository(root=tmp_path)
+    derive_session(repository, "SES-20260912-1432", jsonl_path)
+
+    result = read(repository, "SES-20260912-1432#T001")
+
+    assert result.context_manifest is None
+
+
+def test_read_ref_on_a_session_with_no_events_still_surfaces_an_empty_manifest(tmp_path):
+    jsonl_path = tmp_path / "claude-code-session.jsonl"
+    _write_jsonl(jsonl_path, _TWO_TURNS)
+    repository = Repository(root=tmp_path)
+    derive_session(repository, "SES-20260912-1432", jsonl_path)
+
+    result = read(repository, "SES-20260912-1432")
+
+    assert result.context_manifest["records_loaded"] == []
