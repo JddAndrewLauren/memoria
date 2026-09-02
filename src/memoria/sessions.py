@@ -42,6 +42,7 @@ case this module is built for.
 
 from __future__ import annotations
 
+import html
 import json
 import re
 import subprocess
@@ -62,14 +63,21 @@ TRANSCRIPT_FILENAME = "transcript.md"
 # module has no use for.
 _ROLE_BY_TYPE = {"user": "Author", "assistant": "Assistant"}
 
-# The anchor tag is matched as part of the heading, not on its own: it sits
-# on the line *before* the next turn's heading, and a reader splitting on
-# the heading alone would leak that next-turn anchor into the end of this
-# turn's captured body.
+# Structure is re-read from the rendered markdown, so structure and turn
+# text must not be able to pass for each other. Every structural line - the
+# anchor a heading is matched together with, the ledger's ``Served:`` line -
+# opens with ``<``, and a turn's text is rendered with ``<`` (and ``&``, so
+# the escape reverses exactly) as entities. A message whose own text carries
+# a heading or a ``Served:`` line therefore cannot forge a turn boundary or
+# lose its last paragraph to the ledger's stripping: what a ``#T`` citation
+# resolves to is what that role actually said. The anchor tag is matched as
+# part of the heading rather than on its own because it sits on the line
+# *before* the next turn's heading, and a reader splitting on the heading
+# alone would leak that next-turn anchor into the end of this turn's body.
 _TURN_HEADING = re.compile(
     r'<a id="t\d+"></a>\n\n## T(?P<n>\d+) — (?P<role>Author|Assistant)'
 )
-_TRAILING_SERVED_LINE = re.compile(r"\n\nServed: .*\Z")
+_STRUCTURE_AFTER_BODY = re.compile(r"\n\n<")
 
 
 class SessionError(Exception):
@@ -131,9 +139,10 @@ def read_session(repository: Repository, session_id: str, turn: int | None = Non
 
     A bare reference returns ``transcript.md`` exactly as it is on disk -
     the same full-source contract ``memoria.records.read`` gives a chapter
-    or a section. A turn reference returns just what was said in it: the
-    text between its heading and the next one, with the trailing ``Served:``
-    line (provenance the ledger added, not part of the turn) stripped.
+    or a section. A turn reference returns just what was said in it,
+    verbatim: the text between its heading and the first structural line
+    after it (the ledger's ``Served:`` line, provenance rather than speech,
+    or the next turn's anchor), with the rendering's entities undone.
     """
     path = transcript_path(repository, session_id)
     if not path.is_file():
@@ -149,7 +158,10 @@ def read_session(repository: Repository, session_id: str, turn: int | None = Non
         start = match.end()
         stop = headings[position + 1].start() if position + 1 < len(headings) else len(text)
         body = text[start:stop].strip("\n")
-        return _TRAILING_SERVED_LINE.sub("", body)
+        structure = _STRUCTURE_AFTER_BODY.search(body)
+        if structure is not None:
+            body = body[: structure.start()]
+        return html.unescape(body)
     raise SessionError(
         f"{session_id} has {len(headings)} turn(s); there is no T{turn:03d}"
     )
@@ -214,11 +226,7 @@ def _load_entries(jsonl_path: Path) -> dict[str, dict]:
     entries: dict[str, dict] = {}
     if not jsonl_path.is_file():
         raise SessionError(f"no such session transcript source: {jsonl_path}")
-    for line in jsonl_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        entry = json.loads(line)
+    for entry in _load_jsonl(jsonl_path):
         if entry.get("isSidechain"):
             continue
         uuid = entry.get("uuid")
@@ -226,6 +234,24 @@ def _load_entries(jsonl_path: Path) -> dict[str, dict]:
             continue
         entries[uuid] = entry
     return entries
+
+
+def _load_jsonl(path: Path) -> list[dict]:
+    """Every non-blank line of ``path`` parsed as JSON, or ``SessionError``
+    naming the file and line that would not parse - a JSONL caught mid-append
+    with a truncated last line, say. One error type crosses this module's
+    boundary (the convention ``memoria.records.read`` states), so a caller
+    that catches ``SessionError`` never sees ``json.JSONDecodeError``."""
+    parsed = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            parsed.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            raise SessionError(f"{path}: line {number} is not valid JSON ({exc})") from exc
+    return parsed
 
 
 def _build_turns(entries: dict[str, dict]) -> list[Turn]:
@@ -309,12 +335,7 @@ def _load_events(repository: Repository, session_id: str) -> list[dict]:
     path = session_dir(repository, session_id) / "events.jsonl"
     if not path.is_file():
         return []
-    events = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            events.append(json.loads(line))
-    return events
+    return _load_jsonl(path)
 
 
 def _served_by_turn(events: list[dict], turns: list[Turn]) -> dict[int, list[str]]:
@@ -360,15 +381,28 @@ def _parse_timestamp(value: str) -> datetime:
 def _render_transcript(turns: list[Turn], served_by_turn: dict[int, list[str]]) -> str:
     """One ``<a id="t017"></a>`` / ``## T017 — Role`` block per turn (part 04
     §4's own markdown-link example cites the lower-case anchor form), each
-    followed by what it served, when it served anything."""
+    followed by what it served, when it served anything.
+
+    The turn's text has ``&`` and ``<`` rendered as entities (see
+    ``_TURN_HEADING``): markdown shows them as typed, and ``read_session``
+    reverses them, but no line of turn text can open with the ``<`` every
+    structural line does."""
     blocks = []
     for turn in turns:
         heading = f'<a id="t{turn.number:03d}"></a>\n\n## T{turn.number:03d} — {turn.role}'
-        blocks.append(f"{heading}\n\n{turn.text}")
+        blocks.append(f"{heading}\n\n{_escape_turn_text(turn.text)}")
         served = served_by_turn.get(turn.number)
         if served:
-            blocks.append(f"Served: {', '.join(served)}")
+            blocks.append(f"<small>Served: {', '.join(served)}</small>")
     return "\n\n".join(blocks) + "\n"
+
+
+def _escape_turn_text(text: str) -> str:
+    """``&`` then ``<`` as entities - exactly the pair ``html.unescape``
+    reverses without touching anything else, and the least alteration that
+    keeps ``<`` out of the rendered text. ``>`` stays: a blockquote the
+    author typed still renders as one."""
+    return text.replace("&", "&amp;").replace("<", "&lt;")
 
 
 def _current_revision(repository: Repository) -> str | None:
