@@ -151,14 +151,17 @@ From `poc-plan.md` §7, and it **may not be weakened**:
 > summarized-only), decorated with the curated overlay, a raw full-source read
 > available, and every read ledgered in `events.jsonl`.
 
-The reason is not purity. Evidence lives outside the session's working repo
-and direct reads are routed back to the tools by a hook
-(`.claude/hooks/route-evidence-reads.sh`, `poc-plan.md` §3). That hook is a
-**router, not a wall** — Bash can still reach the files. It only works while
-the tool returns *more* than a raw read does. The moment reading through the
-tool is worse than `cat`, the router becomes an obstacle and people go around
-it, and the ledger that makes the context manifest a record rather than a
-request stops being complete.
+The reason is not purity. Evidence lives outside the session's working repo,
+and this repo's own `sources/normalized/` records and `.memoria/` index are
+what a session actually reads — direct reads of either are routed back to the
+tools by a hook (`.claude/hooks/route-evidence-reads.sh`, `poc-plan.md` §3),
+registered for Read, Grep, Glob and Bash. That hook is a **router, not a
+wall** — a rewritten Bash command can still reach the files, since the hook
+matches Bash by exact-string containment rather than parsing shell. It only
+works while the tool returns *more* than a raw read does. The moment reading
+through the tool is worse than `cat`, the router becomes an obstacle and
+people go around it, and the ledger that makes the context manifest a record
+rather than a request stops being complete.
 
 So: the verbatim text is served unmodified and contiguously, and the
 full-source read may never be removed or degraded.
