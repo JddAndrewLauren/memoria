@@ -128,6 +128,19 @@ forbids.
   error requires importing it) and #24's "an un-normalized checkout renders an honest
   empty state rather than an error".
 
+  **And the value names which state it is in** (#157). Removing the exception was only
+  half of this consequence, and for a while it was the only half that landed: `read_all`,
+  `search` and `load_all_subjects` each returned `[]` for missing and for empty alike, so
+  a caller could not tell an unbuilt corpus from an empty one and the UI guessed — it told
+  every author with no sources to run `memoria normalize`, including the ones who already
+  had. The distinction is answered by one predicate per facet, each sitting beside the read
+  that returns `[]` and testing the same condition that read already tests:
+  `records.is_normalized`, `index.is_built`, `subjects.is_seeded`. They are additive — the
+  reads still return `[]` and still raise nothing — and public, so the CLI, the MCP server
+  and the web adapter each get the fact without stat-ing a path they should not know. It
+  reaches a client in-band, as `is_built` on the three list responses, rather than through
+  a status route whose answer could drift from the reads it describes.
+
 - **`NORMALIZED_RELATIVE_PATH` leaves `validate.py`.** The constant a reader needs is
   currently owned by the module least related to reading, and `index.py` and `cli.py` both
   import it from there.

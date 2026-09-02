@@ -609,6 +609,33 @@ def load_all_subjects(repository: Repository) -> list[Subject]:
     return sorted(subjects, key=lambda subject: subject.id)
 
 
+def is_seeded(repository: Repository) -> bool:
+    """Whether ``memoria seed-subjects`` has run here (#157).
+
+    The same condition ``load_all_subjects`` and ``load_all_entries`` both
+    return empty on - the ``subjects/`` directory's existence. Without it a
+    caller holding an empty subject list cannot tell an unseeded repository
+    from a seeded one whose subjects were all deleted, and has to guess which
+    to tell the author (ADR-0004).
+
+    **The directory, not its contents.** A ``subjects/`` that exists holding
+    no ``_subject.md`` reads as seeded-and-empty, which is a lie when seeding
+    was interrupted part-way. Deliberate: the stricter test - does any
+    subject prompt exist - is definitionally ``bool(load_all_subjects(...))``
+    and so carries nothing the caller's own list did not already carry, which
+    is exactly the third state this predicate exists to add. It would also
+    make sources and subjects answer differently for structurally identical
+    situations, since ``sources/normalized/`` holding no records is the state
+    ``records.is_normalized`` reports as normalized-and-empty. The narrow
+    case stays narrow: ``write_builtin_subjects`` lands each prompt with its
+    directory, and git tracks no empty directory, so a fresh clone never has
+    this shape.
+
+    Additive: both loaders behave exactly as before.
+    """
+    return (repository.root / SUBJECTS_RELATIVE_PATH).is_dir()
+
+
 def load_all_entries(repository: Repository) -> dict[str, Entry]:
     """Every entry in the repository, keyed by ``SUB-x/y``.
 
