@@ -129,6 +129,29 @@ def test_normalize_converts_a_plain_text_unit(tmp_path):
     assert (repo_root / "sources" / "normalized" / "SRC-000001.md").is_file()
 
 
+def test_normalize_lists_failed_units_on_stderr_and_still_exits_zero(tmp_path):
+    """One corrupt unit is reported, not fatal (#106): the run converts the
+    rest, names the failed unit with its reason on stderr, and exits 0."""
+    evidence_root = tmp_path / "evidence"
+    raw = evidence_root / "raw"
+    raw.mkdir(parents=True)
+    (raw / "a.pdf").write_text("not a pdf")
+    (raw / "b.txt").write_text("Fine.")
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "pyproject.toml").write_text("")
+    env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=str(evidence_root))
+
+    result = run_cli("normalize", env=env, cwd=repo_root)
+
+    assert result.returncode == 0, result.stderr
+    assert "converted 1" in result.stdout
+    assert "1 unit(s) failed to convert" in result.stderr
+    assert "SRC-000001" in result.stderr
+    assert (repo_root / "sources" / "normalized" / "SRC-000002.md").is_file()
+    assert not (repo_root / "sources" / "normalized" / "SRC-000001.md").exists()
+
+
 def test_normalize_refuses_clearly_when_no_corpus_is_configured(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()

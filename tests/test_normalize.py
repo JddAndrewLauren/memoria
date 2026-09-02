@@ -728,6 +728,28 @@ def test_the_enron_fixture_converts_with_its_headers_and_without_the_footer(tmp_
     assert "*****" not in body
 
 
+def test_a_body_carrying_the_footer_twice_loses_both(tmp_path):
+    """A forwarded message carries the producer's footer once per hop. The
+    cut is a global substitution, so neither copy survives as a paragraph."""
+    from pathlib import Path as _Path
+
+    raw = (_Path(__file__).parent / "fixtures" / "enron" / "plain.eml").read_bytes()
+    start = raw.index(b"***********")
+    footer = raw[start:]
+    doubled = raw[:start] + b"Forwarded below.\r\n\r\n" + footer + b"\r\n" + footer
+    evidence_root = tmp_path / "evidence"
+    _write_raw_binary_file(evidence_root, "twice.eml", doubled)
+    repository = Repository(root=tmp_path / "repo")
+
+    normalize(repository, evidence_root)
+
+    (record,) = [r for r in read_all(repository) if r.source_type == "email"]
+    body = "\n".join(record.paragraphs)
+    assert "Forwarded below." in body
+    assert "EDRM Enron Email Data Set" not in body
+    assert "*****" not in body
+
+
 def test_a_second_run_does_not_duplicate_attachment_entries(tmp_path):
     """Every re-run used to append a second copy of every attachment entry
     to the manifest (#108): 1,217 attachments, 3,636 entries after three
