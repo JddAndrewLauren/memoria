@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+/* Design tokens extracted from docs/design/memoria-desktop.dc.html, §19.10
+   of docs/plan/19-desktop-ui.md - the canvas is a reference, not a source
+   (docs/adr/0002-ui-is-a-react-client.md): components are built against
+   these tokens, never against the canvas's 360 inline styles. The palette
+   below is already the deduped set §19.10 records (44 raw colours in the
+   canvas, 20 of which appear three times or fewer); nothing here invents a
+   colour the canvas doesn't carry. */
+@theme {
+  --color-page: #f6f2ea;
+  --color-panel: #efe9dd;
+  --color-card: #fdfbf7;
+  --color-rail: #f4f0e7;
+  --color-hover: #e6decd;
+  --color-border: #ddd3c0;
+  --color-border-soft: #e2d9c6;
+  --color-border-faint: #ece4d4;
+  --color-border-strong: #cdbfa4;
+
+  --color-ink: #241f18;
+  --color-body: #33291d;
+  --color-secondary: #6b6152;
+  --color-muted: #8a7f6d;
+  --color-faint: #a99d88;
+
+  /* The three layer colours are load-bearing information design (§19.10):
+     maroon/blue/green identify MANUSCRIPT/SUBJECTS/SOURCES the same way
+     everywhere they appear - sidebar, search groups, badges. */
+  --color-manuscript: #7a3327;
+  --color-subjects: #3d5a78;
+  --color-sources: #4c5c3c;
+  --color-sources-tint: #e4ead9;
+  --color-amber: #a8762a;
+  --color-amber-tint: #f3e6c8;
+  --color-amber-tint-soft: #fbf4e4;
+
+  /* Newsreader and IBM Plex Mono are the design's faces (§19.10); neither
+     is bundled here, so these are fallback-first stacks that approximate
+     them rather than a web-font fetch this local-only app doesn't need. */
+  --font-serif: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  --radius-chip: 6px;
+  --radius-card: 10px;
+}
+
+/* prefers-color-scheme is intentionally not themed here: the design is one
+   fixed sand/paper reading environment (§19.10), not a light/dark pair. */
+body {
+  background: var(--color-page);
+  color: var(--color-body);
+  font-family: var(--font-sans);
+  font-size: 14px;
+}

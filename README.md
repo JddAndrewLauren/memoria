@@ -22,9 +22,22 @@ Practically, this means:
 - The test suite runs with no corpus present and no environment set. If a test
   ever needs one, that is a bug in the test.
 
+## Running the app
+
+```
+scripts/run.sh
+```
+
+The one command that installs, builds and runs everything, from a clean
+checkout: a Python venv for the core and the FastAPI app, `npm install` and
+a production build for the React client at `ui/`, then a single `uvicorn`
+process serving the JSON API under `/api` and the built client at `/` — see
+*The FastAPI app* and *The web client* below. Safe to re-run: an existing
+`.venv` or `ui/node_modules` is left alone. Stop it with Ctrl-C.
+
 ## Installing
 
-From a clean checkout, in a virtualenv:
+The two toolchains `scripts/run.sh` sets up, run by hand:
 
 ```
 python3 -m venv .venv
@@ -45,14 +58,28 @@ is deliberately not in any extra: if `[dev]` pulled it, the suite would only
 ever exercise Leiden and never the networkx fallback most installs actually
 run. Install it by hand for Leiden.
 
+```
+cd ui && npm install
+```
+
 ## Running the tests
+
+```
+scripts/test.sh
+```
+
+The one command that runs both test suites (`docs/adr/0002-ui-is-a-react-client.md`'s
+"the repo's 'one command' property is gone" — this and `scripts/run.sh` are
+what replace it): `pytest` for the core and its adapters, then `vitest` for
+the React client at `ui/`. Assumes both toolchains are already installed —
+see *Installing* above, or run `scripts/run.sh` once, which installs both.
 
 ```
 .venv/bin/pytest tests/ -q
 ```
 
-This is the one command every issue uses to run the suite. It needs no evidence
-corpus and no environment variables.
+This is the one command every issue uses to run the Python suite on its own.
+It needs no evidence corpus and no environment variables.
 
 ### Evidence corpus location
 
@@ -113,15 +140,24 @@ directly.
 .venv/bin/python -m uvicorn memoria.web.app:create_app --factory --reload
 ```
 
-Four reads exist today: list sources (`GET /api/sources`, filterable by
+Six reads exist today: list sources (`GET /api/sources`, filterable by
 `source_type`, `date_confidence` and `contemporaneous`, paginated), read one
 source (`GET /api/sources/{id}`), the raw un-normalized file behind one
-(`GET /api/sources/{id}/raw`), and search (`GET /api/search`, wrapping
-`memoria.index.search`). See `docs/tool-surface.md` for what each filter
-means and `src/memoria/web/schemas.py` for the response shapes.
+(`GET /api/sources/{id}/raw`), search (`GET /api/search`, wrapping
+`memoria.index.search`), list subjects with their entry counts
+(`GET /api/subjects`, #24), and one subject's entries
+(`GET /api/subjects/{id}/entries`, #24). See `docs/tool-surface.md` for what
+each filter means and `src/memoria/web/schemas.py` for the response shapes.
 
 No auth, HTTPS or remote-access code exists — localhost, one machine
 (`docs/poc-plan.md` §5).
+
+When `src/memoria/web/static/` exists (`npm run build` has run - see *The web client*
+below), `create_app` also mounts it: `/assets/*` serves the built JS/CSS,
+and every other path that is not `/api/*` falls back to `index.html` so
+React Router's client-side routes resolve. Nothing under `/api` is affected
+either way, and an app run with no build present (a fresh `pytest` run, for
+instance) serves the API alone.
 
 ### Regenerating the TypeScript client types
 
@@ -135,6 +171,36 @@ result — `tests/test_web_types.py` fails the suite when the committed file
 goes stale against the schema, which is the mitigation the ADR names for a
 two-language stack in a repo with no CI: a backend field rename becomes a
 compile error in `ui/`, not a runtime surprise nobody sees.
+
+## The web client (`ui/`)
+
+React + Vite + TypeScript, client-rendered over the JSON API above
+(`docs/adr/0002-ui-is-a-react-client.md`, #24). The shell carries three
+trees — `MANUSCRIPT` (empty until M5), `SUBJECTS` and `SOURCES` — plus
+cross-layer search. Every read goes through `ui/src/api/client.ts`, the
+client's only path to the API; no view opens SQLite or reads the evidence
+repository directly, and a dependency boundary rule
+(`tests/test_ui_dependency_boundary.py`) fails the Python suite if `ui/`
+ever gains a package capable of reaching a model API.
+
+Styling is Tailwind v4, tokens declared in `ui/src/index.css`'s `@theme`
+block and extracted from `docs/design/memoria-desktop.dc.html` (the canvas
+is a reference, never a source — components are built against the tokens,
+not the canvas's inline styles). The manuscript and source reading surfaces
+are typographic work and get a small hand-written `ui/src/prose.css`
+instead: Tailwind is for chrome, trees, cards and badges.
+
+```
+cd ui
+npm run dev        # a Vite dev server, proxying /api to a uvicorn instance on :8000
+npm run build       # production build to src/memoria/web/static/, gitignored into the package
+npm run typecheck   # tsc --noEmit
+npm test            # vitest run
+```
+
+`scripts/run.sh` and `scripts/test.sh` (see *Running the app* / *Running the
+tests* above) are the one-command versions of `build`+run and `pytest`+`npm
+test` respectively.
 
 ## CLI
 

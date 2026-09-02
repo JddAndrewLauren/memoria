@@ -40,6 +40,26 @@ class Paragraph(BaseModel):
     text: str
 
 
+class EditorialRecordOut(BaseModel):
+    """One piece of editorial apparatus, linked to the paragraph it
+    annotates (#25's "what the data actually is").
+
+    ``editorial_type`` is one of ``footnote``, ``bracketed-span``,
+    ``interpolation`` or ``introduction``; a consumer renders whatever value
+    is actually present rather than assuming that list is closed, the same
+    posture ``SourceSummary.source_type`` already takes. ``retrospective``
+    marks apparatus added after the fact, distinct from the evidence it
+    annotates. ``linked_record_id``/``linked_anchor`` name the paragraph it
+    attaches to - never inline in that paragraph's own text (§6).
+    """
+
+    editorial_type: str
+    retrospective: bool
+    linked_record_id: str
+    linked_anchor: str
+    text: str
+
+
 class SourceDetail(SourceSummary):
     """A source read in full: frontmatter, verbatim paragraphs, apparatus.
 
@@ -53,7 +73,7 @@ class SourceDetail(SourceSummary):
     """
 
     paragraphs: list[Paragraph]
-    apparatus: list[SourceSummary] = []
+    apparatus: list[EditorialRecordOut] = []
 
 
 class SourceListResponse(BaseModel):
@@ -74,6 +94,92 @@ class RawSourceResponse(BaseModel):
 
     text: str
     original_locator: str
+
+
+class LocalityOut(BaseModel):
+    """Whether this connection's client is on the same machine as the
+    server.
+
+    "Reveal in editor" (#65)'s one locality fact - general on purpose, per
+    ``docs/adr/0002-ui-is-a-react-client.md``'s "no other surface may
+    acquire a client-locality condition" of its own: any future
+    locality-gated action reads this same field rather than deriving one.
+    """
+
+    is_local: bool
+
+
+class RevealSourceResponse(BaseModel):
+    """Confirms "Reveal in editor" (#65) launched.
+
+    Carries no other state - the editor or file manager runs on the host,
+    outside this response.
+    """
+
+    opened: bool
+
+
+class ReadOverlayOut(BaseModel):
+    """The curated overlay a decorated paragraph read carries (#20):
+    mirrors ``memoria.index.ReadOverlay`` field for field. ``citing_settlements``
+    is always empty in this build - settlements have no durable storage yet
+    (#20's own docstring) - and stays on the shape rather than being dropped,
+    the same forward-compatibility call ``ReadOverlay`` itself makes.
+    """
+
+    entry_links: list[str]
+    exclusions: list[str]
+    citing_settlements: list[str]
+
+
+class CitationOut(BaseModel):
+    """One resolved reference - the slide-over citation panel's read (§19.9).
+
+    The single generic read the panel uses in both directions: a ``SRC-``
+    paragraph anchor serves the cited text, its record and its backlinks
+    (``overlay``); a ``SUB-x/y`` entry reference serves the entry's own text,
+    with ``record``/``paragraph``/``overlay`` all ``None`` - a backlink is
+    clickable into the same panel, and the panel does not need a second shape
+    to render it (#25's "traverse in both directions"). Wraps
+    ``memoria.records.read`` exactly - the same core function the MCP tool
+    surface calls - so this is the one generic reference read the viewer has,
+    never a second one duplicating ``/sources/{id}``.
+    """
+
+    ref: str
+    citation: str
+    text: str
+    record: SourceSummary | None = None
+    paragraph: int | None = None
+    overlay: ReadOverlayOut | None = None
+
+
+class SubjectSummary(BaseModel):
+    """One subject - the `SUBJECTS` tree's top level (#24).
+
+    ``entry_count`` is computed from the entries actually on disk, never
+    hardcoded (#24's acceptance criteria) - the same discipline
+    ``SourceListResponse.total`` keeps for sources.
+    """
+
+    id: str
+    entry_count: int
+
+
+class SubjectListResponse(BaseModel):
+    items: list[SubjectSummary]
+
+
+class EntrySummary(BaseModel):
+    """One entry under a subject - CONTEXT.md's vocabulary, not "item" or
+    "record" (#24's acceptance criteria)."""
+
+    id: str
+    match_terms: list[str]
+
+
+class EntryListResponse(BaseModel):
+    items: list[EntrySummary]
 
 
 class SearchResultOut(BaseModel):
