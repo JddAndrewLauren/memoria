@@ -24,6 +24,7 @@ overwrites a file the author has already touched.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -472,3 +473,84 @@ def write_builtin_subjects(repository: Repository) -> list[Path]:
         path.write_text(subject_to_markdown(subject), encoding="utf-8")
         written.append(path)
     return written
+
+
+# --- loading everything, and naming a new entry ------------------------------
+
+
+def load_all_subjects(repository: Repository) -> list[Subject]:
+    """Every subject in the repository, by id.
+
+    The extraction needs all of them at once - it hands their prompts to the
+    model and hashes them into its memo key - and until now nothing did, so
+    every caller walked ``subjects/`` itself. A subject directory whose
+    ``_subject.md`` is missing is skipped; one that fails to parse raises,
+    because a half-written subject silently dropped out of the digest would
+    change every memo key without saying so.
+    """
+    root = repository.root / SUBJECTS_RELATIVE_PATH
+    if not root.is_dir():
+        return []
+    subjects = []
+    for directory in sorted(root.iterdir()):
+        prompt = directory / "_subject.md"
+        if not prompt.is_file():
+            continue
+        subjects.append(
+            parse_subject(prompt.read_text(encoding="utf-8"), source=str(prompt))
+        )
+    return sorted(subjects, key=lambda subject: subject.id)
+
+
+def load_all_entries(repository: Repository) -> dict[str, Entry]:
+    """Every entry in the repository, keyed by ``SUB-x/y``.
+
+    Unlike ``load_all_subjects`` a file that fails to parse is **skipped**,
+    matching ``find_entry_path``: this is a sweep across every entry the
+    author has, and one malformed match term must not stop the extraction
+    placing anything against the rest.
+    """
+    root = repository.root / SUBJECTS_RELATIVE_PATH
+    if not root.is_dir():
+        return {}
+    entries: dict[str, Entry] = {}
+    for directory in sorted(root.iterdir()):
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.glob("*.md")):
+            if path.name == "_subject.md":
+                continue
+            try:
+                entry = parse_entry(path.read_text(encoding="utf-8"), source=str(path))
+            except SubjectError:
+                continue
+            entries[entry.id] = entry
+    return entries
+
+
+def entry_slug_for(label: str) -> str:
+    """The entry slug a label promotes to.
+
+    This module owns the ``SUB-<subject>/<entry>`` id format, so it owns the
+    rule for making one - promotion (#17) is the first caller, and inventing
+    a second slugifier next to ``_SLUG`` would let the two drift.
+
+    Raises rather than returning something unusable when a label has no
+    slug in it at all: a candidate labelled only with punctuation is a
+    finding to look at, not an entry to name ``-``.
+    """
+    normalized = unicodedata.normalize("NFKD", label)
+    ascii_only = "".join(
+        character
+        for character in normalized
+        if not unicodedata.combining(character)
+    )
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_only.casefold()).strip("-")
+    # A slug must start with a letter (`_SLUG`), so a label that begins with a
+    # digit - a year under Timeline, most obviously - is prefixed rather than
+    # rejected.
+    if slug and not slug[0].isalpha():
+        slug = f"e-{slug}"
+    if not slug or not re.fullmatch(_SLUG, slug):
+        raise SubjectError(f"no entry slug can be made from label: {label!r}")
+    return slug

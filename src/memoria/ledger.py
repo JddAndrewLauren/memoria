@@ -167,3 +167,72 @@ def _append(repository: Repository, session_id: str, event: dict) -> None:
     }
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(line) + "\n")
+
+
+def append_extraction_brief(
+    repository: Repository, session_id: str, subject_ids: list[str]
+) -> None:
+    """Ledger one served extraction brief.
+
+    It serves every subject prompt verbatim, which is the same category of
+    thing as ``read("SUB-people")`` - and that is ledgered, so this is too.
+    ``served`` names the subject references for the same reason a search line
+    names anchors: the ledger entry and the citation a reader follows are the
+    same string.
+    """
+    _append(
+        repository,
+        session_id,
+        {"tool": "extraction_brief", "served": subject_ids},
+    )
+
+
+def append_extraction_batch(
+    repository: Repository, session_id: str, anchors: list[str]
+) -> None:
+    """Ledger one served batch of paragraphs for extraction.
+
+    Across a whole pass this is the largest delivery of evidence into a
+    model's context anywhere in the system - every paragraph of the archive,
+    once. Leaving it out would make the supplied-context account (ADR-0001)
+    confidently wrong about the one session that read everything, which is
+    the failure that account exists to prevent.
+
+    A memo hit is never ledgered, and that falls out rather than being
+    arranged: the batch only ever carries paragraphs with no cached reading,
+    so a re-run over an already-extracted corpus appends nothing. The ledger
+    records what entered a context, not what the pass considered.
+    """
+    _append(
+        repository,
+        session_id,
+        {"tool": "extraction_next_paragraphs", "served": anchors},
+    )
+
+
+def append_extraction_summary_task(
+    repository: Repository,
+    session_id: str,
+    cluster_id: str,
+    anchors: list[str],
+) -> None:
+    """Ledger one served cluster-summary task.
+
+    ``served`` names the member anchors, which is empty for a parent cluster:
+    a parent is served its children's summaries and no evidence at all, and
+    the ledger should say so rather than implying it saw paragraphs.
+
+    The cluster id rides in its own field rather than in ``served``, because
+    ``served`` names things ``read(ref)`` accepts and a cluster id is
+    deliberately not one - cluster identity does not survive re-clustering
+    (ADR-0005 decision 6), so it is not a reference anything may keep.
+    """
+    _append(
+        repository,
+        session_id,
+        {
+            "tool": "extraction_next_summary",
+            "cluster": cluster_id,
+            "served": anchors,
+        },
+    )
