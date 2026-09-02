@@ -1,7 +1,7 @@
 import hashlib
 
 
-from memoria.manifest import format_id
+from memoria.manifest import format_id, load_manifest, save_manifest
 from memoria.subjects import Entry, Subject, entry_to_markdown, subject_to_markdown
 from memoria.validate import validate
 
@@ -232,6 +232,69 @@ def test_validate_fails_when_a_records_raw_sha256_is_stale(tmp_path):
     errors = validate(evidence_root, repo_root)
 
     assert any("raw_sha256 mismatch" in e and "SRC-000001.md" in e for e in errors)
+
+
+# --- converter pinning (#79, part 05 §5.4) ---------------------------------
+
+
+def _record_converter_pin(evidence_root, suffix, version):
+    manifest_path = evidence_root / "raw" / "manifest.yaml"
+    entries = load_manifest(manifest_path)
+    save_manifest(manifest_path, entries, converters={suffix: version})
+
+
+def test_validate_fails_when_the_manifest_pin_differs_from_pyprojects(tmp_path):
+    evidence_root = _make_corpus(
+        tmp_path, {"raw/vol-01/text.txt": "hello evidence"}
+    )
+    _write_manifest(evidence_root, ["raw/vol-01/text.txt"])
+    _record_converter_pin(evidence_root, ".docx", "markitdown 0.1.5")
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "pyproject.toml").write_text(
+        'convert = [\n    "markitdown[docx]==0.1.7",\n    "pdfplumber==0.11.10",\n]\n'
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert len(errors) == 1
+    assert "markitdown 0.1.5" in errors[0]
+    assert "markitdown 0.1.7" in errors[0]
+
+
+def test_validate_passes_when_the_manifest_pin_matches_pyprojects(tmp_path):
+    evidence_root = _make_corpus(
+        tmp_path, {"raw/vol-01/text.txt": "hello evidence"}
+    )
+    _write_manifest(evidence_root, ["raw/vol-01/text.txt"])
+    _record_converter_pin(evidence_root, ".docx", "markitdown 0.1.7")
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "pyproject.toml").write_text(
+        'convert = [\n    "markitdown[docx]==0.1.7",\n    "pdfplumber==0.11.10",\n]\n'
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert errors == []
+
+
+def test_validate_ignores_a_suffix_the_manifest_has_never_recorded_a_pin_for(
+    tmp_path,
+):
+    evidence_root = _make_corpus(
+        tmp_path, {"raw/vol-01/text.txt": "hello evidence"}
+    )
+    _write_manifest(evidence_root, ["raw/vol-01/text.txt"])
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "pyproject.toml").write_text(
+        'convert = [\n    "markitdown[docx]==0.1.7",\n    "pdfplumber==0.11.10",\n]\n'
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert errors == []
 
 
 # --- subject prompts: `memoria validate` fails one missing any of the four -

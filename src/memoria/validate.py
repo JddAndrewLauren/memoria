@@ -8,12 +8,29 @@ import hashlib
 import re
 from pathlib import Path
 
-from memoria.manifest import DEFAULT_MANIFEST_RELATIVE_PATH, check_ledger, load_manifest
+from memoria.manifest import (
+    DEFAULT_MANIFEST_RELATIVE_PATH,
+    check_ledger,
+    load_converter_pins,
+    load_manifest,
+)
 from memoria.records import NORMALIZED_RELATIVE_PATH
 from memoria.subjects import SUBJECTS_RELATIVE_PATH, SubjectError, parse_entry, parse_subject
 
 _SRC_ID_RE = re.compile(r"SRC-\d{6}", re.IGNORECASE)
 _RAW_SHA256_RE = re.compile(r"^raw_sha256:\s*(\S+)\s*$", re.MULTILINE)
+
+# The `convert` extra's own array in pyproject.toml (#79, part 05 §5.4), and
+# an exact `name[extras]==version` pin within it. Read with a small regex
+# rather than a toml parser: pyproject.toml has no other dependency this
+# repo pins exactly, and adding a parser dependency (`tomllib` needs Python
+# 3.11, which `requires-python = ">=3.10"` does not guarantee) for one array
+# in a file this repo already owns is not worth it. Closes on a `]` at the
+# start of its own line, not the first `]` at all - a dependency's own
+# extras marker (`markitdown[docx]`) closes with one too, before the
+# array's real end.
+_CONVERT_EXTRA_RE = re.compile(r"convert\s*=\s*\[(.*?)^\]", re.DOTALL | re.MULTILINE)
+_PIN_RE = re.compile(r'"([A-Za-z0-9_.-]+)(?:\[[^\]]*\])?==([^"]+)"')
 
 
 def validate(
@@ -55,6 +72,15 @@ def validate(
     for entry in entries:
         if entry.deleted:
             continue
+        if "email_message_index" in entry.extra:
+            # A message inside an email export (#78, part 05 §5.1) shares
+            # its `path` with the export file - that is what lets `sync`'s
+            # per-entry file check keep resolving it - but its `sha256` is
+            # the one message's own bytes, not the whole file's, so there is
+            # nothing at `path` to hash a whole-file match against here.
+            # The export's own entry (present alongside these) is what
+            # covers presence/hash of the file itself.
+            continue
         # path: entries are relative to the evidence repo root, not the
         # manifest's own directory.
         file_path = evidence_root / entry.path
@@ -69,7 +95,49 @@ def validate(
     errors.extend(_validate_normalized_src_ids(repo_root))
     errors.extend(_validate_raw_sha256_matches_manifest(repo_root, entries))
     errors.extend(_validate_subjects(repo_root))
+    errors.extend(_validate_converter_pins(repo_root, manifest_path))
 
+    return errors
+
+
+def _pinned_converter_versions(repo_root: Path) -> dict[str, str]:
+    """The exact converter versions pyproject.toml's ``convert`` extra pins,
+    as ``{package: "package version"}`` - the same ``"name version"`` form a
+    record's own ``converter`` field and ``raw/manifest.yaml``'s
+    ``converters`` mapping use. Empty if pyproject.toml is missing, has no
+    ``convert`` extra, or pins nothing with ``==``."""
+    pyproject_path = repo_root / "pyproject.toml"
+    if not pyproject_path.is_file():
+        return {}
+    match = _CONVERT_EXTRA_RE.search(pyproject_path.read_text(encoding="utf-8"))
+    if match is None:
+        return {}
+    return {
+        name: f"{name} {version}"
+        for name, version in _PIN_RE.findall(match.group(1))
+    }
+
+
+def _validate_converter_pins(repo_root: Path, manifest_path: Path) -> list[str]:
+    """A manifest that recorded a converter version pyproject.toml no
+    longer pins (#79, part 05 §5.4) - a pin bumped without the
+    ``memoria normalize`` run that would have reconverted against it, or a
+    manifest edited by hand. A suffix the manifest has never recorded a
+    converter for is not an error: nothing has converted it yet."""
+    manifest_converters = load_converter_pins(manifest_path)
+    if not manifest_converters:
+        return []
+    pinned = _pinned_converter_versions(repo_root)
+
+    errors = []
+    for suffix, recorded in sorted(manifest_converters.items()):
+        package = recorded.split(" ", 1)[0]
+        expected = pinned.get(package)
+        if expected is not None and expected != recorded:
+            errors.append(
+                f"converter pin mismatch: manifest records {recorded!r} for "
+                f"{suffix!r}, pyproject.toml pins {expected!r}"
+            )
     return errors
 
 

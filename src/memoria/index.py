@@ -23,7 +23,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
-from memoria.records import NormalizedRecord, read_all
+from memoria.records import NormalizedRecord, real_paragraphs, read_all
 from memoria.repository import Repository
 
 INDEX_RELATIVE_PATH = ".memoria/index.db"
@@ -338,7 +338,12 @@ def build_index(
         for statement in _DERIVED_DDL:
             con.execute(statement)
         for record in records:
-            for paragraph_number, paragraph in enumerate(record.paragraphs, start=1):
+            # A pdf page marker earns no index row (docs/
+            # normalized-record-schema.md, "pdf page markers are not
+            # paragraphs"), so this walks the real paragraphs only.
+            for paragraph_number, paragraph in enumerate(
+                real_paragraphs(record), start=1
+            ):
                 anchor = record.anchor_id(paragraph_number)
                 con.execute(
                     "INSERT INTO records (src_id, anchor, source_type, text) "

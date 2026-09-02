@@ -85,8 +85,30 @@ def load_manifest(manifest_path: Path) -> list[ManifestEntry]:
     ]
 
 
-def save_manifest(manifest_path: Path, entries: list[ManifestEntry]) -> None:
-    """Write the ledger back, one row per entry, in ID order."""
+def load_converter_pins(manifest_path: Path) -> dict[str, str]:
+    """The converter versions the last normalization run recorded, keyed by
+    raw suffix (``".docx" -> "markitdown 0.1.7"``) - the same ``"name
+    version"`` form a record's own ``converter`` field uses (#79, part 05
+    §5.4). Empty for a manifest that predates this or does not exist yet."""
+    manifest_path = Path(manifest_path)
+    if not manifest_path.is_file():
+        return {}
+    data = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+    return dict(data.get("converters", {}))
+
+
+def save_manifest(
+    manifest_path: Path,
+    entries: list[ManifestEntry],
+    converters: dict[str, str] | None = None,
+) -> None:
+    """Write the ledger back, one row per entry, in ID order.
+
+    ``converters`` is the pinned-converter-version record ``#79`` adds
+    alongside the unit rows - omitted entirely when empty, so a caller
+    that never passes it (every existing one but ``memoria.normalize``)
+    produces the same file this always wrote.
+    """
     manifest_path = Path(manifest_path)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -96,8 +118,12 @@ def save_manifest(manifest_path: Path, entries: list[ManifestEntry]) -> None:
             row["deleted"] = True
         row.update(entry.extra)
         rows.append(row)
+    document: dict = {}
+    if converters:
+        document["converters"] = converters
+    document["units"] = rows
     manifest_path.write_text(
-        yaml.safe_dump({"units": rows}, sort_keys=False), encoding="utf-8"
+        yaml.safe_dump(document, sort_keys=False), encoding="utf-8"
     )
 
 
