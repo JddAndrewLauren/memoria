@@ -793,3 +793,75 @@ def read_research_memo(repository: Repository, memo_id: str) -> str:
     if not path.is_file():
         raise RecordExtractorError(f"no such research memo: {memo_id}")
     return path.read_text(encoding="utf-8")
+
+
+# --- the driving session's view (#34) -----------------------------------------
+
+
+@dataclass(frozen=True)
+class CurationStatus:
+    """What a post-session pass needs to know before it writes anything:
+    which sessions are on disk and whether each has a transcript to cite,
+    how many records already exist, and whether the tree is clean enough for
+    the dirty-tree rule to let a write through."""
+
+    sessions: tuple[sessions.SessionState, ...]
+    decisions: int
+    questions: int
+    dirty: tuple[str, ...]
+
+
+def curation_status(repository: Repository) -> CurationStatus:
+    return CurationStatus(
+        sessions=tuple(sessions.list_sessions(repository)),
+        decisions=len(list_decisions(repository)),
+        questions=len(list_questions(repository)),
+        dirty=tuple(write.dirty_tracked_paths(repository)),
+    )
+
+
+def serve_entry_for_write(repository: Repository, entry_id: str) -> tuple[subjects.Entry, str]:
+    """The entry and the staleness token a ``record_statement`` or
+    ``revise_statement`` call must present - for a caller composing the
+    statement in the same call as the read it works from (the MCP tools,
+    #34), where the token cannot come from anywhere earlier.
+
+    The token still does its job: an author edit committed between this
+    serve and the write is refused as stale, and the dirty-tree rule runs
+    before either."""
+    if "/" not in entry_id:
+        raise RecordExtractorError(f"not an entry id: {entry_id!r} - expected SUB-<subject>/<entry>")
+    subject_id, entry_slug = entry_id.split("/", 1)
+    try:
+        return subjects.serve_entry(repository, subject_id, entry_slug)
+    except subjects.SubjectError as exc:
+        raise RecordExtractorError(str(exc)) from exc
+
+
+def find_statement(entry: subjects.Entry, badge: str | None, text: str) -> Statement:
+    """The one statement of ``entry`` whose reflow-stable key
+    (``human_touched.statement_key``) matches ``badge`` and ``text`` - so a
+    caller can name a statement by what it says rather than by its exact
+    bytes, and a reflowed paragraph still resolves. A miss names the
+    statements that are there."""
+    wanted = _spoken_key(Statement(badge=badge, text=text))
+    candidates = subjects.parse_statements(entry.body)
+    for statement in candidates:
+        if _spoken_key(statement) == wanted:
+            return statement
+    listed = "; ".join(
+        _spoken_key(s)[:80] for s in candidates if s.badge != MEMORIA_NOTE
+    ) or "(no statements)"
+    raise RecordExtractorError(
+        f"no such statement in {entry.id}: {wanted[:80]!r} - the entry has: {listed}"
+    )
+
+
+def _spoken_key(statement: Statement) -> str:
+    """``human_touched.statement_key`` over what the statement *says*: its
+    ``— <reference>`` provenance lines are part of the paragraph the flag
+    keys on, but a caller naming a statement names its words."""
+    spoken = "\n".join(
+        line for line in statement.text.splitlines() if not line.startswith(PROVENANCE_PREFIX)
+    )
+    return human_touched.statement_key(Statement(badge=statement.badge, text=spoken))

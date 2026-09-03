@@ -49,6 +49,8 @@ ALLOWED_IMPORTS = {
     "memoria.embeddings",  # #81: the local embedder search_semantic wires in
     "memoria.audit",  # #40: the audit pass's tools
     "memoria.trace",  # #42: trace(ref), provenance composed from git and the session
+    "memoria.record_extractor",  # #34: the record extractor's tools, driven by the curation skill
+    "memoria.human_touched",  # #34: curation_flag, the flagging step on its own
 }
 
 FILE_OPENING_CALLS = {"open", "read_text", "read_bytes", "write_text", "write_bytes"}
@@ -423,7 +425,10 @@ def test_the_tool_surface_is_the_read_tools_and_the_extraction_tools():
     a third class of the same shape, the audit's tools - driven by an
     explicit on-demand request, never by a skill running on its own. #42
     adds trace, the one provenance tool part 11 §26 names - a read of what
-    git and the session records already hold, storing nothing.
+    git and the session records already hold, storing nothing. #34 adds the
+    record extractor's tools - the Curator's other half (part 08 §13),
+    driven by the `curation` skill after a session: each one a durable
+    record that commits, never a read.
 
     Pinned as an exact set, so a tool added without a decision fails here.
     """
@@ -449,6 +454,12 @@ def test_the_tool_surface_is_the_read_tools_and_the_extraction_tools():
         "extraction_promote_cluster",
         "audit_pending",
         "audit_record",
+        "curation_status",
+        "record_decision",
+        "record_question",
+        "record_statement",
+        "revise_statement",
+        "curation_flag",
     }
 
 

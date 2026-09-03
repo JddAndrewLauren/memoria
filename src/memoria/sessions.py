@@ -439,3 +439,40 @@ def _current_revision(repository: Repository) -> str | None:
     if result.returncode != 0:
         return None
     return result.stdout.strip()
+
+
+# --- what is on disk ----------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SessionState:
+    """One session directory as found on disk: whether its transcript has
+    been derived yet (#34's curation pass asks this before anything else)."""
+
+    session_id: str
+    has_transcript: bool
+
+
+def list_sessions(repository: Repository) -> list[SessionState]:
+    """Every session directory under ``sessions/``, in id order.
+
+    A session is a directory named by its ``SES-`` id under either nesting
+    ``memoria.ledger.event_path`` writes (``sessions/<YYYY>/<MM>/SES-.../``
+    or ``sessions/SES-.../``). A ledger-only directory is a session whose
+    transcript nobody has derived yet; a directory with ``transcript.md``
+    is one the record extractor can cite.
+    """
+    root = repository.root / "sessions"
+    if not root.is_dir():
+        return []
+    found: list[SessionState] = []
+    for directory in sorted(root.rglob("SES-*")):
+        if not directory.is_dir():
+            continue
+        found.append(
+            SessionState(
+                session_id=directory.name,
+                has_transcript=(directory / TRANSCRIPT_FILENAME).is_file(),
+            )
+        )
+    return found
