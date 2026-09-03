@@ -128,16 +128,20 @@ export interface paths {
          * Read
          * @description Resolve one reference - the slide-over citation panel's read (§19.9).
          *
-         *     Wraps ``memoria.records.read`` exactly, the same composed core the MCP
-         *     tool surface's ``read(ref)`` calls: a ``SRC-`` paragraph anchor (a search
-         *     hit's or a paragraph's own ``anchor``) serves the cited text, its record
-         *     and its curated-overlay backlinks (#20); a ``SUB-x/y`` entry reference -
-         *     an overlay's own ``entry_links``/``exclusions`` - serves the entry's raw
-         *     text, so a backlink is clickable into the same panel in both directions
-         *     (#25's acceptance criteria) without a second read shape. Ledgering the
-         *     served read is the caller's job (``memoria.records.read``'s own
-         *     docstring) - this route never imports ``memoria.ledger``, so an author's
-         *     own read here writes nothing to ``events.jsonl``.
+         *     Wraps ``memoria.records.read``, the same composed core the MCP tool
+         *     surface's ``read(ref)`` calls, but narrower: a ``SRC-`` paragraph anchor
+         *     (a search hit's or a paragraph's own ``anchor``) serves the cited text,
+         *     its record and its curated-overlay backlinks (#20); a ``SUB-x/y`` entry
+         *     reference - an overlay's own ``entry_links``/``exclusions`` - serves the
+         *     entry's raw text, so a backlink is clickable into the same panel in both
+         *     directions (#25's acceptance criteria) without a second read shape.
+         *     Anything else - including a bare ``SUB-`` subject or a repository path
+         *     that would otherwise resolve - is a 404: this route is not the MCP
+         *     ``read(ref)`` tool and does not owe it the same contract (#145,
+         *     ``_is_citable``). Ledgering the served read is the caller's job
+         *     (``memoria.records.read``'s own docstring) - this route never imports
+         *     ``memoria.ledger``, so an author's own read here writes nothing to
+         *     ``events.jsonl``.
          */
         get: operations["read_api_read_get"];
         put?: never;
@@ -239,6 +243,12 @@ export interface components {
          *     ``memoria.records.read`` exactly - the same core function the MCP tool
          *     surface calls - so this is the one generic reference read the viewer has,
          *     never a second one duplicating ``/sources/{id}``.
+         *
+         *     ``anchor`` is the cited paragraph's own stable anchor, from
+         *     ``NormalizedRecord.anchor_id()`` - served, not reconstructed client-side,
+         *     the same "no reconstruction by the caller" discipline
+         *     ``docs/tool-surface.md`` already holds for a search hit's anchor.
+         *     ``None`` whenever ``paragraph`` is, the same pairing.
          */
         CitationOut: {
             /** Ref */
@@ -250,6 +260,8 @@ export interface components {
             record?: components["schemas"]["SourceSummary"] | null;
             /** Paragraph */
             paragraph?: number | null;
+            /** Anchor */
+            anchor?: string | null;
             overlay?: components["schemas"]["ReadOverlayOut"] | null;
         };
         /**

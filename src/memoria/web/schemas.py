@@ -144,6 +144,12 @@ class CitationOut(BaseModel):
     ``memoria.records.read`` exactly - the same core function the MCP tool
     surface calls - so this is the one generic reference read the viewer has,
     never a second one duplicating ``/sources/{id}``.
+
+    ``anchor`` is the cited paragraph's own stable anchor, from
+    ``NormalizedRecord.anchor_id()`` - served, not reconstructed client-side,
+    the same "no reconstruction by the caller" discipline
+    ``docs/tool-surface.md`` already holds for a search hit's anchor.
+    ``None`` whenever ``paragraph`` is, the same pairing.
     """
 
     ref: str
@@ -151,6 +157,7 @@ class CitationOut(BaseModel):
     text: str
     record: SourceSummary | None = None
     paragraph: int | None = None
+    anchor: str | None = None
     overlay: ReadOverlayOut | None = None
 
 

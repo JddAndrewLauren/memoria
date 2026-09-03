@@ -40,6 +40,7 @@ ALLOWED_IMPORTS = {
     "pydantic",
     "memoria.web",
     "memoria.records",
+    "memoria.references",
     "memoria.repository",
     "memoria.index",
     "memoria.subjects",

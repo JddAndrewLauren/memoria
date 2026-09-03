@@ -20,6 +20,7 @@ const PARAGRAPH_CITATION = {
     original_locator: "Journal I, entry dated Jul. 17.",
   },
   paragraph: 17,
+  anchor: "src-000184-p17",
   overlay: { entry_links: ["SUB-people/bob"], exclusions: [], citing_settlements: [] },
 };
 
@@ -85,6 +86,16 @@ describe("the slide-over citation panel (§19.9)", () => {
     expect(screen.getByText("Contemporaneous")).toBeInTheDocument();
     expect(screen.getByText("Cited by")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "people/bob" })).toBeInTheDocument();
+  });
+
+  it("links to the full source using the anchor the server served, never a rebuilt one", async () => {
+    renderProvider();
+    fireEvent.click(screen.getByRole("button", { name: /open src-000184-p17/i }));
+    await screen.findByText("I called Bob that evening.");
+
+    const link = screen.getByRole("link", { name: "Open full source" });
+
+    expect(link).toHaveAttribute("href", "/sources/SRC-000184#src-000184-p17");
   });
 
   it("a backlink is clickable into the same panel, traversing the other direction", async () => {

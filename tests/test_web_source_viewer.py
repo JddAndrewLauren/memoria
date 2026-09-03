@@ -135,6 +135,73 @@ def test_read_of_an_unresolvable_reference_is_a_404(tmp_path):
     assert response.status_code == 404
 
 
+def test_read_serves_the_paragraphs_own_stable_anchor_never_reconstructed(tmp_path):
+    repository = _repo(tmp_path)
+    client = _client(repository)
+
+    body = client.get("/api/read", params={"ref": "SRC-000184 P1"}).json()
+
+    assert body["anchor"] == "src-000184-p1"
+
+
+def test_read_of_a_whole_record_or_an_entry_carries_no_anchor(tmp_path):
+    entry = Entry(id="SUB-people/bob", match_terms=["heron"], body="")
+    repository = _repo(tmp_path, entries=[entry])
+    client = _client(repository)
+
+    whole_record = client.get("/api/read", params={"ref": "SRC-000184"}).json()
+    entry_read = client.get("/api/read", params={"ref": "SUB-people/bob"}).json()
+
+    assert whole_record["anchor"] is None
+    assert entry_read["anchor"] is None
+
+
+# --- narrowed to the refs the panel actually uses (#145) --------------------
+
+
+def test_read_refuses_a_repository_path_that_would_otherwise_resolve(tmp_path):
+    """``.git/config`` is a real, readable file in this repository - the
+    exact case #145 found: the wider ``memoria.records.read`` contract
+    resolved it, even though the citation panel never sends this route
+    anything but a SRC- or SUB-x/y reference."""
+    repository = _repo(tmp_path)
+    client = _client(repository)
+
+    response = client.get("/api/read", params={"ref": ".git/config"})
+
+    assert response.status_code == 404
+
+
+def test_read_refuses_another_in_repo_path_too(tmp_path):
+    (tmp_path / "notes.md").write_text("not a citable reference")
+    repository = _repo(tmp_path)
+    client = _client(repository)
+
+    response = client.get("/api/read", params={"ref": "notes.md"})
+
+    assert response.status_code == 404
+
+
+def test_read_still_refuses_a_traversal_that_escapes_the_repository(tmp_path):
+    repository = _repo(tmp_path)
+    client = _client(repository)
+
+    response = client.get("/api/read", params={"ref": "../etc/passwd"})
+
+    assert response.status_code == 404
+
+
+def test_read_refuses_a_bare_subject_reference_only_an_entry_is_citable(tmp_path):
+    """The panel's backlinks only ever traverse to a ``SUB-x/y`` entry, never
+    a bare subject - #145 narrows to exactly what it uses."""
+    repository = _repo(tmp_path)
+    client = _client(repository)
+
+    response = client.get("/api/read", params={"ref": "SUB-people"})
+
+    assert response.status_code == 404
+
+
 # --- a backlink into an entry, traversing the other direction --------------
 
 
