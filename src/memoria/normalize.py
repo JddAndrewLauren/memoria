@@ -264,15 +264,19 @@ CONVERTERS: dict[str, tuple[Converter, _Pin]] = {
 # `-----Original Message-----` marker no longer surviving the quoted-reply
 # cut all change frontmatter or paragraphs, so one pin bump shows the whole
 # cost at once.
-EMAIL_CONVERTER_VERSION = "email 3"
+# Bumped 3 -> 4 (#104): an HTML-only body now produces real paragraphs
+# instead of a stub, and `.msg` joins `.eml`/`.mbox` as a container suffix -
+# both change paragraphs for messages that previously converted to nothing.
+EMAIL_CONVERTER_VERSION = "email 4"
 
 # Suffixes `_process_email_containers` treats as an "export": a file holding
-# one or more raw email-message units. `.eml` holds exactly one - handling
-# it the same way as `.mbox` (rather than through `CONVERTERS`) is what
-# gives a standalone message the same attachment handling an `.mbox`
-# message gets, at the cost of one reserved SRC- number for the file itself
-# that never becomes a record (ADR-0006 already tolerates such gaps).
-_EMAIL_CONTAINER_SUFFIXES = (".mbox", ".eml")
+# one or more raw email-message units. `.eml` and `.msg` each hold exactly
+# one - handling them the same way as `.mbox` (rather than through
+# `CONVERTERS`) is what gives a standalone message the same attachment
+# handling an `.mbox` message gets, at the cost of one reserved SRC- number
+# for the file itself that never becomes a record (ADR-0006 already
+# tolerates such gaps).
+_EMAIL_CONTAINER_SUFFIXES = (".mbox", ".eml", ".msg")
 
 
 def _paragraph_hash(paragraph: str) -> str:
@@ -353,6 +357,18 @@ def normalize(
         {
             suffix: pin()
             for suffix, (_converter, pin) in CONVERTERS.items()
+            if suffix in suffixes_present
+        }
+    )
+    # Every email container suffix shares one converter (#104): a message
+    # sub-entry's `path` is the container's own, so its suffix is already in
+    # `suffixes_present` above - it was `CONVERTERS` (docx/pdf/txt only) that
+    # never had an entry for it, which is why `.eml`/`.mbox` never reached
+    # this map before, and why `validate`'s pin check never saw them.
+    converters.update(
+        {
+            suffix: EMAIL_CONVERTER_VERSION
+            for suffix in _EMAIL_CONTAINER_SUFFIXES
             if suffix in suffixes_present
         }
     )
@@ -715,11 +731,87 @@ def _read_container_messages(path: Path) -> list[Message]:
     ``email_message_index`` numbers them by."""
     if path.suffix == ".eml":
         return [email.message_from_bytes(_BOGUS_HEADER_LINE.sub(b"", path.read_bytes(), count=1))]
+    if path.suffix == ".msg":
+        return [_read_msg_message(path.read_bytes())]
     box = mailbox.mbox(str(path), create=False)
     try:
         return list(box)
     finally:
         box.close()
+
+
+# --- .msg (Outlook, #104) ---------------------------------------------------
+#
+# The MAPI property streams `_read_msg_message` reads, named the way every
+# `.msg` file's own OLE storage names them: `__substg1.0_<property tag hex,
+# 4 digits><type>`, PT_UNICODE (`...001F`) throughout - the same convention
+# MarkItDown's own (unused here) Outlook converter reads.
+_MSG_TRANSPORT_HEADERS_STREAM = "__substg1.0_007D001F"  # PR_TRANSPORT_MESSAGE_HEADERS
+_MSG_BODY_STREAM = "__substg1.0_1000001F"  # PR_BODY
+_MSG_SUBJECT_STREAM = "__substg1.0_0037001F"  # PR_SUBJECT
+_MSG_FROM_STREAM = "__substg1.0_0C1F001F"  # PR_SENT_REPRESENTING_EMAIL_ADDRESS
+_MSG_TO_STREAM = "__substg1.0_0E04001F"  # PR_DISPLAY_TO
+_MSG_CC_STREAM = "__substg1.0_0E03001F"  # PR_DISPLAY_CC
+
+# A transport-header line `_read_msg_message`'s own reassembly makes stale:
+# the body it pairs these headers with is Outlook's own plain-text
+# extraction (`PR_BODY`), not the original MIME payload these headers
+# describe, so a Content-Type/MIME-Version/Content-Transfer-Encoding line
+# from the original message would tell `email.message_from_string` to
+# expect a multipart or encoded body that plain `PR_BODY` text is not.
+_MSG_STALE_HEADER_RE = re.compile(
+    r"^(content-type|mime-version|content-transfer-encoding):", re.IGNORECASE
+)
+
+
+def _msg_property(ole, stream_path: str) -> str | None:
+    """One MAPI string property: UTF-16LE, the way Outlook always writes a
+    PT_UNICODE (``...001F``) stream. ``None`` when the ``.msg`` carries no
+    such property."""
+    if not ole.exists(stream_path):
+        return None
+    return ole.openstream(stream_path).read().decode("utf-16-le", errors="replace").strip()
+
+
+def _read_msg_message(raw_bytes: bytes) -> Message:
+    """An Outlook ``.msg`` file's one message, reconstructed as an
+    ``email.message.Message`` so it goes through the exact same header and
+    quoted-reply handling every ``.eml``/``.mbox`` message already gets
+    (part 05 §5.2, §5.4). A ``.msg``'s own ``PR_TRANSPORT_MESSAGE_HEADERS``
+    property is the original RFC822 header block for a message that
+    reached Outlook over SMTP, so it is reused verbatim rather than
+    rebuilt property by property. A message with no such property
+    (composed in Outlook, never transported) falls back to the handful of
+    MAPI properties MarkItDown's own ``.msg`` converter reads - subject/
+    from/to/cc only, no date and no threading, the same "no invented date"
+    gap a bare ``.txt`` file has.
+
+    ``olefile`` is imported here, not at module level, for the same
+    core-only-install reason as ``convert_docx``'s ``markitdown`` import.
+    """
+    import olefile
+
+    with olefile.OleFileIO(io.BytesIO(raw_bytes)) as ole:
+        headers_text = _msg_property(ole, _MSG_TRANSPORT_HEADERS_STREAM)
+        body_text = _msg_property(ole, _MSG_BODY_STREAM) or ""
+        if headers_text:
+            headers_text = "\n".join(
+                line
+                for line in headers_text.splitlines()
+                if not _MSG_STALE_HEADER_RE.match(line)
+            )
+        else:
+            headers_text = "\n".join(
+                f"{header}: {value}"
+                for header, stream in (
+                    ("Subject", _MSG_SUBJECT_STREAM),
+                    ("From", _MSG_FROM_STREAM),
+                    ("To", _MSG_TO_STREAM),
+                    ("Cc", _MSG_CC_STREAM),
+                )
+                if (value := _msg_property(ole, stream))
+            )
+    return email.message_from_string(f"{headers_text}\n\n{body_text}")
 
 
 def _clean_message_id(value: str | None) -> str | None:
@@ -810,12 +902,16 @@ def _split_quoted_reply(body: str) -> tuple[str, bool]:
 
 
 def _email_body_text(message: Message) -> str | None:
-    """The message's plain-text body, or ``None`` for an HTML-only body.
+    """The message's plain-text body, converted from an HTML-only body
+    (#104) through MarkItDown when there is no plain-text part - ``None``
+    only when the message has neither, the same stub outcome an unreadable
+    pdf gets.
 
-    MarkItDown's HTML converter (part 05 §5.4) is not wired in here - out of
-    scope this pass (see the PR/issue notes) - so such a message produces no
-    paragraphs, the same outcome an unreadable pdf gets (a stub record).
+    A message with both parts always prefers text/plain, its own words
+    unfiltered by MarkItDown's markdown formatting - the html fallback below
+    only ever runs for a message that has no plain-text part to prefer.
     """
+    html_part = None
     if message.is_multipart():
         for part in message.walk():
             if part.get_content_maintype() == "multipart":
@@ -824,10 +920,28 @@ def _email_body_text(message: Message) -> str | None:
                 continue  # an attachment, not the body
             if part.get_content_type() == "text/plain":
                 return _decode_part(part)
-        return None
-    if message.get_content_type() == "text/plain":
+            if html_part is None and part.get_content_type() == "text/html":
+                html_part = part
+    elif message.get_content_type() == "text/plain":
         return _decode_part(message)
+    elif message.get_content_type() == "text/html":
+        html_part = message
+    if html_part is not None:
+        return _convert_html_body(_decode_part(html_part))
     return None
+
+
+def _convert_html_body(html_text: str) -> str:
+    """An HTML-only body, converted to markdown text (part 05 §5.4) -
+    MarkItDown, the same lazily-imported dependency ``convert_docx`` uses,
+    and for the same reason: the core's only runtime dependency is PyYAML,
+    so importing this at module level would break a core-only install."""
+    from markitdown import MarkItDown, StreamInfo
+
+    result = MarkItDown().convert(
+        io.BytesIO(html_text.encode("utf-8")), stream_info=StreamInfo(extension=".html")
+    )
+    return result.markdown
 
 
 def _decode_part(part: Message) -> str:
