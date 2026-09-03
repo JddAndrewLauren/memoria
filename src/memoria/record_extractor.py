@@ -381,7 +381,7 @@ def list_decisions(repository: Repository) -> tuple[DecisionRecord, ...]:
         DecisionRecord(
             id=match.group("id"),
             citation=match.group("citation"),
-            text=html.unescape(match.group("text")),
+            text=unescape_entry_text(match.group("text")),
         )
         for match in _DECISION_BLOCK.finditer(path.read_text(encoding="utf-8"))
     )
@@ -430,7 +430,7 @@ def list_questions(repository: Repository) -> tuple[QuestionRecord, ...]:
         return ()
     return tuple(
         QuestionRecord(
-            citation=match.group("citation"), text=html.unescape(match.group("text"))
+            citation=match.group("citation"), text=unescape_entry_text(match.group("text"))
         )
         for match in _QUESTION_BLOCK.finditer(path.read_text(encoding="utf-8"))
     )
