@@ -275,6 +275,69 @@ def test_a_unit_whose_converter_raises_is_reported_and_the_pass_goes_on(tmp_path
     assert record.id == "SRC-000002"
 
 
+def test_a_failed_units_manifest_entry_records_the_failure(tmp_path):
+    """#106: the manifest marks a failed unit with its reason, the converter
+    pin that failed, and the raw hash it failed on - so a later run can tell
+    whether anything changed since."""
+    evidence_root = tmp_path / "evidence"
+    _write_raw_file(evidence_root, "a.pdf", "not a pdf at all")
+    repository = Repository(root=tmp_path / "repo")
+
+    report = normalize(repository, evidence_root)
+
+    (entry,) = load_manifest(evidence_root / DEFAULT_MANIFEST_RELATIVE_PATH)
+    failure = entry.extra["failed"]
+    assert failure["reason"] == report.failed["SRC-000001"]
+    assert failure["converter"] == CONVERTERS[".pdf"][1]()
+    assert failure["raw_sha256"] == entry.sha256
+
+
+def test_a_second_run_over_an_unchanged_failed_unit_skips_it_without_retrying(tmp_path):
+    evidence_root = tmp_path / "evidence"
+    _write_raw_file(evidence_root, "a.pdf", "not a pdf at all")
+    repository = Repository(root=tmp_path / "repo")
+    normalize(repository, evidence_root)
+
+    report = normalize(repository, evidence_root)
+
+    assert report.failed == {}
+    assert report.skipped_failed == ["SRC-000001"]
+
+
+def test_a_failed_unit_retries_after_its_converter_pin_bumps(tmp_path, monkeypatch):
+    evidence_root = tmp_path / "evidence"
+    _write_raw_file(evidence_root, "a.pdf", "not a pdf at all")
+    repository = Repository(root=tmp_path / "repo")
+    normalize(repository, evidence_root)
+
+    from memoria import normalize as normalize_module
+
+    monkeypatch.setitem(
+        normalize_module.CONVERTERS,
+        ".pdf",
+        (normalize_module.convert_pdf, lambda: "pdfplumber 999"),
+    )
+    report = normalize(repository, evidence_root)
+
+    assert report.skipped_failed == []
+    assert list(report.failed) == ["SRC-000001"]
+
+
+def test_a_failed_unit_retries_and_succeeds_once_its_content_changes(tmp_path):
+    evidence_root = tmp_path / "evidence"
+    full = _write_raw_file(evidence_root, "a.pdf", "not a pdf at all")
+    repository = Repository(root=tmp_path / "repo")
+    normalize(repository, evidence_root)
+
+    full.write_bytes(_make_pdf(["Real content."]))
+    report = normalize(repository, evidence_root)
+
+    assert report.skipped_failed == []
+    assert report.converted == ["SRC-000001"]
+    (entry,) = load_manifest(evidence_root / DEFAULT_MANIFEST_RELATIVE_PATH)
+    assert "failed" not in entry.extra
+
+
 def test_a_run_over_unchanged_input_produces_no_diff(tmp_path):
     evidence_root = tmp_path / "evidence"
     _write_raw_file(evidence_root, "a.txt", "Hello.\n\nWorld.")

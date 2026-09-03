@@ -310,12 +310,18 @@ class NormalizeReport:
     # ``sum(...values())`` is "how many paragraph hashes changed" - the
     # two numbers the drift report gates a converter bump on.
     paragraph_drift: dict[str, int] = field(default_factory=dict)
-    # Units whose converter raised, by ID, with the exception's text. The
-    # pass goes on past them (found on the Enron slice, #106: a corrupt pdf
-    # attachment stopped the whole run and left every later record
-    # unwritten). No record is written for a failed unit, and it is retried
-    # on the next run because nothing on disk says it was skipped.
+    # Units whose converter raised *this run*, by ID, with the exception's
+    # text (found on the Enron slice, #106: a corrupt pdf attachment stopped
+    # the whole run and left every later record unwritten). No record is
+    # written for a failed unit; the manifest now marks the failure (reason,
+    # converter pin, raw hash) so a later run can tell a still-broken unit
+    # from one worth retrying (see ``skipped_failed`` below).
     failed: dict[str, str] = field(default_factory=dict)
+    # Units left failed from a prior run, whose content hash and converter
+    # pin are both unchanged since - not retried, per the manifest's failure
+    # marker. Disjoint from ``failed``: a unit that fails again after its
+    # hash or pin changed lands in ``failed``, not here.
+    skipped_failed: list[str] = field(default_factory=list)
 
 
 def normalize(
@@ -359,7 +365,8 @@ def normalize(
     unconvertible = []
     paragraph_drift: dict[str, int] = {}
     failed: dict[str, str] = {}
-    for entry in entries:
+    skipped_failed: list[str] = []
+    for index, entry in enumerate(entries):
         if entry.deleted:
             continue
 
@@ -390,11 +397,44 @@ def normalize(
             skipped.append(entry.id)
             continue
 
+        # A prior run's failure marker (#106): skip re-attempting a unit
+        # whose content hash and converter pin are both unchanged since it
+        # last failed - retrying it every run would just raise the same
+        # exception on the same bytes. `force_all` bypasses this the same
+        # way it bypasses the success-skip above.
+        prior_failure = entry.extra.get("failed")
+        if (
+            not force_all
+            and prior_failure is not None
+            and prior_failure.get("raw_sha256") == entry.sha256
+            and prior_failure.get("converter") == pinned_version
+        ):
+            skipped_failed.append(entry.id)
+            continue
+
         try:
             draft = get_draft()
         except Exception as exc:  # noqa: BLE001 - one bad unit must not end the pass
-            failed[entry.id] = f"{type(exc).__name__}: {exc}"
+            reason = f"{type(exc).__name__}: {exc}"
+            failed[entry.id] = reason
+            entries[index] = replace(
+                entry,
+                extra={
+                    **{k: v for k, v in entry.extra.items() if k != "failed"},
+                    "failed": {
+                        "reason": reason,
+                        "converter": pinned_version,
+                        "raw_sha256": entry.sha256,
+                    },
+                },
+            )
             continue
+        if prior_failure is not None:
+            # It converted this time (the bytes or the converter changed) -
+            # the manifest's failure marker no longer applies.
+            entries[index] = replace(
+                entry, extra={k: v for k, v in entry.extra.items() if k != "failed"}
+            )
         record = NormalizedRecord(
             id=entry.id,
             source_type=draft.source_type,
@@ -429,6 +469,13 @@ def normalize(
         record_path.write_text(record_to_markdown(record), encoding="utf-8")
         converted.append(entry.id)
 
+    # A second save: the first (above) persists added units and converter
+    # pins before any conversion is attempted, so those survive even a bug
+    # outside the per-unit try/except; this one persists the failure markers
+    # (and clears) the loop just decided, so a later run's skip-as-failed
+    # check has them.
+    save_manifest(manifest_path, entries, converters=converters)
+
     return NormalizeReport(
         added_units=added + email_added,
         converted=converted,
@@ -436,6 +483,7 @@ def normalize(
         unconvertible=unconvertible,
         paragraph_drift=paragraph_drift,
         failed=failed,
+        skipped_failed=skipped_failed,
     )
 
 

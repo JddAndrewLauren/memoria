@@ -14,7 +14,7 @@ from memoria.records import NORMALIZED_RELATIVE_PATH
 from memoria.repository import NoEvidenceRoot, from_env, require_evidence_root
 from memoria.sessions import SessionError, derive_session
 from memoria.subjects import write_builtin_subjects
-from memoria.validate import validate
+from memoria.validate import validate, validate_warnings
 from memoria.write import Checkpointed, checkpoint
 
 # Where the repository is, and where evidence is, are `memoria.repository`'s
@@ -287,6 +287,8 @@ def main(argv=None):
         except IndexSchemaError as exc:
             print(f"validate: {exc}", file=sys.stderr)
             return 1
+        for warning in validate_warnings(evidence_root):
+            print(f"validate: warning: {warning}")
         for error in errors:
             print(error)
         if errors:
@@ -326,11 +328,18 @@ def main(argv=None):
         if report.failed:
             print(
                 f"normalize: {len(report.failed)} unit(s) failed to convert "
-                "and have no record - each is retried on the next run:",
+                "and have no record - marked in the manifest, retried when "
+                "their content or converter pin changes:",
                 file=sys.stderr,
             )
             for unit_id, reason in report.failed.items():
                 print(f"  {unit_id}: {reason}", file=sys.stderr)
+        if report.skipped_failed:
+            print(
+                f"normalize: {len(report.skipped_failed)} previously-failed "
+                "unit(s) skipped (unchanged)",
+                file=sys.stderr,
+            )
         return 0
 
     if args.command == "rebuild":

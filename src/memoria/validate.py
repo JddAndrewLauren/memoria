@@ -120,6 +120,34 @@ def validate(
     return errors
 
 
+def validate_warnings(
+    evidence_root: Path, manifest_relative_path: str = DEFAULT_MANIFEST_RELATIVE_PATH
+) -> list[str]:
+    """Non-fatal findings alongside ``validate()``'s errors - today, just the
+    manifest's failed-conversion units (#106). A unit whose converter raised
+    gets no record and no ``validate()`` error either (there is nothing to
+    check it against); reporting it here, not in ``validate()``'s own list,
+    is what lets a corpus with one corrupt pdf still validate.
+
+    Empty when the manifest is missing (``validate()`` already reports that
+    as an error) or lists no failed unit.
+    """
+    evidence_root = Path(evidence_root)
+    manifest_path = evidence_root / manifest_relative_path
+    if not manifest_path.is_file():
+        return []
+    entries = load_manifest(manifest_path)
+    failed_ids = sorted(
+        entry.id for entry in entries if not entry.deleted and "failed" in entry.extra
+    )
+    if not failed_ids:
+        return []
+    return [
+        f"{len(failed_ids)} unit(s) failed to convert and have no record: "
+        + ", ".join(failed_ids)
+    ]
+
+
 def _pinned_converter_versions(repo_root: Path) -> dict[str, str]:
     """The exact converter versions pyproject.toml's ``convert`` extra pins,
     as ``{package: "package version"}`` - the same ``"name version"`` form a
