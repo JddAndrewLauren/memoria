@@ -312,3 +312,221 @@ def test_curator_actor_identity_matches_the_maintainers(tmp_path):
     assert CURATOR.name == MAINTAINER_CURATOR.name
     assert CURATOR.email == MAINTAINER_CURATOR.email
     assert CURATOR.human is False
+
+
+# --- badged statements into entry bodies, per the write matrix (#31) ---------
+
+
+def _entry(repository: Repository, entry_id: str, body: str) -> str:
+    """Commit an entry file, the way one already exists before the extractor
+    reaches it, and return its repository-relative path."""
+    from memoria.subjects import Entry, entry_to_markdown
+
+    subject_slug, entry_slug = entry_id[len("SUB-"):].split("/")
+    relative_path = f"subjects/{subject_slug}/{entry_slug}.md"
+    path = repository.root / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(entry_to_markdown(Entry(id=entry_id, body=body)), encoding="utf-8")
+    _git(repository.root, "add", relative_path)
+    _git(
+        repository.root, "-c", "user.name=Setup", "-c", "user.email=setup@memoria.test",
+        "commit", "-q", "-m", f"add {entry_id}",
+    )
+    return relative_path
+
+
+def _served(repository: Repository, entry_id: str):
+    from memoria.subjects import serve_entry
+
+    subject_id, entry_slug = entry_id.split("/")
+    return serve_entry(repository, subject_id, entry_slug)
+
+
+BOB = "SUB-people/bob"
+TESTIMONY = "Bob was born in 1962 in Cleveland."
+
+
+def test_record_statement_appends_a_badged_statement_with_its_provenance(tmp_path):
+    from memoria.record_extractor import record_statement
+
+    repository = _repo(tmp_path)
+    relative_path = _entry(repository, BOB, TESTIMONY)
+    _, token = _served(repository, BOB)
+
+    record = record_statement(
+        repository, BOB, "source", "Bob called on July 17.", ("SRC-000184 P17",), token
+    )
+
+    text = (tmp_path / relative_path).read_text(encoding="utf-8")
+    assert TESTIMONY in text
+    assert "[source] Bob called on July 17.\n— SRC-000184 ¶17" in text
+    assert record.provenance == ("SRC-000184 ¶17",)
+    # Committed through the write path, as the Curator - never left dirty.
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert status == ""
+    author = subprocess.run(
+        ["git", "log", "-1", "--format=%an <%ae>"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout.strip()
+    assert author == f"{CURATOR.name} <{CURATOR.email}>"
+
+
+def test_the_written_statement_is_in_the_audit_visible_body_and_open_is_not(tmp_path):
+    """The seventh checkbox: what the extractor writes lands where the audit
+    and assembly read - badged statements and their provenance in, `[open]`
+    out - through the one predicate `subjects.is_audit_visible` owns."""
+    from memoria.audit import audit_visible_body
+    from memoria.record_extractor import record_statement
+
+    repository = _repo(tmp_path)
+    _entry(repository, BOB, TESTIMONY)
+    _, token = _served(repository, BOB)
+    record_statement(repository, BOB, "source", "Bob called on July 17.", ("SRC-000184 P17",), token)
+    _, token = _served(repository, BOB)
+    record_statement(repository, BOB, "open", "Maybe he called twice.", (), token)
+
+    entry, _ = _served(repository, BOB)
+    visible = audit_visible_body(entry)
+
+    assert TESTIMONY in visible
+    assert "[source] Bob called on July 17.\n— SRC-000184 ¶17" in visible
+    assert "Maybe he called twice." not in visible
+    assert "[open] Maybe he called twice." in entry.body
+
+
+@pytest.mark.parametrize("badge", [None, "", "testimony", "AUTHOR"])
+def test_a_machine_write_to_testimony_fails_loudly(tmp_path, badge):
+    """Part 06 §8.2: the Curator never writes unbadged text, no exceptions.
+    There is no badge value that writes testimony, and nothing lands."""
+    from memoria.record_extractor import record_statement
+
+    repository = _repo(tmp_path)
+    relative_path = _entry(repository, BOB, TESTIMONY)
+    before = (tmp_path / relative_path).read_text(encoding="utf-8")
+    _, token = _served(repository, BOB)
+
+    with pytest.raises(RecordExtractorError, match="testimony"):
+        record_statement(repository, BOB, badge, "Heavyset, slow-spoken.", ("SRC-000184 P17",), token)
+
+    assert (tmp_path / relative_path).read_text(encoding="utf-8") == before
+
+
+def test_a_statement_cannot_smuggle_an_unbadged_paragraph_after_itself(tmp_path):
+    """A blank line inside the text would end the badged paragraph and start
+    an unbadged one - testimony by another route. Refused the same way."""
+    from memoria.record_extractor import record_statement
+
+    repository = _repo(tmp_path)
+    relative_path = _entry(repository, BOB, TESTIMONY)
+    before = (tmp_path / relative_path).read_text(encoding="utf-8")
+    _, token = _served(repository, BOB)
+
+    with pytest.raises(RecordExtractorError, match="one paragraph"):
+        record_statement(
+            repository, BOB, "source", "Bob called.\n\nHeavyset, slow-spoken.",
+            ("SRC-000184 P17",), token,
+        )
+
+    assert (tmp_path / relative_path).read_text(encoding="utf-8") == before
+
+
+@pytest.mark.parametrize(
+    "reference", ["CHP-0001", "SEC-0003", "chapters/08/draft.md", "book.md"]
+)
+def test_manuscript_prose_cannot_be_harvested_without_a_settlement(tmp_path, reference):
+    """Part 06 §8.8 / part 08 §13.4: the book saying something is not
+    evidence that it is true. A manuscript reference is never provenance
+    for a statement; changing what an entry says needs a settlement (#33)."""
+    from memoria.record_extractor import record_statement
+
+    repository = _repo(tmp_path)
+    relative_path = _entry(repository, BOB, TESTIMONY)
+    before = (tmp_path / relative_path).read_text(encoding="utf-8")
+    _, token = _served(repository, BOB)
+
+    with pytest.raises(RecordExtractorError, match="settlement"):
+        record_statement(repository, BOB, "source", "Bob knew by chapter 5.", (reference,), token)
+
+    assert (tmp_path / relative_path).read_text(encoding="utf-8") == before
+
+
+@pytest.mark.parametrize(
+    "reference", ["DEC-0001", "RES-20261018-003", "CLM-0041", "SUB-people/alice"]
+)
+def test_provenance_may_not_terminate_in_a_derived_artifact(tmp_path, reference):
+    from memoria.record_extractor import record_statement
+
+    repository = _repo(tmp_path)
+    _entry(repository, BOB, TESTIMONY)
+    _, token = _served(repository, BOB)
+
+    with pytest.raises(RecordExtractorError, match="original material"):
+        record_statement(repository, BOB, "inferred", "Bob feared losing control.", (reference,), token)
+
+
+@pytest.mark.parametrize("badge", ["source", "inferred"])
+def test_an_assertion_badge_needs_provenance_and_open_does_not(tmp_path, badge):
+    from memoria.record_extractor import record_statement
+
+    repository = _repo(tmp_path)
+    relative_path = _entry(repository, BOB, TESTIMONY)
+    _, token = _served(repository, BOB)
+
+    with pytest.raises(RecordExtractorError, match="provenance"):
+        record_statement(repository, BOB, badge, "Bob called on July 17.", (), token)
+
+    record_statement(repository, BOB, "open", "Did Bob call twice?", (), token)
+    assert "[open] Did Bob call twice?" in (tmp_path / relative_path).read_text(encoding="utf-8")
+
+
+def test_an_author_statement_needs_an_author_spoken_citing_turn(tmp_path):
+    """Part 06 §9.2, the same bar `record_decision` holds: a source alone is
+    not author evidence, and neither is the assistant's own turn."""
+    from memoria.record_extractor import record_statement
+
+    repository = _repo(tmp_path)
+    relative_path = _entry(repository, BOB, TESTIMONY)
+    session_id = _session(repository, SESSION_ID, [("assistant", MUSING), ("user", DECISION)])
+    _, token = _served(repository, BOB)
+
+    with pytest.raises(RecordExtractorError, match="citing transcript turn"):
+        record_statement(repository, BOB, "author", DECISION, ("SRC-000184 P17",), token)
+    with pytest.raises(RecordExtractorError, match="Assistant"):
+        record_statement(repository, BOB, "author", DECISION, (f"{session_id}#T001",), token)
+
+    record = record_statement(repository, BOB, "author", DECISION, (f"{session_id}#T2",), token)
+
+    assert record.provenance == ("SES-20260912-1432#T002",)
+    assert f"[author] {DECISION}\n— SES-20260912-1432#T002" in (
+        tmp_path / relative_path
+    ).read_text(encoding="utf-8")
+
+
+def test_record_statement_is_rejected_when_the_entry_moved_underneath(tmp_path):
+    """ADR-0003's second gate: an author edit committed between the
+    extractor's read and its write leaves a clean tree, which the
+    dirty-tree rule cannot see - the token can."""
+    from memoria.record_extractor import record_statement
+
+    repository = _repo(tmp_path)
+    relative_path = _entry(repository, BOB, TESTIMONY)
+    _, token = _served(repository, BOB)
+    _entry(repository, BOB, TESTIMONY + " Heavyset, slow-spoken.")  # a committed edit
+
+    with pytest.raises(RecordExtractorError, match="stale"):
+        record_statement(repository, BOB, "source", "Bob called.", ("SRC-000184 P17",), token)
+
+    assert "[source]" not in (tmp_path / relative_path).read_text(encoding="utf-8")
+
+
+def test_record_statement_refuses_a_dirty_tree(tmp_path):
+    from memoria.record_extractor import record_statement
+
+    repository = _repo(tmp_path)
+    relative_path = _entry(repository, BOB, TESTIMONY)
+    _, token = _served(repository, BOB)
+    (tmp_path / relative_path).write_text("mid-edit\n", encoding="utf-8")  # uncommitted
+
+    with pytest.raises(RecordExtractorError, match="uncommitted human modifications"):
+        record_statement(repository, BOB, "source", "Bob called.", ("SRC-000184 P17",), token)

@@ -4,12 +4,47 @@ Where ``memoria.extraction`` is the **index maintainer** - the subject
 system's candidate engine, writing only rebuildable derived state that
 asserts nothing (ADR-0005) - this module is the half part 08 §12 names
 separately because it carries a different risk profile: it writes **durable
-records** - post-session decisions, questions and research memos - and it is
-the only half the curation restraint rules bind. Writing badged statements
-into entry bodies is a further piece of the same half, built to its own
-issue (#31) against the write matrix (part 06 §8.2); this module's scope is
-the three record kinds part 08 §13 names on their own: decisions, questions,
-research memos.
+records** - post-session decisions, questions and research memos (#30), and
+badged statements into entry bodies (#31) - and it is the only half the
+curation restraint rules bind.
+
+**Entry statements follow the write matrix** (part 06 §8.2), and
+``record_statement`` is its whole mechanical content. The entry body is
+shared territory and the badge is the ownership marker, so the one thing
+this writer can never do is write unbadged text: there is no badge value
+that produces testimony, and a text carrying a blank line - which would end
+the badged paragraph and start an unbadged one - is refused for the same
+reason. ``[author]`` needs an author-spoken citing turn, the same bar as
+``record_decision``; ``[source]`` and ``[inferred]`` need provenance;
+``[open]`` may carry none (part 06 §9.4's own example carries none, and
+part 15 §23 enumerates the three assertion badges, not four). Every
+provenance reference must be **original material** - source evidence
+(``SRC-``), a transcript turn (``SES-...#T``) or an attributable change
+(``CHG-``), the terminal records part 06 §8.6 names - so a chain that stops
+at a decision, a research memo, a claim or another entry is refused as
+terminating in a derived artifact (part 15 §23), and a manuscript reference
+is refused outright: the book saying something is not evidence that it is
+true, and an entry changes on a settlement (#33), never by harvesting (part
+06 §8.8, part 08 §13.4). ``check_provenance`` is that rule, and
+``memoria validate`` applies the same function to what is on disk, so the
+write rule is a checked property rather than a convention.
+
+**The statement and its provenance are one paragraph.** ``subjects.
+parse_statements`` splits a body on blank lines and reads an unbadged
+paragraph as testimony, so part 06 §9.3's illustrated ``Basis:`` block,
+separated from its statement by a blank line, would parse as the author's
+words. The form written here keeps every provenance line inside the
+statement's own paragraph, one ``— <reference>`` line per reference,
+which is also the form ``decisions.md`` already uses.
+
+**The token is the caller's, from the read it worked from** (ADR-0003):
+``record_statement`` takes the token ``subjects.serve_entry`` minted and
+never mints its own, so an author edit committed between the extractor's
+read and its write - a clean tree, invisible to the dirty-tree guard below
+- is ``Rejected`` as stale and surfaces as a refusal. Revising an existing
+statement is not built: the matrix's "who revises it" column waits on #32's
+human-touched flag, which is what gates a free revision of ``[source]``/
+``[inferred]``/``[open]``.
 
 **One rule does the work** (part 08 §13.1, §13.4, part 06 §9.2): an
 ``[author]`` statement needs a citing transcript turn that is identifiably
@@ -72,9 +107,12 @@ records already written are individually valid and individually cited. It
 is safe because the pass is re-runnable, not because a half-pass is
 harmless - ids are minted one more than the highest already on disk, and
 ``write.create`` rejects an existing file rather than flattening it, so
-re-running writes the missing records and nothing twice. If a record write
-ever stops being independently valid, that reasoning goes with it and this
-module needs real atomicity instead.
+re-running writes the missing records and nothing twice. An entry
+statement is the exception, and the driving session carries it: a re-run
+must re-read the entry for a fresh token anyway, and what it reads is the
+body the last run left, so a statement already there is one it does not
+record again. If a record write ever stops being independently valid, that
+reasoning goes with it and this module needs real atomicity instead.
 """
 
 from __future__ import annotations
@@ -82,10 +120,12 @@ from __future__ import annotations
 import html
 import re
 from dataclasses import dataclass
+from dataclasses import replace as dataclass_replace
 from datetime import datetime
 
-from memoria import references, sessions, write
+from memoria import manuscript, references, sessions, subjects, write
 from memoria.repository import Repository
+from memoria.subjects import Statement
 from memoria.write import Actor, Rejected
 
 DECISIONS_FILENAME = "decisions.md"
@@ -110,6 +150,16 @@ VALID_CONFIDENCE = (
     "insufficient evidence",
     "unknowable from current archive",
 )
+
+# The badges a machine may write into an entry body (part 06 §8.2's write
+# matrix). No fifth value: unbadged text is testimony, and testimony is
+# never machine-written (§8.6, §9.5).
+BADGES = ("author", "source", "inferred", "open")
+# The badges part 15 §23 calls assertions - the ones that must carry
+# provenance. `[open]` is exploratory (part 06 §9.4), not an assertion.
+ASSERTION_BADGES = ("author", "source", "inferred")
+# A provenance line inside a statement's paragraph: `— <reference>`.
+PROVENANCE_PREFIX = "— "
 
 _DECISION_ID = re.compile(r"^DEC-(\d{4})$")
 _DECISION_ENTRY = re.compile(r'<a id="(?P<anchor>dec-\d{4})"></a>\n\n## (?P<id>DEC-\d{4})')
@@ -137,6 +187,16 @@ class QuestionRecord:
 
     citation: str
     text: str
+
+
+@dataclass(frozen=True)
+class StatementRecord:
+    """A badged statement as written into an entry body."""
+
+    entry_id: str
+    badge: str
+    text: str
+    provenance: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -327,6 +387,142 @@ def record_question(
     block = f"[open] {_escape(text)}\n\n— {citation}\n\n"
     _append(repository, QUESTIONS_FILENAME, block, actor)
     return QuestionRecord(citation=citation, text=text)
+
+
+# --- badged statements into entry bodies (the write matrix) -------------------
+
+
+def check_provenance(ref: str) -> str:
+    """The canonical citation for ``ref`` if it may stand as a statement's
+    provenance, or a ``RecordExtractorError`` saying why it may not.
+
+    Original material only - see the module docstring. One function for
+    both directions: ``record_statement`` refuses through it before writing,
+    and ``memoria validate`` reports through it what a hand edit wrote.
+    """
+    try:
+        reference = references.parse(ref)
+    except references.BadReference as exc:
+        raise RecordExtractorError(str(exc)) from exc
+    if isinstance(
+        reference,
+        (references.SourceReference, references.SessionReference, references.ChangeReference),
+    ):
+        return references.format_citation(reference)
+    is_manuscript = isinstance(
+        reference, (references.ChapterReference, references.SectionReference)
+    ) or (
+        isinstance(reference, references.PathReference)
+        and (
+            reference.path.parts[0] == "chapters"
+            or str(reference.path) in manuscript.BRIEF_FILENAMES
+        )
+    )
+    if is_manuscript:
+        raise RecordExtractorError(
+            f"{ref} is manuscript prose, and the book saying something is not "
+            "evidence that it is true - an entry changes on a settlement, "
+            "never by harvesting a passage (part 06 §8.8, part 08 §13.4)"
+        )
+    raise RecordExtractorError(
+        f"{ref} is not original material - provenance terminates in source "
+        "evidence (SRC-), a transcript turn (SES-...#T) or a change (CHG-), "
+        "never in a derived artifact (part 15 §23)"
+    )
+
+
+def statement_provenance(statement: Statement) -> tuple[str, ...]:
+    """The references a statement's own paragraph cites, one per
+    ``— <reference>`` line - the form ``record_statement`` writes."""
+    return tuple(
+        line[len(PROVENANCE_PREFIX):].strip()
+        for line in statement.text.splitlines()
+        if line.startswith(PROVENANCE_PREFIX)
+    )
+
+
+def check_author_evidence(repository: Repository, provenance: tuple[str, ...]) -> str:
+    """Part 06 §9.2's bar for an ``[author]`` statement, over its provenance:
+    one reference is a transcript turn, and that turn is the author's own.
+    Returns the citation. A turn that does not resolve is not this check's
+    finding - ``memoria validate`` reports it once, as a missing turn."""
+    for ref in provenance:
+        reference = references.parse(ref)
+        if isinstance(reference, references.SessionReference) and reference.turn is not None:
+            role, citation = _cite_turn(repository, reference.session_id, reference.turn)
+            if role != "Author":
+                raise RecordExtractorError(
+                    f"{citation} is the {role}'s turn, not the author's - an "
+                    "[author] statement needs identifiable author evidence "
+                    "(part 06 §9.2)"
+                )
+            return citation
+    raise RecordExtractorError(
+        "an [author] statement needs a citing transcript turn (SES-...#T) "
+        "that is the author's own (part 06 §8.2, §9.2)"
+    )
+
+
+def record_statement(
+    repository: Repository,
+    entry_id: str,
+    badge: str | None,
+    text: str,
+    provenance: tuple[str, ...],
+    token: str,
+    actor: Actor | None = None,
+) -> StatementRecord:
+    """Append one badged statement to an entry's body, per the write matrix
+    (part 06 §8.2) - see the module docstring for the rules in full.
+
+    ``token`` is the one ``subjects.serve_entry`` minted for the read this
+    statement was composed against; the write is refused as stale if the
+    file moved underneath. Everything else on the entry - testimony, match
+    terms, the overlay, unmodelled frontmatter - round-trips untouched.
+    """
+    actor = actor or CURATOR
+    ensure_clean_tree(repository)
+    if "/" not in entry_id:
+        raise RecordExtractorError(f"not an entry id: {entry_id!r} - expected SUB-<subject>/<entry>")
+    if badge not in BADGES:
+        raise RecordExtractorError(
+            f"badge {badge!r} is not one of {', '.join(BADGES)} - the Curator "
+            "never writes testimony; unbadged text is the author's hand alone "
+            "(part 06 §8.2)"
+        )
+    text = text.strip()
+    if not text or "\n" in text:
+        raise RecordExtractorError(
+            "a statement is one paragraph: its text may not be empty or span "
+            "lines - a blank line would end the badged paragraph and start an "
+            "unbadged one, which is testimony (part 06 §8.2)"
+        )
+    citations = tuple(check_provenance(ref) for ref in provenance)
+    if badge == "author":
+        check_author_evidence(repository, citations)
+    elif badge in ASSERTION_BADGES and not citations:
+        raise RecordExtractorError(
+            f"a [{badge}] statement needs provenance (part 06 §9, part 15 §23)"
+        )
+
+    subject_id, entry_slug = entry_id.split("/", 1)
+    try:
+        relative_path = subjects.entry_relative_path(repository, subject_id, entry_slug)
+        # The token is the caller's; the one minted here is discarded for
+        # `subjects.set_match_terms`'s reason.
+        entry, _minted_here_and_unused = subjects.serve_entry(repository, subject_id, entry_slug)
+    except subjects.SubjectError as exc:
+        raise RecordExtractorError(str(exc)) from exc
+    block = "\n".join([f"[{badge}] {text}", *(f"{PROVENANCE_PREFIX}{c}" for c in citations)])
+    body = f"{entry.body.rstrip()}\n\n{block}" if entry.body.strip() else block
+    content = subjects.entry_to_markdown(dataclass_replace(entry, body=body))
+    result = write.write(repository, relative_path, token, content, actor)
+    if isinstance(result, Rejected):
+        raise RecordExtractorError(
+            f"could not write {relative_path}: {result.outcome} - re-read the "
+            "entry and re-run the pass"
+        )
+    return StatementRecord(entry_id=entry_id, badge=badge, text=text, provenance=citations)
 
 
 # --- research memos -------------------------------------------------------------
