@@ -28,8 +28,9 @@ a twelfth thing this module computes.
 **Two bullets have no mechanical source yet, and this module does not
 invent one.** "Human/Curator conflicts" is the Memoria note the Curator
 writes when evidence conflicts with a human-touched statement (CONTEXT.md's
-"Memoria note" / "Human-touched flag") - part 08 §14.2's write path is not
-built anywhere in this codebase yet. "Unsupported interpretation statements"
+"Memoria note" / "Human-touched flag") - ``memoria.record_extractor.
+revise_statement`` writes them (#32), but nothing yet collects the notes
+across entries into a report. "Unsupported interpretation statements"
 is, in the plan doc's own words, "the one check [in §23] that needs a
 model" - the opposite of what this report is allowed to do. Both fields
 below are always empty rather than backed by an invented proxy (an

@@ -235,9 +235,11 @@ class StatementOut(BaseModel):
     value: **the absence of a badge is the attribution** (part 06 §9.5),
     which is why it is a nullable field on the shape rather than an omitted
     key. A response that dropped it would not be serving the entry.
-    Non-null values are ``author``, ``source``, ``inferred`` and ``open``; a
-    client renders whatever value is present rather than assuming that list
-    is closed, the same posture ``SourceSummary.source_type`` takes.
+    Non-null values are ``author``, ``source``, ``inferred`` and ``open``,
+    plus ``memoria-note`` for a Memoria note (part 08 §14.2, #32) - served
+    whole, outside the audit-visible body like ``[open]``; a client renders
+    whatever value is present rather than assuming that list is closed, the
+    same posture ``SourceSummary.source_type`` takes.
     """
 
     badge: str | None = None

@@ -24,6 +24,7 @@ from memoria.record_extractor import (
     record_decision,
     record_question,
     record_research_memo,
+    record_statement,
 )
 from memoria.records import ReadError
 from memoria.records import read as records_read
@@ -543,3 +544,271 @@ def test_record_statement_refuses_a_dirty_tree(tmp_path):
 
     with pytest.raises(RecordExtractorError, match="uncommitted human modifications"):
         record_statement(repository, BOB, "source", "Bob called.", ("SRC-000184 P17",), token)
+
+
+# --- revising a statement: the matrix's other column, gated by the flag (#32) --
+
+
+INFERRED = "Fear of losing control appears to intensify after the call."
+
+
+def _statement_in(repository: Repository, entry_id: str, badge, prefix: str):
+    """The one parsed statement of ``entry_id``'s body with this badge whose
+    text starts with ``prefix`` - the handle ``revise_statement`` takes."""
+    from memoria.subjects import parse_statements
+
+    entry, token = _served(repository, entry_id)
+    (statement,) = [
+        s for s in parse_statements(entry.body)
+        if s.badge == badge and s.text.startswith(prefix)
+    ]
+    return statement, token
+
+
+def _hand_edit(repository: Repository, relative_path: str, old: str, new: str) -> None:
+    """The author edits the entry in place and commits by hand - the case
+    the badges cannot see (#32), landing in history as a non-Curator
+    commit."""
+    path = repository.root / relative_path
+    path.write_text(path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+    _git(repository.root, "add", relative_path)
+    _git(repository.root, "commit", "-q", "-m", "hand edit")
+
+
+def test_revise_rewrites_a_free_statement_in_place_and_nothing_else(tmp_path):
+    """Part 06 §8.2: `[source]`/`[inferred]`/`[open]` are the Curator's to
+    revise freely while nothing has flagged them."""
+    from memoria.record_extractor import StatementRecord, revise_statement
+
+    repository = _repo(tmp_path)
+    relative_path = _entry(repository, BOB, TESTIMONY)
+    _, token = _served(repository, BOB)
+    record_statement(repository, BOB, "inferred", INFERRED, ("SRC-000184 P17",), token)
+    _, token = _served(repository, BOB)
+    record_statement(repository, BOB, "open", "Did Bob call twice?", (), token)
+    statement, token = _statement_in(repository, BOB, "inferred", "Fear")
+
+    record = revise_statement(
+        repository, BOB, statement, "source", "Bob feared losing control; he said so.",
+        ("SRC-000190 P2",), token,
+    )
+
+    assert isinstance(record, StatementRecord)
+    text = (tmp_path / relative_path).read_text(encoding="utf-8")
+    assert INFERRED not in text
+    assert (
+        f"{TESTIMONY}\n\n[source] Bob feared losing control; he said so.\n— SRC-000190 ¶2"
+        "\n\n[open] Did Bob call twice?\n"
+    ) in text
+    assert subprocess.run(
+        ["git", "log", "-1", "--format=%ae"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout.strip() == CURATOR.email
+
+
+def test_a_conflict_with_a_human_touched_statement_becomes_a_memoria_note(tmp_path):
+    """The fourth checkbox, part 08 §14.2 end to end: the author hand-edits
+    a Curator statement; the pass flags it; when evidence later conflicts,
+    the Curator appends a Memoria note after it and the statement is left
+    byte-identical."""
+    from memoria.record_extractor import MEMORIA_NOTE_CLOSE, MemoriaNoteRecord, revise_statement
+
+    repository = _repo(tmp_path)
+    relative_path = _entry(repository, BOB, TESTIMONY)
+    _, token = _served(repository, BOB)
+    record_statement(repository, BOB, "inferred", INFERRED, ("SRC-000184 P17",), token)
+    edited = "Fear of losing control appears to intensify after the call, and never eases."
+    _hand_edit(repository, relative_path, INFERRED, edited)
+    before = (tmp_path / relative_path).read_text(encoding="utf-8")
+    statement, token = _statement_in(repository, BOB, "inferred", "Fear")
+
+    record = revise_statement(
+        repository, BOB, statement, "source", "Later letters show the fear easing by spring.",
+        ("SRC-000190 P2", "SES-20260912-1432#T3"), token, today="2026-10-18",
+    )
+
+    assert isinstance(record, MemoriaNoteRecord)
+    assert record.statement == statement
+    note = (
+        "> **Memoria note — 2026-10-18**\n"
+        ">\n"
+        "> Later letters show the fear easing by spring.\n"
+        "> See SRC-000190 ¶2 and SES-20260912-1432#T003.\n"
+        f"> {MEMORIA_NOTE_CLOSE}"
+    )
+    assert record.note == note
+    after = (tmp_path / relative_path).read_text(encoding="utf-8")
+    # Byte-identical up to and including the statement; the note follows it.
+    statement_end = before.index(edited) + len(edited) + len("\n— SRC-000184 ¶17")
+    assert after[:statement_end] == before[:statement_end]
+    assert after[statement_end:] == f"\n\n{note}" + before[statement_end:]
+
+
+def test_a_conflict_with_testimony_becomes_a_memoria_note(tmp_path):
+    """Author-supreme: testimony outranks documentary evidence
+    (CONTEXT.md), and the Curator never writes unbadged text - so a
+    conflict with it is a note, never a rewrite."""
+    from memoria.record_extractor import MemoriaNoteRecord, revise_statement
+
+    repository = _repo(tmp_path)
+    relative_path = _entry(repository, BOB, TESTIMONY)
+    before = (tmp_path / relative_path).read_text(encoding="utf-8")
+    statement, token = _statement_in(repository, BOB, None, "Bob was born")
+
+    record = revise_statement(
+        repository, BOB, statement, "source", "The register gives 1961.", ("SRC-000002 P1",), token,
+    )
+
+    assert isinstance(record, MemoriaNoteRecord)
+    after = (tmp_path / relative_path).read_text(encoding="utf-8")
+    assert after.startswith(before.rstrip("\n") + "\n\n> **Memoria note — ")
+    assert "The register gives 1961." in after
+    assert TESTIMONY in after
+
+
+def test_an_author_statement_is_revised_only_on_a_new_citing_turn(tmp_path):
+    """The matrix's `[author]` row: revised by the Curator "only on a new
+    citing turn". Evidence alone earns a note; a new author-spoken turn,
+    offered as `[author]`, earns the revision."""
+    from memoria.record_extractor import MemoriaNoteRecord, StatementRecord, revise_statement
+
+    repository = _repo(tmp_path)
+    relative_path = _entry(repository, BOB, TESTIMONY)
+    session_id = _session(
+        repository, SESSION_ID, [("user", DECISION), ("user", "Actually, make it chapter 10.")]
+    )
+    _, token = _served(repository, BOB)
+    record_statement(repository, BOB, "author", DECISION, (f"{session_id}#T1",), token)
+    statement, token = _statement_in(repository, BOB, "author", "Let's keep")
+
+    noted = revise_statement(
+        repository, BOB, statement, "source", "Chapter 9 already reveals it.", ("SRC-000184 P17",), token,
+    )
+    assert isinstance(noted, MemoriaNoteRecord)
+    assert f"[author] {DECISION}" in (tmp_path / relative_path).read_text(encoding="utf-8")
+
+    statement, token = _statement_in(repository, BOB, "author", "Let's keep")
+    revised = revise_statement(
+        repository, BOB, statement, "author", "Keep Bob's knowledge ambiguous until chapter 10.",
+        (f"{session_id}#T2",), token,
+    )
+    assert isinstance(revised, StatementRecord)
+    text = (tmp_path / relative_path).read_text(encoding="utf-8")
+    assert f"[author] {DECISION}" not in text
+    assert "[author] Keep Bob's knowledge ambiguous until chapter 10.\n— SES-20260912-1432#T002" in text
+
+
+def test_a_memoria_note_is_outside_the_audit_visible_body_and_write_side_assembly(tmp_path):
+    """The fifth checkbox, both halves: the note is in the file, and neither
+    the audit's comparison text nor assembly's loaded Tier 2 carries it."""
+    from memoria.assembly import assemble
+    from memoria.audit import audit_visible_body
+    from memoria.manuscript import Brief
+    from memoria.record_extractor import revise_statement
+
+    repository = _repo(tmp_path)
+    _entry(repository, BOB, TESTIMONY)
+    statement, token = _statement_in(repository, BOB, None, "Bob was born")
+    revise_statement(
+        repository, BOB, statement, "source", "The register gives 1961.", ("SRC-000002 P1",), token,
+    )
+
+    entry, _ = _served(repository, BOB)
+    assert "Memoria note" in entry.body
+    visible = audit_visible_body(entry)
+    assert TESTIMONY in visible
+    assert "Memoria note" not in visible and "1961" not in visible
+
+    context = assemble(repository, "SES-test", Brief(id="SEC-0001", text="My years with Bob."))
+    (resolved,) = context.resolved_entries
+    assert resolved.entry_id == BOB
+    assert TESTIMONY in resolved.audit_visible_body
+    assert "Memoria note" not in resolved.audit_visible_body
+    assert "1961" not in resolved.audit_visible_body
+
+
+def test_a_memoria_note_is_retrievable_through_read_ref_on_the_entry(tmp_path):
+    """The sixth checkbox: author-facing means reachable. `read(SUB-x/y)`
+    serves the entry file verbatim, note included."""
+    from memoria.record_extractor import revise_statement
+
+    repository = _repo(tmp_path)
+    _entry(repository, BOB, TESTIMONY)
+    statement, token = _statement_in(repository, BOB, None, "Bob was born")
+    revise_statement(
+        repository, BOB, statement, "source", "The register gives 1961.", ("SRC-000002 P1",), token,
+        today="2026-10-18",
+    )
+
+    served = records_read(repository, BOB)
+
+    assert "> **Memoria note — 2026-10-18**" in served.text
+    assert "> The register gives 1961.\n> See SRC-000002 ¶1.\n" in served.text
+
+
+def test_revise_refuses_a_dirty_tree_and_says_so(tmp_path):
+    """The third checkbox holds for the revision write too - one rule, one
+    place, at the top of every write."""
+    from memoria.record_extractor import revise_statement
+
+    repository = _repo(tmp_path)
+    relative_path = _entry(repository, BOB, f"{TESTIMONY}\n\n[inferred] {INFERRED}")
+    statement, token = _statement_in(repository, BOB, "inferred", "Fear")
+    (tmp_path / "decisions.md").write_text("mid-thought\n", encoding="utf-8")
+    _git(tmp_path, "add", "decisions.md")
+    _git(tmp_path, "commit", "-q", "-m", "track decisions")
+    (tmp_path / "decisions.md").write_text("mid-thought, still\n", encoding="utf-8")
+    before = (tmp_path / relative_path).read_text(encoding="utf-8")
+
+    with pytest.raises(RecordExtractorError, match="uncommitted human modifications \\(decisions.md\\)"):
+        revise_statement(repository, BOB, statement, "source", "Bob said so.", ("SRC-000184 P17",), token)
+
+    assert (tmp_path / relative_path).read_text(encoding="utf-8") == before
+
+
+def test_revise_refuses_a_statement_that_is_no_longer_in_the_body(tmp_path):
+    from memoria.record_extractor import revise_statement
+    from memoria.subjects import Statement
+
+    repository = _repo(tmp_path)
+    _entry(repository, BOB, TESTIMONY)
+    _, token = _served(repository, BOB)
+
+    with pytest.raises(RecordExtractorError, match="no such statement"):
+        revise_statement(
+            repository, BOB, Statement(badge="inferred", text="Never written."),
+            "source", "Bob said so.", ("SRC-000184 P17",), token,
+        )
+
+
+def test_a_memoria_note_itself_is_not_revised(tmp_path):
+    from memoria.record_extractor import revise_statement
+    from memoria.subjects import MEMORIA_NOTE
+
+    repository = _repo(tmp_path)
+    _entry(repository, BOB, TESTIMONY)
+    statement, token = _statement_in(repository, BOB, None, "Bob was born")
+    revise_statement(
+        repository, BOB, statement, "source", "The register gives 1961.", ("SRC-000002 P1",), token,
+    )
+    note, token = _statement_in(repository, BOB, MEMORIA_NOTE, "> **Memoria note")
+
+    with pytest.raises(RecordExtractorError, match="not a statement"):
+        revise_statement(repository, BOB, note, "source", "Again.", ("SRC-000002 P1",), token)
+
+
+def test_a_revision_validates_the_replacement_exactly_as_an_append(tmp_path):
+    """No badge value revises into testimony, and an assertion badge still
+    needs provenance - the same `_statement_block` both writes go through."""
+    from memoria.record_extractor import revise_statement
+
+    repository = _repo(tmp_path)
+    relative_path = _entry(repository, BOB, f"{TESTIMONY}\n\n[inferred] {INFERRED}")
+    statement, token = _statement_in(repository, BOB, "inferred", "Fear")
+    before = (tmp_path / relative_path).read_text(encoding="utf-8")
+
+    with pytest.raises(RecordExtractorError, match="testimony"):
+        revise_statement(repository, BOB, statement, None, "Bob feared it.", (), token)
+    with pytest.raises(RecordExtractorError, match="provenance"):
+        revise_statement(repository, BOB, statement, "source", "Bob feared it.", (), token)
+
+    assert (tmp_path / relative_path).read_text(encoding="utf-8") == before

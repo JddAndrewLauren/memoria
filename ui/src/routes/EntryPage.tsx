@@ -31,14 +31,16 @@ const BADGE_TONE: Record<string, Tone> = {
   open: "neutral",
   // A settlement (#33) is the author's own act, so it takes the author's colour.
   settled: "blue",
+  // §19.6's amber card: the Curator's note on a statement it may not
+  // rewrite (part 08 §14.2, #32), served under this pseudo-badge.
+  "memoria-note": "amber",
 };
 
 // The audit-visible body is testimony and every badged statement except
-// `[open]` - `memoria.subjects.is_audit_visible` on the server side, and
-// this is the same line drawn on the same field. Memoria notes join
-// `[open]` outside it when #32 lands.
+// `[open]` and a Memoria note - `memoria.subjects.is_audit_visible` on the
+// server side, and this is the same line drawn on the same field.
 function isAuditVisible(statement: StatementOut): boolean {
-  return statement.badge !== "open";
+  return statement.badge !== "open" && statement.badge !== "memoria-note";
 }
 
 /**
