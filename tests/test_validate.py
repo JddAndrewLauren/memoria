@@ -1,5 +1,7 @@
 import hashlib
 
+import pytest
+
 
 from memoria.manifest import ManifestEntry, format_id, load_manifest, save_manifest
 from memoria.subjects import Entry, Subject, entry_to_markdown, subject_to_markdown
@@ -610,3 +612,130 @@ def test_validate_fails_and_names_a_citation_to_a_session_with_no_transcript(tmp
     assert len(errors) == 1
     assert "SES-20260913-0900#T001" in errors[0]
     assert "questions.md" in errors[0]
+
+
+# --- entry statements: badge, provenance, and where it terminates (#31) ------
+
+
+def _write_entry(repo_root, entry_id, body):
+    subject_id, entry_slug = entry_id.split("/")
+    _write_subject_prompt(
+        repo_root, subject_id, subject_to_markdown(_make_subject(id=subject_id))
+    )
+    entry_path = repo_root / "subjects" / subject_id.removeprefix("SUB-") / f"{entry_slug}.md"
+    entry_path.write_text(entry_to_markdown(Entry(id=entry_id, body=body)), encoding="utf-8")
+    return entry_path
+
+
+def test_validate_passes_badged_statements_carrying_original_provenance(tmp_path):
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    _write_transcript(
+        repo_root, "SES-20260912-1432", [(1, "Author", "Bob knew by chapter 5.")]
+    )
+    _write_entry(
+        repo_root, "SUB-people/bob",
+        "Bob was born in 1962.\n\n"
+        "[source] Bob called on July 17.\n— SRC-000184 ¶17\n\n"
+        "[author] Bob knew by chapter 5.\n— SES-20260912-1432#T001\n\n"
+        "[inferred] Bob feared losing control.\n— SRC-000184 ¶17\n— SES-20260912-1432#T001\n\n"
+        "[open] Maybe he called twice.\n\n"
+        "— a dash line in testimony is testimony, not provenance",
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert errors == []
+
+
+def test_validate_fails_an_author_statement_lacking_a_citing_turn(tmp_path):
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    _write_entry(
+        repo_root, "SUB-people/bob", "[author] Bob knew by chapter 5.\n— SRC-000184 ¶17"
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert len(errors) == 1
+    assert "citing transcript turn" in errors[0]
+    assert "subjects/people/bob.md" in errors[0].replace("\\", "/")
+
+
+def test_validate_fails_an_author_statement_citing_the_assistants_turn(tmp_path):
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    _write_transcript(
+        repo_root, "SES-20260912-1432", [(1, "Assistant", "Maybe Bob knew by chapter 5.")]
+    )
+    _write_entry(
+        repo_root, "SUB-people/bob",
+        "[author] Bob knew by chapter 5.\n— SES-20260912-1432#T001",
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert len(errors) == 1
+    assert "Assistant" in errors[0]
+
+
+def test_validate_fails_an_author_statement_whose_turn_is_missing_once_not_twice(tmp_path):
+    """A missing turn is already `_validate_session_turns`'s finding; the
+    statement check does not report the same hole a second time."""
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    _write_entry(
+        repo_root, "SUB-people/bob",
+        "[author] Bob knew by chapter 5.\n— SES-20260912-1432#T001",
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert len(errors) == 1
+    assert "missing transcript turn" in errors[0]
+
+
+@pytest.mark.parametrize("badge", ["source", "inferred", "author"])
+def test_validate_fails_a_badged_statement_lacking_provenance(tmp_path, badge):
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    _write_entry(repo_root, "SUB-people/bob", f"[{badge}] Bob called on July 17.")
+
+    errors = validate(evidence_root, repo_root)
+
+    assert len(errors) == 1
+    assert "no provenance" in errors[0]
+    assert f"[{badge}]" in errors[0]
+
+
+def test_validate_passes_an_open_line_without_provenance(tmp_path):
+    """Part 06 §9.4's own example carries none: `[open]` is exploratory,
+    not an assertion, and part 15 §23 lists the three assertion badges."""
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    _write_entry(repo_root, "SUB-people/bob", "[open] Maybe he called twice.")
+
+    assert validate(evidence_root, repo_root) == []
+
+
+@pytest.mark.parametrize(
+    "reference", ["DEC-0001", "RES-20261018-003", "CLM-0041", "SUB-people/alice"]
+)
+def test_validate_fails_provenance_terminating_in_a_derived_artifact(tmp_path, reference):
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    _write_entry(
+        repo_root, "SUB-people/bob", f"[inferred] Bob feared losing control.\n— {reference}"
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert len(errors) == 1
+    assert "original material" in errors[0]
+    assert reference in errors[0]
+
+
+@pytest.mark.parametrize("reference", ["CHP-0001", "chapters/08/draft.md"])
+def test_validate_fails_provenance_harvested_from_the_manuscript(tmp_path, reference):
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    _write_entry(
+        repo_root, "SUB-people/bob", f"[source] Bob knew by chapter 5.\n— {reference}"
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert len(errors) == 1
+    assert "settlement" in errors[0]

@@ -16,10 +16,24 @@ from memoria.manifest import (
     load_converter_pins,
     load_manifest,
 )
+from memoria.record_extractor import (
+    ASSERTION_BADGES,
+    RecordExtractorError,
+    check_author_evidence,
+    check_provenance,
+    statement_provenance,
+)
 from memoria.records import NORMALIZED_RELATIVE_PATH, ReadError
 from memoria.records import read as read_ref
 from memoria.repository import Repository
-from memoria.subjects import SUBJECTS_RELATIVE_PATH, SubjectError, parse_entry, parse_subject
+from memoria.sessions import SessionError
+from memoria.subjects import (
+    SUBJECTS_RELATIVE_PATH,
+    SubjectError,
+    parse_entry,
+    parse_statements,
+    parse_subject,
+)
 
 _SRC_ID_RE = re.compile(r"SRC-\d{6}", re.IGNORECASE)
 _RAW_SHA256_RE = re.compile(r"^raw_sha256:\s*(\S+)\s*$", re.MULTILINE)
@@ -60,7 +74,9 @@ def validate(
     resolves to an actual record, that every record's ``raw_sha256``
     still matches what the manifest records for its raw unit, and that
     every ``SES-...#T017`` citation names a turn an actual session
-    transcript carries (#28).
+    transcript carries (#28), and that every badged assertion in an entry
+    body carries provenance that terminates in original material, with an
+    ``[author]`` statement citing an author-spoken turn (#31, part 15 §23).
 
     Returns a list of human-readable error messages; an empty list means the
     corpus matches the manifest exactly and no SRC- ID is left unresolved.
@@ -113,6 +129,7 @@ def validate(
     errors.extend(_validate_normalized_src_ids(repo_root))
     errors.extend(_validate_raw_sha256_matches_manifest(repo_root, entries))
     errors.extend(_validate_subjects(repo_root))
+    errors.extend(_validate_entry_statements(repo_root))
     errors.extend(_validate_converter_pins(repo_root, manifest_path))
     errors.extend(_validate_gather_overlay(repo_root))
     errors.extend(_validate_session_turns(repo_root))
@@ -343,4 +360,53 @@ def _validate_subjects(repo_root: Path) -> list[str]:
                     f"directory - expected subject {expected_subject_id!r}"
                 )
 
+    return errors
+
+
+def _validate_entry_statements(repo_root: Path) -> list[str]:
+    """Every assertion badge in an entry body carries provenance, every
+    provenance reference is original material, and an ``[author]`` statement
+    cites an author-spoken transcript turn (#31, part 15 §23) - through the
+    same ``record_extractor`` rules the write itself refuses on, so what the
+    extractor may not write is what a hand edit may not leave behind either.
+
+    ``[open]`` is not checked: part 06 §9.4's own example carries no
+    provenance, and §23 names the three assertion badges. An entry that does
+    not parse is ``_validate_subjects``'s finding; a cited turn that does not
+    resolve is ``_validate_session_turns``'s. Neither is repeated here.
+    """
+    subjects_dir = repo_root / SUBJECTS_RELATIVE_PATH
+    if not subjects_dir.is_dir():
+        return []
+    repository = Repository(root=repo_root)
+
+    errors = []
+    for entry_path in sorted(subjects_dir.glob("*/*.md")):
+        if entry_path.name == "_subject.md":
+            continue
+        try:
+            entry = parse_entry(entry_path.read_text(encoding="utf-8"), source=str(entry_path))
+        except SubjectError:
+            continue
+        where = entry_path.relative_to(repo_root).as_posix()
+        for statement in parse_statements(entry.body):
+            if statement.badge not in ASSERTION_BADGES:
+                continue
+            label = f"[{statement.badge}] {statement.text.splitlines()[0][:60]}"
+            provenance = statement_provenance(statement)
+            if not provenance:
+                errors.append(f"{where}: no provenance on {label!r}")
+                continue
+            citations = []
+            for ref in provenance:
+                try:
+                    citations.append(check_provenance(ref))
+                except RecordExtractorError as exc:
+                    errors.append(f"{where}: {label!r} cites {exc}")
+            if statement.badge == "author":
+                try:
+                    check_author_evidence(repository, tuple(citations))
+                except RecordExtractorError as exc:
+                    if not isinstance(exc.__cause__, SessionError):
+                        errors.append(f"{where}: {label!r} - {exc}")
     return errors
