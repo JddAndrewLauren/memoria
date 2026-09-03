@@ -236,7 +236,9 @@ def resolve_claude_transcript(
     if not session_id:
         raise SessionError(
             f"{CLAUDE_CODE_SESSION_ID_ENV_VAR} is not set, so there is no "
-            f"session id to search {projects_root} for"
+            f"session id to search {projects_root} for; it is set only inside "
+            "a Claude Code session - from a plain shell, pass the transcript "
+            "path to derive-session instead"
         )
     matches = sorted(projects_root.glob(f"*/{session_id}.jsonl"))
     if not matches:

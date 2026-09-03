@@ -37,6 +37,7 @@ import subprocess
 from dataclasses import dataclass
 
 from memoria import authorship, context_manifest, references, sessions
+from memoria.audit import paragraph_spans
 from memoria.changes import CHANGE_ID_TRAILER
 from memoria.repository import Repository
 
@@ -118,7 +119,7 @@ def trace(repository: Repository, ref: str) -> Trace:
     if not path.is_file():
         raise TraceError(f"{reference.section_id} has no prose yet: no {relative}")
     text = path.read_text(encoding="utf-8")
-    spans = authorship.paragraph_spans(text)
+    spans = paragraph_spans(text)
     if not 1 <= reference.paragraph <= len(spans):
         raise TraceError(
             f"{reference.section_id} has {len(spans)} paragraph(s); "
