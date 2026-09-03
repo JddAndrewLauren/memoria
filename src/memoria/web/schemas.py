@@ -141,9 +141,17 @@ class CitationOut(BaseModel):
     with ``record``/``paragraph``/``overlay`` all ``None`` - a backlink is
     clickable into the same panel, and the panel does not need a second shape
     to render it (#25's "traverse in both directions"). Wraps
-    ``memoria.records.read`` exactly - the same core function the MCP tool
-    surface calls - so this is the one generic reference read the viewer has,
-    never a second one duplicating ``/sources/{id}``.
+    ``memoria.records.read``, the same composed core the MCP tool surface
+    calls, but narrower: only those two reference kinds resolve, and a bare
+    ``SUB-`` subject or a repository path is a 404 (#145) - so this is the
+    one generic reference read the viewer has, never a second one duplicating
+    ``/sources/{id}`` or a browse over the repository.
+
+    ``anchor`` is the cited paragraph's own stable anchor, from
+    ``NormalizedRecord.anchor_id()`` - served, not reconstructed client-side,
+    the same "no reconstruction by the caller" discipline
+    ``docs/tool-surface.md`` already holds for a search hit's anchor.
+    ``None`` whenever ``paragraph`` is, the same pairing.
     """
 
     ref: str
@@ -151,6 +159,7 @@ class CitationOut(BaseModel):
     text: str
     record: SourceSummary | None = None
     paragraph: int | None = None
+    anchor: str | None = None
     overlay: ReadOverlayOut | None = None
 
 

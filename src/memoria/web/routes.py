@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+import memoria.references as references
 from memoria.index import SearchFilters
 from memoria.index import search as search_index
 from memoria.records import NormalizedRecord, Read, ReadError
@@ -173,6 +174,9 @@ def _to_citation(ref: str, result: Read) -> CitationOut:
         text=result.text,
         record=_to_summary(result.record) if result.record is not None else None,
         paragraph=result.paragraph,
+        anchor=result.record.anchor_id(result.paragraph)
+        if result.record is not None and result.paragraph is not None
+        else None,
         overlay=ReadOverlayOut(
             entry_links=result.overlay.entry_links,
             exclusions=result.overlay.exclusions,
@@ -183,21 +187,53 @@ def _to_citation(ref: str, result: Read) -> CitationOut:
     )
 
 
+def _is_citable(reference: references.Reference) -> bool:
+    """Whether ``reference`` is one of the two shapes the citation panel
+    actually cites - a ``SRC-`` record or paragraph, or a ``SUB-x/y`` entry -
+    rather than the wider set ``memoria.records.read`` resolves for the MCP
+    tool surface (chapters, sections, changes, sessions, decisions, research
+    memos, a bare ``SUB-`` subject, or a repository path). #145: that wider
+    contract was never something the panel needed, and left standing it is
+    the kind of thing that becomes load-bearing by accident - ``GET
+    /api/read?ref=.git/config`` served the file.
+    """
+    if isinstance(reference, references.SourceReference):
+        return True
+    return (
+        isinstance(reference, references.SubjectReference)
+        and reference.entry_slug is not None
+    )
+
+
 @router.get("/read")
 def read(ref: str, repository: Repository = Depends(get_repository)) -> CitationOut:
     """Resolve one reference - the slide-over citation panel's read (§19.9).
 
-    Wraps ``memoria.records.read`` exactly, the same composed core the MCP
-    tool surface's ``read(ref)`` calls: a ``SRC-`` paragraph anchor (a search
-    hit's or a paragraph's own ``anchor``) serves the cited text, its record
-    and its curated-overlay backlinks (#20); a ``SUB-x/y`` entry reference -
-    an overlay's own ``entry_links``/``exclusions`` - serves the entry's raw
-    text, so a backlink is clickable into the same panel in both directions
-    (#25's acceptance criteria) without a second read shape. Ledgering the
-    served read is the caller's job (``memoria.records.read``'s own
-    docstring) - this route never imports ``memoria.ledger``, so an author's
-    own read here writes nothing to ``events.jsonl``.
+    Wraps ``memoria.records.read``, the same composed core the MCP tool
+    surface's ``read(ref)`` calls, but narrower: a ``SRC-`` paragraph anchor
+    (a search hit's or a paragraph's own ``anchor``) serves the cited text,
+    its record and its curated-overlay backlinks (#20); a ``SUB-x/y`` entry
+    reference - an overlay's own ``entry_links``/``exclusions`` - serves the
+    entry's raw text, so a backlink is clickable into the same panel in both
+    directions (#25's acceptance criteria) without a second read shape.
+    Anything else - including a bare ``SUB-`` subject or a repository path
+    that would otherwise resolve - is a 404: this route is not the MCP
+    ``read(ref)`` tool and does not owe it the same contract (#145,
+    ``_is_citable``). Ledgering the served read is the caller's job
+    (``memoria.records.read``'s own docstring) - this route never imports
+    ``memoria.ledger``, so an author's own read here writes nothing to
+    ``events.jsonl``.
     """
+    try:
+        reference = references.parse(ref)
+    except references.BadReference:
+        reference = None
+    if reference is not None and not _is_citable(reference):
+        raise HTTPException(
+            status_code=404,
+            detail=f"{ref!r} is not a citable reference: /api/read serves "
+            "SRC- records and paragraphs, and SUB-x/y entries, only",
+        )
     try:
         result = read_ref(repository, ref)
     except ReadError as exc:

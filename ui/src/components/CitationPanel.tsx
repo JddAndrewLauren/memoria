@@ -115,10 +115,6 @@ function CitationPanel({ refs, onBack, onClose }: CitationPanelProps) {
   );
 }
 
-function anchorFor(recordId: string, paragraph: number): string {
-  return `${recordId.toLowerCase()}-p${paragraph}`;
-}
-
 function CitationBody({
   data,
   onNavigateAway,
@@ -158,8 +154,8 @@ function CitationBody({
         <div className="mt-4 flex gap-2">
           <Link
             to={
-              paragraph !== null
-                ? `/sources/${record.id}#${anchorFor(record.id, paragraph)}`
+              paragraph !== null && data.anchor
+                ? `/sources/${record.id}#${data.anchor}`
                 : `/sources/${record.id}`
             }
             onClick={onNavigateAway}
