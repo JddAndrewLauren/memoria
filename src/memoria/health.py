@@ -48,7 +48,6 @@ when it is unset - ``None`` says "not checked", an empty tuple would say
 
 from __future__ import annotations
 
-import html
 import re
 import subprocess
 from dataclasses import dataclass
@@ -223,8 +222,11 @@ def _open_questions(repository: Repository) -> tuple[OpenQuestion, ...]:
         citation = match.group("citation")
         date_match = _SES_DATE_RE.match(citation)
         date = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}" if date_match else None
+        # record_question (#151) writes this text unescaped - questions.md
+        # has no anchors for it to forge, so there is nothing to reverse
+        # here.
         questions.append(
-            OpenQuestion(text=html.unescape(match.group("text")), citation=citation, date=date)
+            OpenQuestion(text=match.group("text"), citation=citation, date=date)
         )
     return tuple(questions)
 

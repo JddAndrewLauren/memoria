@@ -42,7 +42,6 @@ case this module is built for.
 
 from __future__ import annotations
 
-import html
 import json
 import re
 import subprocess
@@ -53,6 +52,7 @@ from pathlib import Path
 
 import yaml
 
+from memoria.entity_escape import escape_entry_text, unescape_entry_text
 from memoria.repository import Repository
 
 METADATA_FILENAME = "metadata.yaml"
@@ -161,7 +161,7 @@ def read_session(repository: Repository, session_id: str, turn: int | None = Non
         structure = _STRUCTURE_AFTER_BODY.search(body)
         if structure is not None:
             body = body[: structure.start()]
-        return html.unescape(body)
+        return unescape_entry_text(body)
     raise SessionError(
         f"{session_id} has {len(headings)} turn(s); there is no T{turn:03d}"
     )
@@ -407,26 +407,18 @@ def _render_transcript(turns: list[Turn], served_by_turn: dict[int, list[str]]) 
     followed by what it served, when it served anything.
 
     The turn's text has ``&`` and ``<`` rendered as entities (see
-    ``_TURN_HEADING``): markdown shows them as typed, and ``read_session``
-    reverses them, but no line of turn text can open with the ``<`` every
-    structural line does."""
+    ``_TURN_HEADING`` and ``memoria.entity_escape``): markdown shows them as
+    typed, and ``read_session`` reverses them, but no line of turn text can
+    open with the ``<`` every structural line does."""
     blocks = []
     for turn in turns:
         heading = f'<a id="t{turn.number:03d}"></a>\n\n## T{turn.number:03d} — {turn.role}'
-        blocks.append(f"{heading}\n\n{_escape_turn_text(turn.text)}")
+        blocks.append(f"{heading}\n\n{escape_entry_text(turn.text)}")
         served = served_by_turn.get(turn.number)
         if served:
-            escaped_served = ", ".join(_escape_turn_text(citation) for citation in served)
+            escaped_served = ", ".join(escape_entry_text(citation) for citation in served)
             blocks.append(f"<small>Served: {escaped_served}</small>")
     return "\n\n".join(blocks) + "\n"
-
-
-def _escape_turn_text(text: str) -> str:
-    """``&`` then ``<`` as entities - exactly the pair ``html.unescape``
-    reverses without touching anything else, and the least alteration that
-    keeps ``<`` out of the rendered text. ``>`` stays: a blockquote the
-    author typed still renders as one."""
-    return text.replace("&", "&amp;").replace("<", "&lt;")
 
 
 def _current_revision(repository: Repository) -> str | None:

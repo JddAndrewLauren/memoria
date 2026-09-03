@@ -117,13 +117,13 @@ reasoning goes with it and this module needs real atomicity instead.
 
 from __future__ import annotations
 
-import html
 import re
 from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
 from datetime import datetime
 
 from memoria import manuscript, references, sessions, subjects, write
+from memoria.entity_escape import escape_entry_text, unescape_entry_text
 from memoria.repository import Repository
 from memoria.subjects import Statement
 from memoria.write import Actor, Rejected
@@ -266,13 +266,6 @@ def _cite_turn(repository: Repository, session_id: str, turn: int) -> tuple[str,
     return role, citation
 
 
-def _escape(text: str) -> str:
-    """``&`` then ``<`` as entities - ``sessions._escape_turn_text``'s exact
-    pair, so free text can never open a ``<a id="...">`` and forge a second
-    entry boundary in ``decisions.md``."""
-    return text.replace("&", "&amp;").replace("<", "&lt;")
-
-
 def _append(repository: Repository, relative_path: str, block: str, actor: Actor) -> None:
     """Append ``block`` to ``relative_path``, creating it if this is its
     first entry - both directions going through ``memoria.write`` so every
@@ -338,7 +331,7 @@ def record_decision(
     block = (
         f'<a id="{decision_id.lower()}"></a>\n\n'
         f"## {decision_id}\n\n"
-        f"[author] {_escape(text)}\n\n"
+        f"[author] {escape_entry_text(text)}\n\n"
         f"— {citation}\n\n"
     )
     _append(repository, DECISIONS_FILENAME, block, actor)
@@ -359,7 +352,7 @@ def read_decision(repository: Repository, decision_id: str) -> str:
             continue
         start = match.end()
         stop = entries[position + 1].start() if position + 1 < len(entries) else len(text)
-        return html.unescape(text[start:stop].strip("\n"))
+        return unescape_entry_text(text[start:stop].strip("\n"))
     raise RecordExtractorError(f"no such decision: {decision_id}")
 
 
@@ -380,11 +373,19 @@ def record_question(
     assertion, whichever role's turn it cites - a question is never
     doctrine, and an interim interpretation stays exploratory until an
     author turn earns it ``[author]`` through ``record_decision``.
+
+    Written unescaped, deliberately (#151): ``memoria.entity_escape`` exists
+    to stop free text forging a document's own structural ``<a id="...">``
+    anchor, and ``questions.md`` has none - no anchors, no ids. Its only
+    entry boundary is the literal ``[open] `` prefix, which escaping ``&``
+    and ``<`` never defended either way, so escaping here bought nothing and
+    had no reader to reverse it. ``decisions.md`` keeps the escape because
+    its entries do open on ``<a id="dec-0088"></a>``.
     """
     actor = actor or CURATOR
     ensure_clean_tree(repository)
     _, citation = _cite_turn(repository, session_id, turn)
-    block = f"[open] {_escape(text)}\n\n— {citation}\n\n"
+    block = f"[open] {text}\n\n— {citation}\n\n"
     _append(repository, QUESTIONS_FILENAME, block, actor)
     return QuestionRecord(citation=citation, text=text)
 
