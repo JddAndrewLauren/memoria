@@ -163,11 +163,36 @@ class ManuscriptParagraph:
         return f"{self.chapter_number:02d}/{self.section_number:02d}#{self.paragraph_index}"
 
 
+def paragraph_spans(text: str) -> list[tuple[int, int]]:
+    """``(start, end)`` character offsets of every paragraph's stripped text,
+    in ``text``, in order - blank-line separated, each stripped of
+    surrounding whitespace, empty runs dropped. ``text[start:end]`` is
+    exactly the paragraph ``_split_paragraphs`` returns at the same
+    position, so ¶N here is ¶N there - ``_split_paragraphs`` is expressed in
+    terms of this so the two cannot drift apart."""
+    spans: list[tuple[int, int]] = []
+    position = 0
+    for match in _BLANK_LINE.finditer(text):
+        _add_paragraph_span(spans, text, position, match.start())
+        position = match.end()
+    _add_paragraph_span(spans, text, position, len(text))
+    return spans
+
+
+def _add_paragraph_span(spans: list[tuple[int, int]], text: str, start: int, end: int) -> None:
+    chunk = text[start:end]
+    stripped = chunk.strip()
+    if not stripped:
+        return
+    lead = len(chunk) - len(chunk.lstrip())
+    spans.append((start + lead, start + lead + len(stripped)))
+
+
 def _split_paragraphs(text: str) -> list[str]:
     """Blank-line paragraph splitting - draft.md is plain prose, carrying
     none of the anchor comments a normalized evidence record's body does, so
     ``records._parse_paragraphs``'s anchor-aware split does not apply here."""
-    return [p.strip() for p in _BLANK_LINE.split(text.strip()) if p.strip()]
+    return [text[start:end] for start, end in paragraph_spans(text)]
 
 
 def manuscript_paragraphs(repository: Repository) -> list[ManuscriptParagraph]:
