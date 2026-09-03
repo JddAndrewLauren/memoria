@@ -8,7 +8,7 @@ from memoria import changes, health
 from memoria.context_manifest import derive_context_manifest
 from memoria.embeddings import default_embed_fn
 from memoria.extraction import RECURRENCE_THRESHOLD_DEFAULT
-from memoria.index import INDEX_RELATIVE_PATH, IndexSchemaError, rebuild
+from memoria.index import INDEX_RELATIVE_PATH, IndexBuildError, IndexSchemaError, rebuild
 from memoria.normalize import normalize as run_normalize
 from memoria.records import NORMALIZED_RELATIVE_PATH
 from memoria.repository import NoEvidenceRoot, from_env, require_evidence_root
@@ -355,7 +355,7 @@ def main(argv=None):
                 # rebuild" moment ADR-0007 names.
                 embed_fn=default_embed_fn,
             )
-        except IndexSchemaError as exc:
+        except (IndexSchemaError, IndexBuildError) as exc:
             print(f"rebuild: {exc}", file=sys.stderr)
             return 1
         records = report.records

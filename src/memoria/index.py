@@ -300,6 +300,19 @@ class IndexSchemaError(Exception):
     """The index file on disk cannot be opened under this build's rules."""
 
 
+class IndexBuildError(Exception):
+    """``embed_fn`` returned a different number of vectors than paragraphs it
+    was given (#154).
+
+    Raised before ``build_index``'s single ``commit()``, so the whole build -
+    the vector table included - rolls back with the rest of the pending
+    transaction: closing a connection with no ``commit()`` discards it, the
+    same way any other mid-build exception already does here. A caller sees
+    either a fully rebuilt index or, on a schema-fresh repository, no
+    ``.memoria/index.db`` at all - never a ``paragraph_vectors`` table
+    silently missing the paragraphs an embedder dropped."""
+
+
 @dataclass
 class SearchResult:
     """One hit: where the match is, and optionally what it looks like.
@@ -439,6 +452,12 @@ def build_index(
     rebuild`` is the one caller that does, so the every-`build_index`-call
     test suite this repository already has never triggers a real model load.
 
+    An ``embed_fn`` that returns fewer vectors than the paragraphs it was
+    handed raises ``IndexBuildError`` naming both counts (#154), rather than
+    letting ``zip`` silently pair only the shorter sequence and leave a
+    truncated tail of paragraphs unsearchable with no error at all. See
+    ``IndexBuildError`` for what a caller finds on disk afterward.
+
     Takes the frozen ``Repository`` value, like ``search`` and every other
     core function that names a location (ADR-0004): the index path is a fact
     about a repository, not an argument a caller composes.
@@ -520,6 +539,12 @@ def build_index(
                     to_embed.append((anchor, paragraph))
         if to_embed:
             vectors = embed_fn([text for _, text in to_embed])
+            if len(vectors) != len(to_embed):
+                raise IndexBuildError(
+                    f"embedder returned {len(vectors)} vectors for "
+                    f"{len(to_embed)} paragraphs; the semantic index was not "
+                    "built"
+                )
             for (anchor, _text), vector in zip(to_embed, vectors):
                 con.execute(
                     "INSERT INTO paragraph_vectors (anchor, embedding) "
