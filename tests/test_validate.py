@@ -1,12 +1,32 @@
 import hashlib
+import re
+from pathlib import Path
 
 import pytest
 
 
 from memoria.manifest import ManifestEntry, format_id, load_manifest, save_manifest
 from memoria.normalize import EMAIL_CONVERTER_VERSION
-from memoria.subjects import Entry, Subject, entry_to_markdown, subject_to_markdown
+from memoria.record_extractor import statement_provenance
+from memoria.subjects import Entry, Subject, entry_to_markdown, parse_statements, subject_to_markdown
 from memoria.validate import validate, validate_warnings
+
+PLAN_06 = (
+    Path(__file__).resolve().parent.parent / "docs" / "plan" / "06-subjects-and-attribution.md"
+)
+
+
+def _lift_example(section_heading):
+    """The first fenced ``markdown`` code block under a ``## <section_heading>``
+    heading in part 06's provenance plan doc, so a test that feeds the doc's
+    own prose to the parser breaks the moment the two drift apart (#187)."""
+    doc = PLAN_06.read_text(encoding="utf-8")
+    match = re.search(
+        rf"^## {re.escape(section_heading)}\n.*?```markdown\n(.*?)```",
+        doc, re.DOTALL | re.MULTILINE,
+    )
+    assert match, f"no fenced markdown example found under {section_heading!r}"
+    return match.group(1).strip()
 
 
 def _make_subject(**overrides):
@@ -730,6 +750,51 @@ def test_validate_fails_a_badged_statement_lacking_provenance(tmp_path, badge):
     assert len(errors) == 1
     assert "no provenance" in errors[0]
     assert f"[{badge}]" in errors[0]
+
+
+def test_93s_example_parses_as_one_inferred_statement_with_its_two_references():
+    """Part 06 §9.3's own example is the one-paragraph form (#187): no blank
+    line before the basis lines, so `parse_statements` reads them as the
+    `[inferred]` statement's own provenance rather than a second, unbadged
+    statement."""
+    statements = parse_statements(_lift_example("9.3 Inferred statements"))
+
+    assert len(statements) == 1
+    assert statements[0].badge == "inferred"
+    assert statement_provenance(statements[0]) == (
+        "SRC-000184 ¶17",
+        "SES-20260912-1432#T017",
+    )
+
+
+def test_validate_passes_the_plans_93_example_lifted_verbatim(tmp_path):
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    _write_transcript(
+        repo_root, "SES-20260912-1432", [(17, "Author", "Discussed the acquisition.")]
+    )
+    _write_entry(repo_root, "SUB-people/bob", _lift_example("9.3 Inferred statements"))
+
+    assert validate(evidence_root, repo_root) == []
+
+
+def test_validate_names_the_one_paragraph_form_on_the_old_93_shape(tmp_path):
+    """An entry hand-typed in §9.3's withdrawn blank-line ``Basis:`` shape
+    (#187) parses as two statements - an unprovenanced `[inferred]` one and
+    unbadged testimony opening `Basis:` - and the second is diagnosed by
+    name rather than silently loaded as the author's own words."""
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    _write_entry(
+        repo_root, "SUB-people/bob",
+        "[inferred] Fear of losing control appears to intensify after the "
+        "acquisition.\n\n"
+        "Basis:\n- SRC-000184 ¶17\n- SES-20260912-1432#T017",
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    basis_findings = [e for e in errors if "Basis:" in e and "one-paragraph" in e]
+    assert len(basis_findings) == 1
+    assert "subjects/people/bob.md" in basis_findings[0].replace("\\", "/")
 
 
 def test_validate_passes_an_open_line_without_provenance(tmp_path):

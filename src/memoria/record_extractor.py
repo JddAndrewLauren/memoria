@@ -31,11 +31,11 @@ write rule is a checked property rather than a convention.
 
 **The statement and its provenance are one paragraph.** ``subjects.
 parse_statements`` splits a body on blank lines and reads an unbadged
-paragraph as testimony, so part 06 §9.3's illustrated ``Basis:`` block,
-separated from its statement by a blank line, would parse as the author's
-words. The form written here keeps every provenance line inside the
-statement's own paragraph, one ``— <reference>`` line per reference,
-which is also the form ``decisions.md`` already uses.
+paragraph as testimony, so a ``Basis:`` block separated from its statement
+by a blank line - part 06 §9.3's example before #187 restated it - would
+parse as the author's words. The form written here keeps every provenance
+line inside the statement's own paragraph, one ``— <reference>`` line per
+reference, which is also the form ``decisions.md`` already uses.
 
 **The token is the caller's, from the read it worked from** (ADR-0003):
 ``record_statement`` takes the token ``subjects.serve_entry`` minted and
