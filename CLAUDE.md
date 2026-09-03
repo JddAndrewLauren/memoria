@@ -17,8 +17,21 @@ Single-context: `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/
 
 ### Visual verification
 
-This repo has **no visual gate**, by decision on 2026-09-02 — no `docs/SURFACES.md`,
-no screenshot capture, no Playwright. The vitest suite in `ui/` covers UI behaviour
-and is the only UI gate. Skip visual verification rather than improvising one; do not
-re-raise the missing registry as a gap. Revisit if the reading surfaces start
-regressing in ways behaviour tests cannot see.
+**No routine visual gate** (decision 2026-09-02, clarified 2026-09-03). There is no
+`docs/SURFACES.md` surface registry, and no wrap-up, review or PR is expected to
+screenshot the app or walk it in a browser. The vitest suite in `ui/` covers UI
+behaviour and is the standing UI gate. Do not add a visual step to a routine
+workflow, and do not re-raise the missing registry as a gap.
+
+**Browser tooling is not forbidden.** The rule above is about what runs *every time*,
+not about what the repo may use. Driving the app in a real browser is the right tool
+for a task that genuinely needs layout, scroll position or paint — a milestone gate
+walk (`docs/gates/`), or diagnosing a rendering bug behaviour tests cannot see — and
+an agent should reach for it there rather than handing the work back. jsdom cannot
+substitute: it has no `scrollIntoView` and every layout measurement reads 0, so
+"landed on the paragraph" and "kept my place" are unobservable in the vitest suite by
+construction.
+
+So: **routine work, no browser; a gate or a layout bug, use one.** Prefer a scripted,
+headless run whose output is an artifact someone can check over a screenshot nobody
+reads.
