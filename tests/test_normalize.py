@@ -1461,6 +1461,72 @@ def test_a_msg_file_with_no_transport_headers_falls_back_to_mapi_properties(tmp_
     assert record.thread_id == record.id
 
 
+def test_a_msg_stale_header_is_stripped_with_its_folded_continuation_lines(tmp_path):
+    """Real Outlook transport headers are nearly always multipart with a
+    folded `boundary=` continuation under `Content-Type`. Dropping only
+    the `Content-Type:` line left that continuation folded onto the header
+    above it - `Message-ID` here, so `thread_id` absorbed the boundary and
+    threading for the message was dead (#191 review, round 1). Every
+    stale header goes together with its continuation lines; the headers
+    around it survive intact."""
+    evidence_root = tmp_path / "evidence"
+    headers = (
+        "From: alice@example.com\r\n"
+        "To: bob@example.com\r\n"
+        "Subject: Q3 numbers\r\n"
+        "Date: Mon, 17 Oct 2011 09:00:00 -0500\r\n"
+        "Message-ID: <msg1@x>\r\n"
+        "Content-Type: multipart/alternative;\r\n"
+        '\tboundary="_000_abc_"\r\n'
+        "MIME-Version: 1.0\r\n"
+        "In-Reply-To: <msg0@x>\r\n"
+    )
+    msg_path = evidence_root / "raw" / "message.msg"
+    msg_path.parent.mkdir(parents=True, exist_ok=True)
+    msg_path.write_bytes(
+        _make_msg(
+            [
+                ("__substg1.0_007D001F", headers),
+                ("__substg1.0_1000001F", "Here are the numbers."),
+            ]
+        )
+    )
+    repository = Repository(root=tmp_path / "repo")
+
+    normalize(repository, evidence_root)
+
+    (record,) = read_all(repository)
+    assert record.thread_id == "msg1@x"
+    assert record.event_date == "Mon, 17 Oct 2011 09:00:00 -0500"
+    assert record.date_confidence == "exact"
+    assert record.paragraphs == ["Here are the numbers."]
+
+
+def test_an_unreadable_msg_is_a_failed_unit_and_the_pass_goes_on(tmp_path):
+    """A renamed or truncated `.msg` (not an OLE2 file at all) used to raise
+    out of the container read and end the whole run with nothing
+    normalized, where the same bytes as a `.pdf` are recorded as one
+    failed unit (#106). It now gets exactly that bookkeeping: named in
+    the report with its reason, marked in the manifest, and the rest of
+    the corpus still converts."""
+    evidence_root = tmp_path / "evidence"
+    _write_raw_file(evidence_root, "a.msg", "not an OLE2 file")
+    _write_raw_file(evidence_root, "b.txt", "After it.")
+    repository = Repository(root=tmp_path / "repo")
+
+    report = normalize(repository, evidence_root)
+
+    assert list(report.failed) == ["SRC-000001"]
+    assert "NotOleFileError" in report.failed["SRC-000001"]
+    assert report.converted == ["SRC-000002"]
+    assert report.unconvertible == []
+    (record,) = read_all(repository)
+    assert record.paragraphs == ["After it."]
+    broken, _ = load_manifest(evidence_root / DEFAULT_MANIFEST_RELATIVE_PATH)
+    assert broken.extra["failed"]["converter"] == EMAIL_CONVERTER_VERSION
+    assert validate(evidence_root, tmp_path) == []
+
+
 def test_email_container_suffixes_enter_the_manifest_converters_map(tmp_path):
     """`.eml`/`.mbox` converted but were never entered in the manifest's
     `converters` map (`CONVERTERS`, #79's own map, covers only docx/pdf/

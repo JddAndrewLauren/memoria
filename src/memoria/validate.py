@@ -28,6 +28,7 @@ from memoria.record_extractor import (
     check_provenance,
     statement_provenance,
 )
+from memoria.normalize import EMAIL_CONVERTER_VERSION
 from memoria.records import NORMALIZED_RELATIVE_PATH, ReadError
 from memoria.records import read as read_ref
 from memoria.repository import Repository
@@ -208,11 +209,17 @@ def _validate_converter_pins(repo_root: Path, manifest_path: Path) -> list[str]:
     longer pins (#79, part 05 §5.4) - a pin bumped without the
     ``memoria normalize`` run that would have reconverted against it, or a
     manifest edited by hand. A suffix the manifest has never recorded a
-    converter for is not an error: nothing has converted it yet."""
+    converter for is not an error: nothing has converted it yet.
+
+    The email converter (``.eml``/``.mbox``/``.msg``, #104) is the
+    standard library plus this package's own code, so its pin is
+    ``normalize.EMAIL_CONVERTER_VERSION`` rather than a pyproject.toml
+    line; a manifest recording an older ``email N`` is the same drift."""
     manifest_converters = load_converter_pins(manifest_path)
     if not manifest_converters:
         return []
     pinned = _pinned_converter_versions(repo_root)
+    pinned["email"] = EMAIL_CONVERTER_VERSION
 
     errors = []
     for suffix, recorded in sorted(manifest_converters.items()):

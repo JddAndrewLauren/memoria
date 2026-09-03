@@ -343,7 +343,9 @@ def normalize(
     evidence_root = Path(evidence_root)
     manifest_path = evidence_root / manifest_relative_path
     entries, added = sync(evidence_root, manifest_relative_path)
-    entries, email_added, email_drafts = _process_email_containers(evidence_root, entries)
+    entries, email_added, email_drafts, email_failures = _process_email_containers(
+        evidence_root, entries
+    )
 
     # The pinned converter version for every suffix actually present on disk
     # (#79, part 05 §5.4), merged onto whatever a prior run recorded so a
@@ -387,12 +389,28 @@ def normalize(
             continue
 
         email_draft = email_drafts.get(entry.id)
-        if email_draft is not None:
+        email_failure = email_failures.get(entry.id)
+        if email_draft is not None or email_failure is not None:
             pinned_version = EMAIL_CONVERTER_VERSION
-            get_draft: Callable[[], ConversionDraft] = lambda draft=email_draft: draft
+
+            def get_draft(
+                draft=email_draft, failure=email_failure
+            ) -> ConversionDraft:
+                # An unreadable container (#104) re-raises here, inside the
+                # try/except below, so it gets a pdf's failure bookkeeping.
+                if failure is not None:
+                    raise failure
+                return draft
+
         else:
             registration = CONVERTERS.get(Path(entry.path).suffix)
             if registration is None:
+                if "failed" in entry.extra:
+                    # An email container that read cleanly this run after
+                    # failing on a prior one: its failure marker is stale.
+                    entries[index] = replace(
+                        entry, extra={k: v for k, v in entry.extra.items() if k != "failed"}
+                    )
                 unconvertible.append(entry.id)
                 continue
             converter, pin = registration
@@ -518,10 +536,13 @@ def _try_parse(record_path: Path) -> NormalizedRecord | None:
 
 def _process_email_containers(
     evidence_root: Path, entries: list[ManifestEntry]
-) -> tuple[list[ManifestEntry], list[str], dict[str, ConversionDraft]]:
+) -> tuple[list[ManifestEntry], list[str], dict[str, ConversionDraft], dict[str, Exception]]:
     """Expand every raw email export into one ledger entry per message, and
     one per attachment it carries, then pre-build each message's
-    ``ConversionDraft``.
+    ``ConversionDraft``. A container that cannot be read at all (a renamed
+    or truncated ``.msg``, say) is returned in the fourth element, keyed by
+    its own entry ID, for ``normalize`` to record as a failed unit the same
+    way it records an unreadable pdf (#106) - it must not end the pass.
 
     Message sub-entries share the container's own ``path`` rather than a
     synthetic one: that is what lets ``sync``'s per-entry file-existence
@@ -552,6 +573,7 @@ def _process_email_containers(
     added_ids: list[str] = []
     new_entries: dict[str, ManifestEntry] = {}
     drafts: dict[str, ConversionDraft] = {}
+    read_failures: dict[str, Exception] = {}
 
     for container in others:
         if container.deleted or Path(container.path).suffix not in _EMAIL_CONTAINER_SUFFIXES:
@@ -564,7 +586,16 @@ def _process_email_containers(
                 if key[0] == container.path:
                     new_entries[prior.id] = replace(prior, deleted=True)
             continue
-        messages = _read_container_messages(evidence_root / container.path)
+        try:
+            messages = _read_container_messages(evidence_root / container.path)
+        except Exception as exc:  # noqa: BLE001 - one bad container must not end the pass
+            read_failures[container.id] = exc
+            # Its messages from a prior (readable) run: same carry-forward as
+            # a deleted container above.
+            for key, prior in prior_messages.items():
+                if key[0] == container.path:
+                    new_entries[prior.id] = replace(prior, deleted=True)
+            continue
 
         # Pass 1: one ledger entry per message, reusing a prior run's ID and
         # refreshing its hash to its own bytes.
@@ -703,7 +734,7 @@ def _process_email_containers(
     # attachment entry, and `validate` reported the duplicates (#108).
     combined = [e for e in others if e.id not in new_entries] + list(new_entries.values())
     combined.sort(key=lambda e: id_number(e.id))
-    return combined, added_ids, drafts
+    return combined, added_ids, drafts, read_failures
 
 
 # ZL's production wrote this bare line into the header block of two in five
@@ -764,6 +795,26 @@ _MSG_STALE_HEADER_RE = re.compile(
 )
 
 
+def _strip_stale_msg_headers(headers_text: str) -> str:
+    """The transport header block minus every `_MSG_STALE_HEADER_RE` line
+    *and its folded continuation lines* (RFC 5322 §2.2.3: a line starting
+    with whitespace continues the header above it). Dropping only the
+    first line would leave e.g. `Content-Type`'s ``boundary="..."``
+    continuation folded onto whatever header precedes it - `Message-ID`
+    or `Date` in a typical Outlook block - and corrupt that one instead."""
+    kept = []
+    dropping = False
+    for line in headers_text.splitlines():
+        if line[:1] in (" ", "\t"):
+            if not dropping:
+                kept.append(line)
+            continue
+        dropping = _MSG_STALE_HEADER_RE.match(line) is not None
+        if not dropping:
+            kept.append(line)
+    return "\n".join(kept)
+
+
 def _msg_property(ole, stream_path: str) -> str | None:
     """One MAPI string property: UTF-16LE, the way Outlook always writes a
     PT_UNICODE (``...001F``) stream. ``None`` when the ``.msg`` carries no
@@ -795,11 +846,7 @@ def _read_msg_message(raw_bytes: bytes) -> Message:
         headers_text = _msg_property(ole, _MSG_TRANSPORT_HEADERS_STREAM)
         body_text = _msg_property(ole, _MSG_BODY_STREAM) or ""
         if headers_text:
-            headers_text = "\n".join(
-                line
-                for line in headers_text.splitlines()
-                if not _MSG_STALE_HEADER_RE.match(line)
-            )
+            headers_text = _strip_stale_msg_headers(headers_text)
         else:
             headers_text = "\n".join(
                 f"{header}: {value}"
