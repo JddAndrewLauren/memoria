@@ -234,6 +234,16 @@ def test_renaming_an_entry_file_does_not_flag_its_untouched_statements(tmp_path)
 # --- nothing infers ownership from git blame ---------------------------------
 
 
+# The modules allowed to say "blame" at all. `human_touched.py`'s docstring
+# says why blame was retired for ownership. `trace.py` (and the MCP tool
+# that fronts it) runs `git blame` on purpose, but over manuscript prose to
+# compose a paragraph's provenance - which commit, which session turn (#42,
+# part 04 §4.1) - never over an entry to decide who owns a statement; the
+# plan accepts that blame coarsens under reflow there because nothing
+# ratchets on it. Anything else naming blame is a new use to be argued for.
+BLAME_MENTIONS = ["human_touched.py", "mcp/server.py", "trace.py"]
+
+
 def test_nothing_in_the_codebase_infers_ownership_from_git_blame():
     """The last checkbox, held as a property of the source tree: ownership
     is carried by the badge and backstopped by this flag, and no module
@@ -243,7 +253,10 @@ def test_nothing_in_the_codebase_infers_ownership_from_git_blame():
         for path in sorted(SRC_ROOT.rglob("*.py"))
         if re.search(r"\bblame\b", path.read_text(encoding="utf-8"))
     ]
-    assert offenders == ["human_touched.py"]  # its docstring says so, and nothing else
+    assert offenders == BLAME_MENTIONS
+    # And the one module that does run blame never reads an entry or a badge.
+    trace_source = (SRC_ROOT / "trace.py").read_text(encoding="utf-8")
+    assert not re.search(r"\bsubjects\b|\bbadge\b|\bhuman_touched\b|\bownership\b", trace_source)
 
 
 def _head(repository: Repository) -> str:
