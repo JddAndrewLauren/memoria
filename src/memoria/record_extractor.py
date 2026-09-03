@@ -41,10 +41,24 @@ which is also the form ``decisions.md`` already uses.
 ``record_statement`` takes the token ``subjects.serve_entry`` minted and
 never mints its own, so an author edit committed between the extractor's
 read and its write - a clean tree, invisible to the dirty-tree guard below
-- is ``Rejected`` as stale and surfaces as a refusal. Revising an existing
-statement is not built: the matrix's "who revises it" column waits on #32's
-human-touched flag, which is what gates a free revision of ``[source]``/
-``[inferred]``/``[open]``.
+- is ``Rejected`` as stale and surfaces as a refusal.
+
+**Revising an existing statement is the matrix's other column, gated by the
+human-touched flag** (#32, part 08 §14). ``revise_statement`` rewrites a
+``[source]``/``[inferred]``/``[open]`` statement freely and an ``[author]``
+one only on a new citing turn - unless the statement is one the Curator may
+not rewrite: unbadged testimony, an ``[author]`` statement offered no new
+author turn (both author-supreme), or any statement
+``memoria.human_touched`` has flagged as changed by a non-Curator commit.
+Then it appends a **Memoria note** directly after the statement and leaves
+the statement byte-identical (§14.2's own example: "The author text has
+been left unchanged"). The note is author-facing only: ``subjects.
+parse_statements`` serves it under its own kind so it is never testimony,
+and ``subjects.is_audit_visible`` keeps it out of write-side assembly and
+the audit alike. It reaches the author through ``read(ref)`` on the entry,
+which serves the file verbatim. The flagging step runs at the top of every
+revision, so the decision is never made against a flag the driving session
+forgot to refresh.
 
 **One rule does the work** (part 08 §13.1, §13.4, part 06 §9.2): an
 ``[author]`` statement needs a citing transcript turn that is identifiably
@@ -77,28 +91,29 @@ something or only wonder is the model judgement above. Choosing
 either function is reached; this module guarantees only that nothing the
 assistant said is ever badged ``[author]``.
 
-**The dirty-tree guard is per-write, and it is an early refusal rather
-than an opt-out** (part 08 §14.2): "the Curator never writes into a file
-with uncommitted human modifications ... the pass waits." The invariant
-binds each write - "never writes into a file" - and waiting is its
-consequence, which is why ``ensure_clean_tree`` is called at the top of
-every public write here (#32's own acceptance criterion states the rule the
-same way). A single check at the start of a multi-write pass would be the
-weaker reading, not the stricter one: it would let the second and third
-writes land into a tree that went dirty after it.
+**The dirty-tree rule is per-write, and it is an early refusal rather
+than an opt-out** (part 08 §14.2, #32): "the Curator never writes into a
+file with uncommitted human modifications ... the pass waits." The
+invariant binds each write - "never writes into a file" - and waiting is
+its consequence, which is why ``ensure_clean_tree`` is the one rule, in one
+place, called at the top of every public write here. A single check at the
+start of a multi-write pass would be the weaker reading, not the stricter
+one: it would let the second and third writes land into a tree that went
+dirty after it.
 
-What the guard does *not* do is take this module off ``memoria.write``'s
+What the rule does *not* do is take this module off ``memoria.write``'s
 automatic checkpoint (ADR-0008). Every write here goes through
 ``write.write``/``write.create`` as ``CURATOR``, a non-human actor, so a
 checkpoint runs before the bytes are replaced, exactly as it does for any
-other machine write. The guard normally makes it a no-op by refusing first;
-in the window between the guard and the write, ADR-0008 governs, and it
+other machine write. The rule normally makes it a no-op by refusing first;
+in the window between the rule and the write, ADR-0008 governs, and it
 says so deliberately - that is "the moment the dirty-tree rule (#32) stops
-protecting a file and the human-touched flag has to take over". The flag is
-#32's, and it is not built yet, so that window is currently protected by
-nothing on the far side of the checkpoint. Closing it belongs to #32, which
-owns the dirty-tree rule outright and should absorb or replace
-``ensure_clean_tree`` rather than sit beside it.
+protecting a file and the human-touched flag has to take over". It now
+does: an edit the checkpoint commits is a non-Curator commit, and the next
+flagging step marks what it changed. #32 considered moving the refusal
+into ``write.write``'s non-human branch instead, which would reverse
+ADR-0008's checkpoint-before-machine-write, and declined: the checkpoint
+is what turns an edit made in that window into a commit the flag can see.
 
 **A pass that refuses part way through leaves a partial extraction, and
 that is accepted.** There is no rollback and no all-or-nothing scope: each
@@ -122,10 +137,10 @@ from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
 from datetime import datetime
 
-from memoria import manuscript, references, sessions, subjects, write
+from memoria import human_touched, manuscript, references, sessions, subjects, write
 from memoria.entity_escape import escape_entry_text, unescape_entry_text
 from memoria.repository import Repository
-from memoria.subjects import Statement
+from memoria.subjects import MEMORIA_NOTE, Statement
 from memoria.write import Actor, Rejected
 
 DECISIONS_FILENAME = "decisions.md"
@@ -160,6 +175,9 @@ BADGES = ("author", "source", "inferred", "open")
 ASSERTION_BADGES = ("author", "source", "inferred")
 # A provenance line inside a statement's paragraph: `— <reference>`.
 PROVENANCE_PREFIX = "— "
+# The closing line of every Memoria note - part 08 §14.2's own words, and
+# the promise the note makes: nothing above it was rewritten.
+MEMORIA_NOTE_CLOSE = "The author text has been left unchanged."
 
 _DECISION_ID = re.compile(r"^DEC-(\d{4})$")
 _DECISION_ENTRY = re.compile(r'<a id="(?P<anchor>dec-\d{4})"></a>\n\n## (?P<id>DEC-\d{4})')
@@ -211,6 +229,18 @@ class StatementRecord:
 
 
 @dataclass(frozen=True)
+class MemoriaNoteRecord:
+    """A Memoria note appended after a statement the Curator may not
+    rewrite (part 08 §14.2). ``statement`` is that statement, exactly as it
+    still stands; ``note`` is the paragraph written after it."""
+
+    entry_id: str
+    statement: Statement
+    note: str
+    provenance: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ResearchMemo:
     """§35's durable research memo, before it is minted an id and written.
 
@@ -242,8 +272,8 @@ class ResearchMemoRecord:
 
 
 def ensure_clean_tree(repository: Repository) -> None:
-    """Refuse rather than run against a repository with uncommitted human
-    modifications (part 08 §14.2, #30's own acceptance criterion).
+    """The dirty-tree rule (part 08 §14.2, #32): refuse rather than write
+    into a repository with uncommitted human modifications, and say so.
 
     Unscoped, deliberately: not just ``decisions.md``/``questions.md``/
     ``research/**``, but the whole repository, since a dirty file anywhere
@@ -510,27 +540,13 @@ def check_author_evidence(repository: Repository, provenance: tuple[str, ...]) -
     )
 
 
-def record_statement(
-    repository: Repository,
-    entry_id: str,
-    badge: str | None,
-    text: str,
-    provenance: tuple[str, ...],
-    token: str,
-    actor: Actor | None = None,
-) -> StatementRecord:
-    """Append one badged statement to an entry's body, per the write matrix
-    (part 06 §8.2) - see the module docstring for the rules in full.
-
-    ``token`` is the one ``subjects.serve_entry`` minted for the read this
-    statement was composed against; the write is refused as stale if the
-    file moved underneath. Everything else on the entry - testimony, match
-    terms, the overlay, unmodelled frontmatter - round-trips untouched.
-    """
-    actor = actor or CURATOR
-    ensure_clean_tree(repository)
-    if "/" not in entry_id:
-        raise RecordExtractorError(f"not an entry id: {entry_id!r} - expected SUB-<subject>/<entry>")
+def _statement_block(
+    repository: Repository, badge: str | None, text: str, provenance: tuple[str, ...]
+) -> tuple[str, tuple[str, ...], str]:
+    """Validate one badged statement per the write matrix and render its
+    paragraph: ``(text, citations, block)``. Shared by ``record_statement``
+    and ``revise_statement`` so a revision can never write what an append
+    would refuse."""
     if badge not in BADGES:
         raise RecordExtractorError(
             f"badge {badge!r} is not one of {', '.join(BADGES)} - the Curator "
@@ -551,17 +567,29 @@ def record_statement(
         raise RecordExtractorError(
             f"a [{badge}] statement needs provenance (part 06 §9, part 15 §23)"
         )
+    block = "\n".join([f"[{badge}] {text}", *(f"{PROVENANCE_PREFIX}{c}" for c in citations)])
+    return text, citations, block
 
+
+def _served_entry(repository: Repository, entry_id: str) -> tuple[str, subjects.Entry]:
+    """The entry's repository-relative path and its parsed form. The
+    caller's token is the one that gates the write; the one minted here is
+    discarded for ``subjects.set_match_terms``'s reason."""
+    if "/" not in entry_id:
+        raise RecordExtractorError(f"not an entry id: {entry_id!r} - expected SUB-<subject>/<entry>")
     subject_id, entry_slug = entry_id.split("/", 1)
     try:
         relative_path = subjects.entry_relative_path(repository, subject_id, entry_slug)
-        # The token is the caller's; the one minted here is discarded for
-        # `subjects.set_match_terms`'s reason.
         entry, _minted_here_and_unused = subjects.serve_entry(repository, subject_id, entry_slug)
     except subjects.SubjectError as exc:
         raise RecordExtractorError(str(exc)) from exc
-    block = "\n".join([f"[{badge}] {text}", *(f"{PROVENANCE_PREFIX}{c}" for c in citations)])
-    body = f"{entry.body.rstrip()}\n\n{block}" if entry.body.strip() else block
+    return relative_path, entry
+
+
+def _write_body(
+    repository: Repository, relative_path: str, entry: subjects.Entry, body: str,
+    token: str, actor: Actor,
+) -> None:
     content = subjects.entry_to_markdown(dataclass_replace(entry, body=body))
     result = write.write(repository, relative_path, token, content, actor)
     if isinstance(result, Rejected):
@@ -569,6 +597,122 @@ def record_statement(
             f"could not write {relative_path}: {result.outcome} - re-read the "
             "entry and re-run the pass"
         )
+
+
+def record_statement(
+    repository: Repository,
+    entry_id: str,
+    badge: str | None,
+    text: str,
+    provenance: tuple[str, ...],
+    token: str,
+    actor: Actor | None = None,
+) -> StatementRecord:
+    """Append one badged statement to an entry's body, per the write matrix
+    (part 06 §8.2) - see the module docstring for the rules in full.
+
+    ``token`` is the one ``subjects.serve_entry`` minted for the read this
+    statement was composed against; the write is refused as stale if the
+    file moved underneath. Everything else on the entry - testimony, match
+    terms, the overlay, unmodelled frontmatter - round-trips untouched.
+    """
+    actor = actor or CURATOR
+    ensure_clean_tree(repository)
+    text, citations, block = _statement_block(repository, badge, text, provenance)
+    relative_path, entry = _served_entry(repository, entry_id)
+    body = f"{entry.body.rstrip()}\n\n{block}" if entry.body.strip() else block
+    _write_body(repository, relative_path, entry, body, token, actor)
+    return StatementRecord(entry_id=entry_id, badge=badge, text=text, provenance=citations)
+
+
+def _locate(body: str, statement: Statement) -> tuple[int, int]:
+    """The span of ``statement``'s paragraph in ``body`` - the exact bytes,
+    so a revision replaces that paragraph and nothing else, and a note lands
+    right after it. Paragraphs are walked the way ``subjects.
+    parse_statements`` splits them, so what is found is what was served."""
+    position = 0
+    for chunk in re.split(r"\n\s*\n", body):
+        start = body.index(chunk, position)
+        position = start + len(chunk)
+        paragraph = chunk.strip()
+        if not paragraph:
+            continue
+        found = subjects.parse_statements(paragraph)
+        if found and found[0] == statement:
+            inner = start + chunk.index(paragraph)
+            return inner, inner + len(paragraph)
+    raise RecordExtractorError(
+        f"no such statement in the entry: [{statement.badge}] "
+        f"{statement.text.splitlines()[0][:60]!r} - re-read the entry"
+    )
+
+
+def render_memoria_note(text: str, citations: tuple[str, ...], *, today: str) -> str:
+    """Part 08 §14.2's note, as one blockquote paragraph: the heading with
+    its date, the Curator's account of the conflict, the evidence it rests
+    on, and the promise that the author text stands."""
+    lines = [f"> **Memoria note — {today}**", ">", f"> {text}"]
+    if citations:
+        joined = " and ".join(citations) if len(citations) <= 2 else (
+            ", ".join(citations[:-1]) + f" and {citations[-1]}"
+        )
+        lines.append(f"> See {joined}.")
+    lines.append(f"> {MEMORIA_NOTE_CLOSE}")
+    return "\n".join(lines)
+
+
+def revise_statement(
+    repository: Repository,
+    entry_id: str,
+    statement: Statement,
+    badge: str | None,
+    text: str,
+    provenance: tuple[str, ...],
+    token: str,
+    actor: Actor | None = None,
+    *,
+    today: str | None = None,
+) -> StatementRecord | MemoriaNoteRecord:
+    """Revise ``statement`` in ``entry_id``'s body to a new badged statement
+    - or, where the write matrix and the human-touched flag say the Curator
+    may not, append a Memoria note after it and leave it byte-identical.
+
+    ``statement`` is one of ``subjects.parse_statements`` over the entry the
+    caller read (the read ``token`` came from); it is matched exactly, so a
+    paragraph that moved underneath is "no such statement" rather than a
+    guess at which one was meant. The replacement is validated exactly as
+    ``record_statement`` validates an append. The flag is refreshed first
+    (``human_touched.flag``), and the decision is then:
+
+    - unbadged testimony: author-supreme, never the Curator's - a note;
+    - flagged human-touched (part 08 §14.2): a note, whatever its badge;
+    - ``[author]``: revised only on a new citing author turn, which is what
+      a valid ``[author]`` replacement carries - offered anything else, a
+      note;
+    - ``[source]``/``[inferred]``/``[open]``: rewritten in place.
+
+    Either way it is one write, through the write path, as the Curator.
+    """
+    actor = actor or CURATOR
+    ensure_clean_tree(repository)
+    text, citations, block = _statement_block(repository, badge, text, provenance)
+    relative_path, entry = _served_entry(repository, entry_id)
+    start, end = _locate(entry.body, statement)
+    if statement.badge == MEMORIA_NOTE:
+        raise RecordExtractorError("a Memoria note is not a statement, and is not revised")
+    human_touched.flag(repository, actor)
+    author_supreme = statement.badge is None or (statement.badge == "author" and badge != "author")
+    if author_supreme or human_touched.is_human_touched(repository, entry_id, statement):
+        note = render_memoria_note(
+            text, citations, today=today or datetime.now().strftime("%Y-%m-%d")
+        )
+        body = f"{entry.body[:end]}\n\n{note}{entry.body[end:]}"
+        _write_body(repository, relative_path, entry, body, token, actor)
+        return MemoriaNoteRecord(
+            entry_id=entry_id, statement=statement, note=note, provenance=citations
+        )
+    body = f"{entry.body[:start]}{block}{entry.body[end:]}"
+    _write_body(repository, relative_path, entry, body, token, actor)
     return StatementRecord(entry_id=entry_id, badge=badge, text=text, provenance=citations)
 
 

@@ -148,9 +148,9 @@ def _report_health(report) -> None:
         )
     print(
         "health: human/Curator conflicts and unsupported-interpretation "
-        "statements are not yet reported - their producing mechanisms (the "
-        "Memoria note write path, part 08 §14.2, and the model-based "
-        "unsupported-claims check, §23) are not built"
+        "statements are not yet reported - Memoria notes are written (part "
+        "08 §14.2, #32) but not yet collected, and the model-based "
+        "unsupported-claims check (§23) is not built"
     )
 
 

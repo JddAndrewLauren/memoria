@@ -47,6 +47,14 @@ _ENTRY_REF_RE = re.compile(rf"^SUB-{_SLUG}/{_SLUG}$")
 # settlement (§8.7, #33), written by `memoria.settlements` and read here so
 # it is a statement of its own kind rather than mistaken for testimony.
 _BADGE_RE = re.compile(r"^\[(author|source|inferred|open|settled)\]\s*")
+# The pseudo-badge `parse_statements` gives a Memoria note (part 08 §14.2) -
+# never written inside square brackets, so no entry body can carry it as a
+# real badge; it exists so a note is distinguishable from testimony by the
+# same field a badge is read off, and joins `[open]` outside the
+# audit-visible body (`is_audit_visible`). The note's own first line is the
+# marker: `> **Memoria note — <date>**`, `memoria.record_extractor`'s form.
+MEMORIA_NOTE = "memoria-note"
+_MEMORIA_NOTE_RE = re.compile(r"^> \*\*Memoria note — ")
 
 
 class SubjectError(Exception):
@@ -364,11 +372,21 @@ def parse_statements(body: str) -> list[Statement]:
     (``[settled]``, §8.7) are shared territory in the same body (part 06
     §8.2); this is what makes them distinguishable rather than merely
     visually different.
+
+    A Memoria note (part 08 §14.2) is the third kind: a blockquote paragraph
+    opening ``> **Memoria note — <date>**``, served whole under the
+    ``MEMORIA_NOTE`` pseudo-badge. Without this an unbadged paragraph is
+    testimony by definition (§9.5), and a note the Curator appended would
+    read as the author's own words - loaded by assembly and evaluated by
+    the audit, the two things §14.2 says a note never is.
     """
     statements = []
     for paragraph in re.split(r"\n\s*\n", body.strip()):
         paragraph = paragraph.strip()
         if not paragraph:
+            continue
+        if _MEMORIA_NOTE_RE.match(paragraph):
+            statements.append(Statement(badge=MEMORIA_NOTE, text=paragraph))
             continue
         match = _BADGE_RE.match(paragraph)
         if match:
@@ -392,11 +410,12 @@ def is_audit_visible(statement: Statement) -> bool:
     copies of a one-line predicate is how the two drift, and the surface
     would then show as audit-visible something the audit never reads.
 
-    Memoria notes sit outside the body too (part 08 §14.2), but this
-    codebase does not write them yet (#32); when it does they join
-    ``[open]`` here rather than at either call site.
+    Memoria notes sit outside the body too (part 08 §14.2, #32): "it never
+    loads into write-side assembly and the audit never evaluates against
+    it" - author-facing only, retrievable through ``read(ref)`` on the entry
+    because the read serves the file verbatim.
     """
-    return statement.badge != "open"
+    return statement.badge not in ("open", MEMORIA_NOTE)
 
 
 def _split_frontmatter(text: str, source: str) -> tuple[dict, str]:

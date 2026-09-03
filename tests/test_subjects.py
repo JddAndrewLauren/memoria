@@ -9,6 +9,7 @@ and badged statements) and match terms (the system's only alias store).
 import pytest
 
 from memoria.subjects import (
+    MEMORIA_NOTE,
     BUILTIN_SUBJECTS,
     Entry,
     OverlayAct,
@@ -476,6 +477,33 @@ def test_an_open_line_is_not_audit_visible():
     prose against - so the entry view draws it outside the body too, off
     this same predicate."""
     assert is_audit_visible(Statement(badge="open", text="Did Bob know?")) is False
+
+
+MEMORIA_NOTE_TEXT = (
+    "> **Memoria note — 2026-10-18**\n"
+    ">\n"
+    "> Later research cuts against the interpretation above.\n"
+    "> See RES-20261018-003 and SRC-002914 ¶8.\n"
+    "> The author text has been left unchanged."
+)
+
+
+def test_a_memoria_note_is_parsed_as_a_note_and_not_as_testimony():
+    """Part 08 §14.2's note is a blockquote paragraph in the shared body. An
+    unbadged paragraph is testimony by definition (§9.5), so without its own
+    kind the Curator's note would read as the author's own words."""
+    body = f"[inferred] Fear of losing control appears to intensify.\n\n{MEMORIA_NOTE_TEXT}"
+    statements = parse_statements(body)
+
+    assert [s.badge for s in statements] == ["inferred", MEMORIA_NOTE]
+    assert statements[1].text == MEMORIA_NOTE_TEXT
+
+
+def test_a_memoria_note_is_not_audit_visible():
+    """"It never loads into write-side assembly and the audit never
+    evaluates against it" (part 08 §14.2) - the same predicate that keeps
+    `[open]` out, so neither consumer needs a rule of its own."""
+    assert is_audit_visible(Statement(badge=MEMORIA_NOTE, text=MEMORIA_NOTE_TEXT)) is False
 
 
 # --- serving an entry for editing (ADR-0003, #26) ----------------------------

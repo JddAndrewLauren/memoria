@@ -111,7 +111,14 @@ INDEX_RELATIVE_PATH = ".memoria/index.db"
 # into a passage, so the anchor there is a paragraph's position within its
 # section's `draft.md`, recomputed fresh on every call rather than stored
 # anywhere else - an aid to diagnosis, not a citation).
-PRESERVED_TABLES = ("memoria_schema", "memo")
+#
+# `human_touched` (#32, part 08 §14.2) is the third preserved table: the
+# human-touched flag is "set once, monotonic, never recomputed", and a table
+# `rebuild` dropped would recompute it by construction. Its rows are not
+# model output - `memoria.human_touched` re-derives them from git history,
+# which is why `--reset-cache` may still delete the file - but they are
+# state a rebuild has no business touching.
+PRESERVED_TABLES = ("memoria_schema", "memo", "human_touched")
 
 # Everything else. Dropped and regenerated on every `memoria rebuild`, which
 # is §42's contract made mechanical.
@@ -164,6 +171,18 @@ _PRESERVED_DDL = (
     # looks a row up by `anchor`.
     "CREATE TABLE IF NOT EXISTS memo(" + _MEMO_COLUMNS + ")",
     "CREATE INDEX IF NOT EXISTS memo_kind_anchor ON memo(kind, anchor)",
+    # One row per statement a non-Curator commit changed (#32). `statement`
+    # is `memoria.human_touched.statement_key`'s whitespace-normalized form
+    # of the badged paragraph - the key a reflow cannot move - and `commit_sha`
+    # names the non-Curator commit that set it, so "why is this flagged" is
+    # answerable. Rows are only ever inserted; the pass that sets them
+    # records the `HEAD` it read up to under `memoria_schema`'s
+    # `human_touched_head`, and the next pass walks on from there.
+    "CREATE TABLE IF NOT EXISTS human_touched("
+    "entry_id TEXT NOT NULL, statement TEXT NOT NULL, "
+    "commit_sha TEXT NOT NULL, flagged_at TEXT NOT NULL, "
+    "PRIMARY KEY (entry_id, statement)"
+    ")",
 )
 
 _DERIVED_DDL = (

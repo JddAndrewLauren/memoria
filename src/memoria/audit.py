@@ -214,8 +214,8 @@ def audit_visible_body(entry: Entry) -> str:
     ``subjects.is_audit_visible`` owns *which* statements those are, because
     the entry view (#26) has to draw the same line on screen and a second
     copy of the predicate is how the key and the surface drift apart.
-    Memoria notes join ``[open]`` there when #32 lands, without changing the
-    judgement key's shape.
+    Memoria notes (#32) sit with ``[open]`` there, outside the body, without
+    changing the judgement key's shape.
     """
     statements = [s for s in parse_statements(entry.body) if is_audit_visible(s)]
     return "\n\n".join(

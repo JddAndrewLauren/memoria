@@ -22,8 +22,8 @@ that scan under a different name.
 except ``[open]`` - ``memoria.audit.audit_visible_body``, the same function
 the audit itself loads a paragraph's comparison text from (#37), so the two
 consumers agree on what an entry's body even is without either growing its
-own copy. Memoria notes join the exclusion once part 08 §14.2 writes them;
-today there is nothing else to exclude, per that function's own docstring.
+own copy. Memoria notes (part 08 §14.2, #32) are excluded by the same
+predicate: author-facing only, never loaded here.
 
 **Gathered sets are reported, not loaded.** An entry's gathered set
 (``memoria.index.gather``) rides on the working context as identifiers - its
