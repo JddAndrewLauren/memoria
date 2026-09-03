@@ -200,6 +200,19 @@ def test_reading_one_decision_does_not_leak_a_sibling_decisions_text(tmp_path):
     assert DECISION not in read_decision(repository, second.id)
 
 
+def test_a_decision_with_markup_characters_round_trips_verbatim(tmp_path):
+    text = 'a < b && c > d, and a literal &lt; too, next to <a id="dec-0088"></a>'
+    repository = _repo(tmp_path)
+    session_id = _session(repository, SESSION_ID, [("user", text)])
+
+    record = record_decision(repository, session_id, 1, text)
+
+    decisions_text = (tmp_path / "decisions.md").read_text(encoding="utf-8")
+    # Only the two real, un-escaped anchors this module rendered itself.
+    assert decisions_text.count("<") == 2
+    assert f"[author] {text}\n\n— {record.citation}" == read_decision(repository, record.id)
+
+
 # --- DEC- and RES- are durable files, not index rows -------------------------
 
 
