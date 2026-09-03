@@ -20,7 +20,9 @@ const PARAGRAPH_CITATION = {
     original_locator: "Journal I, entry dated Jul. 17.",
   },
   paragraph: 17,
-  anchor: "src-000184-p17",
+  // Deliberately not what `${record.id.toLowerCase()}-p${paragraph}` would
+  // rebuild: the link must carry the anchor the server served, verbatim.
+  anchor: "src-000184-served-p17",
   overlay: { entry_links: ["SUB-people/bob"], exclusions: [], citing_settlements: [] },
 };
 
@@ -95,7 +97,7 @@ describe("the slide-over citation panel (§19.9)", () => {
 
     const link = screen.getByRole("link", { name: "Open full source" });
 
-    expect(link).toHaveAttribute("href", "/sources/SRC-000184#src-000184-p17");
+    expect(link).toHaveAttribute("href", "/sources/SRC-000184#src-000184-served-p17");
   });
 
   it("a backlink is clickable into the same panel, traversing the other direction", async () => {

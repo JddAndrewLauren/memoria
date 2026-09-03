@@ -150,12 +150,14 @@ The reads are: list sources (`GET /api/sources`, filterable by `source_type`,
 (`GET /api/subjects/{id}/entries`, #24). See `docs/tool-surface.md` for what
 each filter means and `src/memoria/web/schemas.py` for the response shapes.
 
-`GET /api/read` is the MCP server's `read(ref)` over HTTP, the same composed
-core: a `SRC-` paragraph anchor — a search hit's, or a paragraph's own —
-serves the cited text with its record and its curated-overlay backlinks (#20),
-and a `SUB-x/y` entry reference, which is what those backlinks are, serves
-that entry's own raw text. So the slide-over citation panel follows a link in
-either direction without a second read shape.
+`GET /api/read` wraps the same composed core as the MCP server's `read(ref)`,
+but narrower: a `SRC-` paragraph anchor — a search hit's, or a paragraph's
+own — serves the cited text with its record and its curated-overlay backlinks
+(#20), and a `SUB-x/y` entry reference, which is what those backlinks are,
+serves that entry's own raw text. Anything else, including a bare `SUB-`
+subject or a repository path the core would resolve, is a 404 (#145). So the
+slide-over citation panel follows a link in either direction without a second
+read shape, and the route is not a repository browse.
 
 Not everything served is a read. `GET /api/locality` reports one connection
 fact — whether the client is on this machine, decided by the peer address and
