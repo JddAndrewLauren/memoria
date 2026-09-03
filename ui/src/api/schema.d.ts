@@ -109,6 +109,12 @@ export interface paths {
          *     ``/locality`` reports. This is what keeps the action purely additive
          *     (ADR-0002): a hosted client gets a plain 403, never a launch on a
          *     machine it is not sitting at.
+         *
+         *     ``opened: true`` is only ever returned once the launch has actually
+         *     survived its grace period (``records._launch``) - a missing opener
+         *     binary or one that exits immediately both raise ``LaunchError`` here,
+         *     reported as a real error response rather than a 500 traceback or a
+         *     claim this route cannot back up.
          */
         post: operations["reveal_source_api_sources__record_id__reveal_post"];
         delete?: never;
@@ -128,16 +134,20 @@ export interface paths {
          * Read
          * @description Resolve one reference - the slide-over citation panel's read (§19.9).
          *
-         *     Wraps ``memoria.records.read`` exactly, the same composed core the MCP
-         *     tool surface's ``read(ref)`` calls: a ``SRC-`` paragraph anchor (a search
-         *     hit's or a paragraph's own ``anchor``) serves the cited text, its record
-         *     and its curated-overlay backlinks (#20); a ``SUB-x/y`` entry reference -
-         *     an overlay's own ``entry_links``/``exclusions`` - serves the entry's raw
-         *     text, so a backlink is clickable into the same panel in both directions
-         *     (#25's acceptance criteria) without a second read shape. Ledgering the
-         *     served read is the caller's job (``memoria.records.read``'s own
-         *     docstring) - this route never imports ``memoria.ledger``, so an author's
-         *     own read here writes nothing to ``events.jsonl``.
+         *     Wraps ``memoria.records.read``, the same composed core the MCP tool
+         *     surface's ``read(ref)`` calls, but narrower: a ``SRC-`` paragraph anchor
+         *     (a search hit's or a paragraph's own ``anchor``) serves the cited text,
+         *     its record and its curated-overlay backlinks (#20); a ``SUB-x/y`` entry
+         *     reference - an overlay's own ``entry_links``/``exclusions`` - serves the
+         *     entry's raw text, so a backlink is clickable into the same panel in both
+         *     directions (#25's acceptance criteria) without a second read shape.
+         *     Anything else - including a bare ``SUB-`` subject or a repository path
+         *     that would otherwise resolve - is a 404: this route is not the MCP
+         *     ``read(ref)`` tool and does not owe it the same contract (#145,
+         *     ``_is_citable``). Ledgering the served read is the caller's job
+         *     (``memoria.records.read``'s own docstring) - this route never imports
+         *     ``memoria.ledger``, so an author's own read here writes nothing to
+         *     ``events.jsonl``.
          */
         get: operations["read_api_read_get"];
         put?: never;
@@ -202,16 +212,24 @@ export interface paths {
         };
         /**
          * Read Entry
-         * @description One entry read whole - #64's third subject read, built here (#157).
+         * @description Read one entry: #64's third subject read, built here for #148 and
+         *     #157.
          *
-         *     Resolves an entry whose file has been renamed: ``load_entry`` reads
-         *     through ``find_entry_path``, which falls back to matching the
-         *     frontmatter ``id``, so #16's stable ``SUB-x/y`` IDs survive a rename on
-         *     disk and this route inherits that without repeating it.
+         *     `GET /api/read?ref=SUB-x/y` (#25) already serves this same entry, but as
+         *     the raw file verbatim, frontmatter included - the MCP tool surface's "the
+         *     entry, verbatim" contract (`docs/tool-surface.md`), reached through a
+         *     reference for the slide-over citation panel's backlink navigation. That
+         *     is a different read from this one: the `SUBJECTS` tree needs an entry
+         *     shaped like its `list subjects`/`list a subject's entries` siblings -
+         *     parsed fields, not a raw blob - the same way `read_source` parses a
+         *     record into paragraphs rather than pointing callers at `raw_source`.
          *
-         *     One ``except`` covers every 404 the read has, because the core raises
-         *     for all three: an unknown subject, an unknown entry, and a
-         *     ``subject_id`` that is not a subject ID at all.
+         *     `load_entry` survives a renamed entry file the same way `find_entry_path`
+         *     does (issue #16). One ``except`` covers every 404 the read has, because
+         *     the core raises `SubjectError` for all three: an unknown subject, an
+         *     unknown entry, and a `subject_id` that is not a subject ID at all - the
+         *     honest-empty-state `list_entries` gives a *known* subject with no
+         *     entries is unaffected.
          *
          *     ``extra`` is not served - it exists so a rewrite does not drop an
          *     unmodelled frontmatter key, not to be published (``EntryDetail``).
@@ -273,9 +291,17 @@ export interface components {
          *     with ``record``/``paragraph``/``overlay`` all ``None`` - a backlink is
          *     clickable into the same panel, and the panel does not need a second shape
          *     to render it (#25's "traverse in both directions"). Wraps
-         *     ``memoria.records.read`` exactly - the same core function the MCP tool
-         *     surface calls - so this is the one generic reference read the viewer has,
-         *     never a second one duplicating ``/sources/{id}``.
+         *     ``memoria.records.read``, the same composed core the MCP tool surface
+         *     calls, but narrower: only those two reference kinds resolve, and a bare
+         *     ``SUB-`` subject or a repository path is a 404 (#145) - so this is the
+         *     one generic reference read the viewer has, never a second one duplicating
+         *     ``/sources/{id}`` or a browse over the repository.
+         *
+         *     ``anchor`` is the cited paragraph's own stable anchor, from
+         *     ``NormalizedRecord.anchor_id()`` - served, not reconstructed client-side,
+         *     the same "no reconstruction by the caller" discipline
+         *     ``docs/tool-surface.md`` already holds for a search hit's anchor.
+         *     ``None`` whenever ``paragraph`` is, the same pairing.
          *
          *     ``EntryDetail`` is **not** a second copy of this for entries, and the two
          *     are not collapsible (#157). Reading ``SUB-x/y`` here serves the entry's
@@ -294,6 +320,8 @@ export interface components {
             record?: components["schemas"]["SourceSummary"] | null;
             /** Paragraph */
             paragraph?: number | null;
+            /** Anchor */
+            anchor?: string | null;
             overlay?: components["schemas"]["ReadOverlayOut"] | null;
         };
         /**
@@ -323,7 +351,16 @@ export interface components {
         };
         /**
          * EntryDetail
-         * @description One entry read whole - #64's third subject read, built here (#157).
+         * @description One entry read whole - #64's third subject read, built here (#148,
+         *     #157).
+         *
+         *     Distinct from ``GET /api/read?ref=SUB-x/y`` (#25's ``CitationOut``),
+         *     which serves the entry's raw file verbatim, frontmatter included - the
+         *     MCP tool surface's "the entry, verbatim" contract
+         *     (``docs/tool-surface.md``), reached through a reference for the
+         *     slide-over citation panel's backlink navigation. This is the `SUBJECTS`
+         *     tree's own read, shaped like its ``SubjectSummary``/``EntrySummary``
+         *     siblings rather than conflated with that one.
          *
          *     ``statements`` is the body split by ``memoria.subjects.parse_statements``:
          *     Memoria's badged statements and the author's unbadged testimony are
