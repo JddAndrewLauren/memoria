@@ -239,10 +239,19 @@ compile error in `ui/`, not a runtime surprise nobody sees.
 
 React + Vite + TypeScript, client-rendered over the JSON API above
 (`docs/adr/0002-ui-is-a-react-client.md`, #24). The shell carries three
-trees — `MANUSCRIPT` (empty until M5), `SUBJECTS` and `SOURCES` — plus
-cross-layer search. `SOURCES` opens the source viewer (#25) and `SUBJECTS`
-opens the entry view (#26), the surface M3's gate is walked on; see
-`docs/gates/m3-gate-walk.md`. Every read goes through `ui/src/api/client.ts`, the
+trees — `MANUSCRIPT`, `SUBJECTS` and `SOURCES` — plus cross-layer search.
+`SOURCES` opens the source viewer (#25) and `SUBJECTS` opens the entry view
+(#26), the surface M3's gate is walked on; see `docs/gates/m3-gate-walk.md`.
+`MANUSCRIPT` is the outline — chapters and sections labelled by their briefs
+— and opens the Section view (#43): the brief, the draft with its
+not-current tint and cause, the entries in scope, and the decisions and open
+questions composed from the sessions that touched it. From a section,
+*Review audit results* opens Review, the results view of an audit the author
+ran from a session (`audit_pending` / `audit_record`) — never an inbox:
+findings as disagreement sets with their admissible resolutions, and view
+evidence / preview diff / apply / settle. Applying a rewrite is the one write
+these surfaces make, through the same write path and staleness token the
+match-term editor uses. Every read goes through `ui/src/api/client.ts`, the
 client's only path to the API; no view opens SQLite or reads the evidence
 repository directly, and a dependency boundary rule
 (`tests/test_ui_dependency_boundary.py`) fails the Python suite if `ui/`

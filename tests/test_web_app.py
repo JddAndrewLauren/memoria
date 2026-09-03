@@ -63,6 +63,12 @@ ALLOWED_IMPORTS = {
     # the two tests below still hold, so a route that opened a file or
     # built a path of its own would fail one of them.
     "memoria.write",
+    # #43: the Section and Review surfaces. Both are compositions over the
+    # core (`memoria.section`, `memoria.review`); the adapter shapes them
+    # and maps `ManuscriptError` to a 404, the same way it maps `ReadError`.
+    "memoria.manuscript",
+    "memoria.review",
+    "memoria.section",
 }
 
 FILE_OPENING_CALLS = {"open", "read_text", "read_bytes", "write_text", "write_bytes"}
@@ -1243,6 +1249,212 @@ def test_nothing_but_the_match_terms_route_writes(tmp_path):
     )
     assert write_methods
     assert paths == [
+        # #43: the author applying a proposed rewrite from Review - the
+        # Section/Review surfaces' one write, through the same write path.
+        "/sections/{section_id}/paragraphs/{paragraph_index}",
         "/sources/{record_id}/reveal",
         "/subjects/{subject_id}/entries/{entry_slug}/match-terms",
     ]
+
+
+# --- the manuscript: outline, Section, Review (#43) ---------------------------
+
+
+def _manuscript_repo(tmp_path, *, draft="Bob went to town.\n\nHe came back.\n"):
+    """`_entry_repo` plus one chapter and one section whose brief resolves
+    to the Bob entry and whose draft holds ``draft`` - committed, since the
+    rewrite route writes through the same git-backed path #26's does."""
+    from memoria.manuscript import create_chapter, create_section
+
+    repository = _entry_repo(
+        tmp_path, entries=[("people", "bob", {"match_terms": ["Bob"]})]
+    )
+    chapter = create_chapter(repository, "The first chapter.")
+    section = create_section(repository, chapter.number, "About Bob.")
+    if draft is not None:
+        (section.dir / "draft.md").write_text(draft, encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "manuscript"], cwd=tmp_path, check=True, capture_output=True
+    )
+    return repository, chapter, section
+
+
+def test_the_manuscript_outline_over_a_fresh_repository_is_not_built(tmp_path):
+    client = _client(_repo(tmp_path))
+
+    assert client.get("/api/manuscript").json() == {"chapters": [], "is_built": False}
+
+
+def test_the_manuscript_outline_lists_chapters_and_sections_by_their_briefs(tmp_path):
+    repository, chapter, section = _manuscript_repo(tmp_path)
+    client = _client(repository)
+
+    body = client.get("/api/manuscript").json()
+
+    assert body["is_built"] is True
+    assert body["chapters"] == [
+        {
+            "id": chapter.brief.id,
+            "number": 1,
+            "excerpt": "The first chapter.",
+            "sections": [
+                {"id": section.brief.id, "number": 1, "excerpt": "About Bob.", "has_draft": True}
+            ],
+        }
+    ]
+
+
+def test_read_section_serves_brief_draft_scope_and_not_current_causes(tmp_path):
+    repository, chapter, section = _manuscript_repo(tmp_path)
+    client = _client(repository)
+
+    body = client.get(f"/api/sections/{section.brief.id}").json()
+
+    assert body["id"] == section.brief.id
+    assert body["chapter_id"] == chapter.brief.id
+    assert body["brief"] == "About Bob."
+    assert body["unconfirmed"] is False
+    assert body["has_draft"] is True
+    assert [p["text"] for p in body["paragraphs"]] == ["Bob went to town.", "He came back."]
+    assert {(n["entry_id"], n["kind"], n["cause"]) for n in body["paragraphs"][0]["not_current"]} == {
+        ("SUB-people/bob", "engagement", "never_audited"),
+        ("SUB-people/bob", "audit_verdict", "never_audited"),
+    }
+    assert body["scope"] == [{"entry_id": "SUB-people/bob", "matched_by": ["bob", "Bob"]}]
+    assert body["scope_empty"] is False
+    assert body["sessions"] == [] and body["decisions"] == [] and body["questions"] == []
+    # No checkpoint or unresolved-impacts state is served (part 12 §39).
+    assert not any(key for key in body if "checkpoint" in key or "impact" in key)
+
+
+def test_read_section_for_an_unknown_id_is_a_404(tmp_path):
+    repository, _, _ = _manuscript_repo(tmp_path)
+    client = _client(repository)
+
+    response = client.get("/api/sections/SEC-9999")
+
+    assert response.status_code == 404
+    assert "SEC-9999" in response.json()["detail"]
+
+
+def test_read_review_over_an_unaudited_section_has_no_findings_and_says_so(tmp_path):
+    repository, _, section = _manuscript_repo(tmp_path)
+    client = _client(repository)
+
+    body = client.get(f"/api/sections/{section.brief.id}/review").json()
+
+    assert body["findings"] == []
+    assert (body["verdicts_current"], body["verdicts_not_current"]) == (0, 2)
+    assert isinstance(body["token"], str) and body["token"]
+
+
+def test_read_review_serves_findings_as_disagreement_sets_with_resolutions(tmp_path):
+    from memoria.audit import (
+        DisagreementMember,
+        Finding,
+        ManuscriptParagraph,
+        finding_verdict,
+        record_audit_verdict,
+    )
+
+    repository, chapter, section = _manuscript_repo(tmp_path)
+    paragraph = ManuscriptParagraph(chapter.number, section.number, 2, "He came back.")
+    finding = Finding(
+        disagreement_set=(
+            DisagreementMember("passage", paragraph.slot),
+            DisagreementMember("source", "src-000184-p1"),
+        ),
+        statement="The source has him back a day later.",
+        confidence="high",
+        subject_id="SUB-people",
+        patch="He came back the next day.",
+    )
+    record_audit_verdict(repository, paragraph, "SUB-people/bob", finding_verdict(finding))
+    client = _client(repository)
+
+    body = client.get(f"/api/sections/{section.brief.id}/review").json()
+
+    assert body["findings"] == [
+        {
+            "paragraph_index": 2,
+            "paragraph_text": "He came back.",
+            "entry_id": "SUB-people/bob",
+            "subject_id": "SUB-people",
+            "confidence": "high",
+            "statement": "The source has him back a day later.",
+            "disagreement_set": [
+                {"kind": "passage", "ref": "01/01#2"},
+                {"kind": "source", "ref": "src-000184-p1"},
+            ],
+            "resolutions": ["rewrite the passage", "exclude the source"],
+            "patch": "He came back the next day.",
+        }
+    ]
+    assert (body["verdicts_current"], body["verdicts_not_current"]) == (1, 1)
+
+
+def test_applying_a_rewrite_replaces_the_paragraph_and_commits_as_the_author(tmp_path):
+    repository, _, section = _manuscript_repo(tmp_path)
+    client = _client(repository)
+    token = client.get(f"/api/sections/{section.brief.id}/review").json()["token"]
+
+    response = client.put(
+        f"/api/sections/{section.brief.id}/paragraphs/2",
+        json={"token": token, "text": "He came back the next day."},
+    )
+
+    assert response.status_code == 200, response.json()
+    body = response.json()
+    assert body["paragraph_index"] == 2
+    assert body["text"] == "He came back the next day."
+    assert body["token"] and body["token"] != token
+    assert (section.dir / "draft.md").read_text(encoding="utf-8") == (
+        "Bob went to town.\n\nHe came back the next day.\n"
+    )
+    author = subprocess.run(
+        ["git", "log", "-1", "--format=%an"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout.strip()
+    assert author == "Local Author"
+    # The brief beside the draft is untouched: no route edits a brief.
+    assert "About Bob." in section.path.read_text(encoding="utf-8")
+
+
+def test_applying_a_rewrite_with_a_stale_token_is_a_409_and_writes_nothing(tmp_path):
+    repository, _, section = _manuscript_repo(tmp_path)
+    client = _client(repository)
+    token = client.get(f"/api/sections/{section.brief.id}/review").json()["token"]
+    (section.dir / "draft.md").write_text("Edited in Obsidian.\n", encoding="utf-8")
+
+    response = client.put(
+        f"/api/sections/{section.brief.id}/paragraphs/1",
+        json={"token": token, "text": "Rewritten."},
+    )
+
+    assert response.status_code == 409
+    assert (section.dir / "draft.md").read_text(encoding="utf-8") == "Edited in Obsidian.\n"
+
+
+def test_applying_a_rewrite_to_a_missing_paragraph_is_a_400(tmp_path):
+    repository, _, section = _manuscript_repo(tmp_path)
+    client = _client(repository)
+    token = client.get(f"/api/sections/{section.brief.id}/review").json()["token"]
+
+    response = client.put(
+        f"/api/sections/{section.brief.id}/paragraphs/7",
+        json={"token": token, "text": "Rewritten."},
+    )
+
+    assert response.status_code == 400
+    assert "no paragraph 7" in response.json()["detail"]
+
+
+def test_applying_a_rewrite_to_an_unknown_section_is_a_404(tmp_path):
+    repository, _, _ = _manuscript_repo(tmp_path)
+    client = _client(repository)
+
+    response = client.put(
+        "/api/sections/SEC-9999/paragraphs/1", json={"token": "x", "text": "Rewritten."}
+    )
+
+    assert response.status_code == 404

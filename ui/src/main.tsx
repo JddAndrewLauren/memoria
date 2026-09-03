@@ -7,6 +7,9 @@ import Home from "./routes/Home";
 import SourceDetailPage from "./routes/SourceDetailPage";
 import RawSourcePage from "./routes/RawSourcePage";
 import EntryPage from "./routes/EntryPage";
+import SectionPage from "./routes/SectionPage";
+import ReviewPage from "./routes/ReviewPage";
+import SuppliedContextPage from "./routes/SuppliedContextPage";
 import "./index.css";
 import "./prose.css";
 
@@ -29,6 +32,12 @@ ReactDOM.createRoot(rootElement).render(
             <Route
               path="subjects/:subjectId/entries/:entrySlug"
               element={<EntryPage />}
+            />
+            <Route path="sections/:sectionId" element={<SectionPage />} />
+            <Route path="sections/:sectionId/review" element={<ReviewPage />} />
+            <Route
+              path="sections/:sectionId/supplied-context"
+              element={<SuppliedContextPage />}
             />
           </Route>
         </Routes>

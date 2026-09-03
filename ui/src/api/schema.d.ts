@@ -388,6 +388,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/manuscript": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Manuscript
+         * @description The `MANUSCRIPT` tree: chapters and sections in outline order, each
+         *     labelled by its brief's first line. Honest about an empty repository
+         *     through ``is_built`` (#157's convention), the way the other trees are.
+         */
+        get: operations["read_manuscript_api_manuscript_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sections/{section_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Section
+         * @description The Section surface, composed at this call (part 19 §19.5 / §19.11):
+         *     the brief, the draft with each paragraph's not-current judgements, the
+         *     entries in scope, and the decisions and questions from the sessions
+         *     that touched it. Nothing here is stored section state - see
+         *     ``memoria.section``.
+         */
+        get: operations["read_section_api_sections__section_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sections/{section_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Review
+         * @description The Review surface: the results of the audit the author ran on this
+         *     section - a read over the verdicts a session recorded, and nothing
+         *     else. Findings arrive as disagreement sets with the resolutions their
+         *     shape admits; the resolution list is read off the set, never a stored
+         *     label (part 06 §8.10).
+         */
+        get: operations["read_review_api_sections__section_id__review_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sections/{section_id}/paragraphs/{paragraph_index}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Rewrite Paragraph
+         * @description Apply a proposed rewrite to one paragraph of a section's draft - the
+         *     author's explicit act from Review, and the surface's one write.
+         *
+         *     Through the single write path (ADR-0003), the same three outcomes
+         *     ``update_match_terms`` has: **409** for a draft changed since Review
+         *     read it (nothing written, nothing merged; the client re-reads for the
+         *     current draft and a fresh token), **400** for a paragraph the draft
+         *     does not have or an empty rewrite, **500** for a write that cannot be
+         *     attempted. Commits as the author - ``repository_actor``, never a name
+         *     in the payload (ADR-0002) - because the click is the authorization
+         *     (part 10 §19.3) and the applied prose is now the author's, the same
+         *     class of thing as an edit made in Obsidian. The only file this can
+         *     reach is ``draft.md``; no route edits a brief.
+         */
+        put: operations["rewrite_paragraph_api_sections__section_id__paragraphs__paragraph_index__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -476,6 +578,27 @@ export interface components {
             /** Anchor */
             anchor?: string | null;
             overlay?: components["schemas"]["ReadOverlayOut"] | null;
+        };
+        /** DecisionOut */
+        DecisionOut: {
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+            /** Citation */
+            citation: string;
+        };
+        /**
+         * DisagreementMemberOut
+         * @description One member of a finding's disagreement set - ``kind`` is one of
+         *     ``passage``, ``entry``, ``source``, ``decision``, ``brief``; ``ref`` is
+         *     that kind's own reference form (``memoria.audit.DisagreementMember``).
+         */
+        DisagreementMemberOut: {
+            /** Kind */
+            kind: string;
+            /** Ref */
+            ref: string;
         };
         /**
          * EditorialRecordOut
@@ -572,6 +695,35 @@ export interface components {
             match_terms: string[];
         };
         /**
+         * FindingOut
+         * @description One finding, as the audit recorded it (part 06 §8.10): a disagreement
+         *     set, prose stating how they disagree, a confidence, the subject that
+         *     raised it, and an optional proposed rewrite. ``resolutions`` is read off
+         *     the set's shape by ``Finding.available_resolutions`` - never stored,
+         *     never a category. ``paragraph_index``/``paragraph_text`` locate it for
+         *     this read only.
+         */
+        FindingOut: {
+            /** Paragraph Index */
+            paragraph_index: number;
+            /** Paragraph Text */
+            paragraph_text: string;
+            /** Entry Id */
+            entry_id: string;
+            /** Subject Id */
+            subject_id: string;
+            /** Confidence */
+            confidence: string;
+            /** Statement */
+            statement: string;
+            /** Disagreement Set */
+            disagreement_set: components["schemas"]["DisagreementMemberOut"][];
+            /** Resolutions */
+            resolutions: string[];
+            /** Patch */
+            patch?: string | null;
+        };
+        /**
          * GatheredSetResponse
          * @description An entry's gathered set, and the exclusions kept out of it.
          *
@@ -650,6 +802,19 @@ export interface components {
             is_local: boolean;
         };
         /**
+         * ManuscriptOutline
+         * @description The `MANUSCRIPT` tree: the ordered tree of chapters and sections,
+         *     which *is* the outline - there is no outline file (part 04 §2.1).
+         *     ``is_built`` is whether ``chapters/`` exists at all, the same
+         *     "which empty is this" flag the other three trees carry (#157).
+         */
+        ManuscriptOutline: {
+            /** Chapters */
+            chapters: components["schemas"]["OutlineChapterOut"][];
+            /** Is Built */
+            is_built: boolean;
+        };
+        /**
          * MatchTermsResponse
          * @description What an accepted match-term write stored, and a fresh token.
          *
@@ -677,6 +842,50 @@ export interface components {
             token: string;
             /** Match Terms */
             match_terms: string[];
+        };
+        /**
+         * NotCurrentOut
+         * @description One not-current judgement against a paragraph: the entry it was
+         *     checked against, the judgement kind (``engagement`` or
+         *     ``audit_verdict``), and the cause - one of ``memoria.audit``'s
+         *     ``STALENESS_CAUSES``, rendered as it is rather than mapped.
+         */
+        NotCurrentOut: {
+            /** Entry Id */
+            entry_id: string;
+            /** Kind */
+            kind: string;
+            /** Cause */
+            cause: string;
+        };
+        /** OutlineChapterOut */
+        OutlineChapterOut: {
+            /** Id */
+            id: string;
+            /** Number */
+            number: number;
+            /** Excerpt */
+            excerpt: string;
+            /** Sections */
+            sections: components["schemas"]["OutlineSectionOut"][];
+        };
+        /**
+         * OutlineSectionOut
+         * @description One section row of the `MANUSCRIPT` tree. ``excerpt`` is the first
+         *     line of the brief, shortened - a brief has no title field (part 04
+         *     §2.1), so the tree shows its prose rather than inventing a name.
+         *     ``has_draft`` tells a planned section (brief written, draft empty -
+         *     CONTEXT.md's "Outline") from one with prose.
+         */
+        OutlineSectionOut: {
+            /** Id */
+            id: string;
+            /** Number */
+            number: number;
+            /** Excerpt */
+            excerpt: string;
+            /** Has Draft */
+            has_draft: boolean;
         };
         /**
          * OverlayActOut
@@ -723,6 +932,13 @@ export interface components {
             /** Text */
             text: string;
         };
+        /** QuestionOut */
+        QuestionOut: {
+            /** Text */
+            text: string;
+            /** Citation */
+            citation: string;
+        };
         /**
          * RawSourceResponse
          * @description The un-normalized file at ``original_file``, served as text.
@@ -762,6 +978,72 @@ export interface components {
         RevealSourceResponse: {
             /** Opened */
             opened: boolean;
+        };
+        /**
+         * ReviewOut
+         * @description The Review surface: the results of an audit the author ran on one
+         *     section, and nothing else (part 19 §19.11's amendment of §19.3).
+         *
+         *     ``findings`` is ordered by confidence. ``verdicts_current`` and
+         *     ``verdicts_not_current`` count the section's (paragraph, entry) audit
+         *     verdicts on each side of the staleness map: zero current is a section
+         *     no audit has been run over, which the surface tells apart from an audit
+         *     that found nothing. ``token`` is the draft's staleness token for
+         *     ``PUT .../paragraphs/{index}`` to present back; ``None`` when the
+         *     section has no draft.
+         */
+        ReviewOut: {
+            /** Section Id */
+            section_id: string;
+            /** Chapter Number */
+            chapter_number: number;
+            /** Section Number */
+            section_number: number;
+            /** Findings */
+            findings: components["schemas"]["FindingOut"][];
+            /** Verdicts Current */
+            verdicts_current: number;
+            /** Verdicts Not Current */
+            verdicts_not_current: number;
+            /** Token */
+            token?: string | null;
+        };
+        /**
+         * RewriteResponse
+         * @description What an accepted rewrite wrote, and a fresh token for the draft the
+         *     write has just changed.
+         */
+        RewriteResponse: {
+            /** Paragraph Index */
+            paragraph_index: number;
+            /** Text */
+            text: string;
+            /** Token */
+            token: string;
+        };
+        /**
+         * RewriteUpdate
+         * @description The author applying a proposed rewrite to one paragraph - the
+         *     interface act part 10 §19.3 names as authorization (``Apply``). ``token``
+         *     is what ``ReviewOut`` served, presented back unread (ADR-0003).
+         */
+        RewriteUpdate: {
+            /** Token */
+            token: string;
+            /** Text */
+            text: string;
+        };
+        /**
+         * ScopeEntryOut
+         * @description One entry the brief's declared scope resolved to, and which of its
+         *     match terms (or its own name) the brief text contains - the "how" half
+         *     of ``memoria.scope.ScopeResolution``'s report.
+         */
+        ScopeEntryOut: {
+            /** Entry Id */
+            entry_id: string;
+            /** Matched By */
+            matched_by: string[];
         };
         /**
          * SearchResponse
@@ -810,6 +1092,60 @@ export interface components {
             source_type: string;
             /** Snippet */
             snippet?: string | null;
+        };
+        /**
+         * SectionParagraphOut
+         * @description One draft paragraph, positionally numbered for this read only (part
+         *     04 §4.1: no durable identity), with every not-current judgement the
+         *     staleness map holds against it - what the surface tints, and why.
+         */
+        SectionParagraphOut: {
+            /** Index */
+            index: number;
+            /** Text */
+            text: string;
+            /** Not Current */
+            not_current: components["schemas"]["NotCurrentOut"][];
+        };
+        /**
+         * SectionView
+         * @description The Section surface (part 19 §19.5 as amended by §19.11): the brief
+         *     (``PURPOSE`` - the one card that reads a file), the draft with its
+         *     not-current tint, the entries in scope, and the decisions and open
+         *     questions composed from the sessions that touched this section.
+         *
+         *     No ``checkpoint``, no ``next``, no ``impacts`` field, and never will be:
+         *     those are withdrawn state (part 12 §39), not empty state.
+         *     ``sessions`` names the session records the decisions and questions
+         *     were composed from, so the composition is legible on the surface.
+         */
+        SectionView: {
+            /** Id */
+            id: string;
+            /** Chapter Id */
+            chapter_id: string;
+            /** Chapter Number */
+            chapter_number: number;
+            /** Section Number */
+            section_number: number;
+            /** Brief */
+            brief: string;
+            /** Unconfirmed */
+            unconfirmed: boolean;
+            /** Has Draft */
+            has_draft: boolean;
+            /** Paragraphs */
+            paragraphs: components["schemas"]["SectionParagraphOut"][];
+            /** Scope */
+            scope: components["schemas"]["ScopeEntryOut"][];
+            /** Scope Empty */
+            scope_empty: boolean;
+            /** Sessions */
+            sessions: string[];
+            /** Decisions */
+            decisions: components["schemas"]["DecisionOut"][];
+            /** Questions */
+            questions: components["schemas"]["QuestionOut"][];
         };
         /**
          * SourceDetail
@@ -1355,6 +1691,124 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_manuscript_api_manuscript_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManuscriptOutline"];
+                };
+            };
+        };
+    };
+    read_section_api_sections__section_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                section_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SectionView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_review_api_sections__section_id__review_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                section_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rewrite_paragraph_api_sections__section_id__paragraphs__paragraph_index__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                section_id: string;
+                paragraph_index: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RewriteUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RewriteResponse"];
                 };
             };
             /** @description Validation Error */

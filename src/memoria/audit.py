@@ -810,14 +810,32 @@ def finding_from_verdict(verdict: dict) -> Finding | None:
     )
 
 
-def findings_in_scope(
+@dataclass(frozen=True)
+class LocatedFinding:
+    """One current finding together with where the traversal found it - the
+    paragraph's position and text as read this call, and the entry it was
+    judged against. The position is display state with the lifetime of one
+    read (part 04 §4.1), carried here so the Review surface (#43) can show
+    a finding beside its paragraph without parsing the passage member's
+    ``ref`` back into a slot - the traversal already knows."""
+
+    chapter_number: int
+    section_number: int
+    paragraph_index: int
+    paragraph_text: str
+    entry_id: str
+    finding: Finding
+
+
+def located_findings_in_scope(
     repository: Repository,
     *,
     chapter_number: int | None = None,
     section_number: int | None = None,
     paragraph_index: int | None = None,
-) -> tuple[Finding, ...]:
-    """Every current finding within one on-demand audit target.
+) -> tuple[LocatedFinding, ...]:
+    """Every current finding within one on-demand audit target, each with
+    the paragraph it was raised against.
 
     A plain read over whatever ``record_audit_verdict`` last cached under
     each in-scope (paragraph, entry) pair's *current* key - a stale
@@ -831,7 +849,7 @@ def findings_in_scope(
     """
     con = connect(repository)
     try:
-        findings: list[Finding] = []
+        findings: list[LocatedFinding] = []
         for item in _iter_scoped_paragraphs(repository):
             if chapter_number is not None and item.chapter_number != chapter_number:
                 continue
@@ -849,10 +867,39 @@ def findings_in_scope(
             value = json.loads(row[0])
             finding = finding_from_verdict(value["verdict"])
             if finding is not None:
-                findings.append(finding)
+                findings.append(
+                    LocatedFinding(
+                        chapter_number=item.chapter_number,
+                        section_number=item.section_number,
+                        paragraph_index=item.paragraph_index,
+                        paragraph_text=item.text,
+                        entry_id=item.entry_id,
+                        finding=finding,
+                    )
+                )
         return tuple(findings)
     finally:
         con.close()
+
+
+def findings_in_scope(
+    repository: Repository,
+    *,
+    chapter_number: int | None = None,
+    section_number: int | None = None,
+    paragraph_index: int | None = None,
+) -> tuple[Finding, ...]:
+    """``located_findings_in_scope``, findings only - for a caller that
+    wants the disagreement sets and not where they sit."""
+    return tuple(
+        item.finding
+        for item in located_findings_in_scope(
+            repository,
+            chapter_number=chapter_number,
+            section_number=section_number,
+            paragraph_index=paragraph_index,
+        )
+    )
 
 
 # --- serving and recording an audit run (#40, driven by an MCP session) ------
