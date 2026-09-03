@@ -1175,7 +1175,7 @@ def record_statement(
     reference; `[open]` may carry none. Testimony is never written here.
     """
     try:
-        entry, token = record_extractor.serve_entry_for_write(repository(), entry_id)
+        _, token = record_extractor.serve_entry_for_write(repository(), entry_id)
         record = record_extractor.record_statement(
             repository(), entry_id, badge, text, tuple(provenance or ()), token
         )

@@ -243,3 +243,42 @@ def test_revising_a_statement_that_is_not_there_names_what_is(tmp_path):
     _entry(repository, BOB, TESTIMONY)
     with pytest.raises(ToolError, match="no such statement in SUB-people/bob"):
         server.revise_statement(BOB, "inferred", "never written", "open", "x")
+
+
+# --- the gaps the wrap-up named ------------------------------------------------
+
+
+def test_list_sessions_sees_the_flat_nesting_the_ledger_falls_back_to(tmp_path):
+    """``memoria.ledger.event_path`` nests a dated id under ``sessions/<YYYY>/
+    <MM>/`` and an undated one directly under ``sessions/``; both are
+    sessions to the pass."""
+    repository = _repo(tmp_path)
+    flat = tmp_path / "sessions" / "SES-custom"
+    flat.mkdir(parents=True)
+    (flat / "events.jsonl").write_text("", encoding="utf-8")
+    _session(repository, [("user", DECISION)])
+
+    assert [(s.session_id, s.has_transcript) for s in list_sessions(repository)] == [
+        (SESSION_ID, True), ("SES-custom", False),
+    ]
+
+
+def test_curation_flag_over_a_repository_with_no_commits_says_so(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    server._repository = Repository(root=tmp_path)
+
+    assert server.curation_flag() == "no commits yet - nothing to flag"
+
+
+def test_record_statement_author_badge_needs_an_author_turn_through_the_tool(tmp_path):
+    repository = _repo(tmp_path)
+    relative_path = _entry(repository, BOB, TESTIMONY)
+    _session(repository, [("assistant", MUSING), ("user", DECISION)])
+
+    with pytest.raises(ToolError, match="Assistant"):
+        server.record_statement(BOB, "author", MUSING, [f"{SESSION_ID}#T1"])
+
+    rendered = server.record_statement(BOB, "author", DECISION, [f"{SESSION_ID}#T2"])
+
+    assert f"[author] {DECISION}\n— {SESSION_ID}#T002" in rendered
+    assert f"[author] {DECISION}" in (tmp_path / relative_path).read_text(encoding="utf-8")

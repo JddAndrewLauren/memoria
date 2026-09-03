@@ -109,8 +109,10 @@ generalise them first. M4 copied M3 and changed the preparation (it wanted a
 manuscript section, a derived session and records the extractor had written)
 and split the walk into a core half and a browser half, because most of its
 gate is facts about files and commits and only one clause needs a viewport.
-Two lessons from building it, both about the scratch repository rather than
-the app: never `git add -A` after the index exists (the dirty-tree rule will
+Each script passes its own spec name to `npm run gate` - the Playwright
+config runs everything under `ui/gate/`, so an unfiltered run walks every
+milestone against one milestone's server. Two lessons from building it, both
+about the scratch repository rather than the app: never `git add -A` after the index exists (the dirty-tree rule will
 refuse every later write, correctly), and a manuscript file the author lays
 down by hand is checkpointed, not committed, or `validate` reads it as an
 unauthorized AI write.

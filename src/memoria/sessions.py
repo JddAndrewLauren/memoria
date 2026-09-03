@@ -475,4 +475,6 @@ def list_sessions(repository: Repository) -> list[SessionState]:
                 has_transcript=(directory / TRANSCRIPT_FILENAME).is_file(),
             )
         )
-    return found
+    # By id, not by path: the dated nesting sorts `2026/` before a flat
+    # `SES-` directory, which would order sessions by layout rather than name.
+    return sorted(found, key=lambda state: state.session_id)

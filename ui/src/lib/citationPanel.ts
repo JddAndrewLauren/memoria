@@ -43,44 +43,62 @@ export function isTurnRef(ref: string): boolean {
 
 const collapse = (text: string) => text.replace(/\s+/g, " ").trim();
 
+type Segmenter = new (
+  locale: string,
+  options: { granularity: string },
+) => { segment(input: string): Iterable<{ segment: string }> };
+
 /**
- * A turn's text as sentences, each flagged if it is the one the highlight
- * names. `Intl.Segmenter` where the runtime has it, a terminal-punctuation
- * split otherwise - what the panel needs is a sentence boundary good enough
- * to land a reader on the right line, not a parser.
+ * A turn's text as sentences, with the run of sentences the highlight
+ * names marked as one. `Intl.Segmenter` does the splitting - every runtime
+ * this ships to has it; without it the turn is one sentence, which is
+ * honest rather than a second, worse splitter.
+ *
+ * The highlight is located *by position* in the whitespace-collapsed turn
+ * and the pieces overlapping that span are marked, so a short sentence that
+ * happens to also occur inside the highlight ("Yes.") is not marked where
+ * it stands elsewhere in the turn. The segmenter also breaks on a wrapped
+ * line and after "Mr.", so the marked pieces are merged: one sentence to
+ * the reader, one mark.
  */
 export function sentencesOf(
   text: string,
   highlight?: string,
 ): { text: string; cited: boolean }[] {
+  const Segmenter = (Intl as unknown as { Segmenter?: Segmenter }).Segmenter;
   const pieces: string[] = [];
-  const Segmenter = (Intl as unknown as { Segmenter?: new (locale: string, options: { granularity: string }) => { segment(input: string): Iterable<{ segment: string }> } }).Segmenter;
   if (Segmenter) {
     for (const { segment } of new Segmenter("en", { granularity: "sentence" }).segment(text)) {
       pieces.push(segment);
     }
   } else {
-    pieces.push(...(text.match(/[^.!?]+(?:[.!?]+["')\]]*|$)\s*/g) ?? [text]));
+    pieces.push(text);
+  }
+  const kept = pieces.filter((piece) => piece.trim().length > 0);
+
+  // Each piece's span in the collapsed turn, the pieces joined by one space.
+  const spans: { start: number; end: number }[] = [];
+  let joined = "";
+  for (const piece of kept) {
+    const own = collapse(piece);
+    if (joined.length > 0) joined += " ";
+    spans.push({ start: joined.length, end: joined.length + own.length });
+    joined += own;
   }
   const wanted = highlight ? collapse(highlight) : "";
-  const flagged = pieces
-    .filter((piece) => piece.trim().length > 0)
-    .map((piece) => {
-      const own = collapse(piece);
-      const cited = wanted.length > 0 && (own.includes(wanted) || wanted.includes(own));
-      return { text: piece, cited };
-    });
-  // The segmenter breaks on a newline and after "Mr." alike, so a sentence
-  // the transcript wrapped, or one carrying an abbreviation, arrives as
-  // several cited pieces. They are one sentence to the reader, and one mark.
+  const at = wanted.length > 0 ? joined.indexOf(wanted) : -1;
+  const citedEnd = at + wanted.length;
+
   const merged: { text: string; cited: boolean }[] = [];
-  for (const piece of flagged) {
+  kept.forEach((piece, index) => {
+    const { start, end } = spans[index];
+    const cited = at >= 0 && start < citedEnd && end > at;
     const last = merged[merged.length - 1];
-    if (piece.cited && last?.cited) {
-      last.text += piece.text;
+    if (cited && last?.cited) {
+      last.text += piece;
     } else {
-      merged.push({ ...piece });
+      merged.push({ text: piece, cited });
     }
-  }
+  });
   return merged;
 }

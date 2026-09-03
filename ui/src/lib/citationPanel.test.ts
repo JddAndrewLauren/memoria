@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { isTurnRef, sentencesOf } from "./citationPanel";
 
 describe("a transcript turn in the citation panel (#34)", () => {
@@ -42,5 +42,29 @@ describe("a transcript turn in the citation panel (#34)", () => {
       "See Mr. Skilling's deck of Jan. 4.",
     ]);
     expect(within.map((s) => s.text).join("")).toBe(turn);
+  });
+
+  it("does not mark a short sentence that merely recurs inside the highlight", () => {
+    const turn = "Yes. I went back and forth. Yes. Let's do it. And that is that. Yes.";
+    const sentences = sentencesOf(turn, "Yes. Let's do it.");
+    expect(sentences.filter((s) => s.cited).map((s) => s.text.trim())).toEqual([
+      "Yes. Let's do it.",
+    ]);
+    expect(sentences.map((s) => s.text).join("")).toBe(turn);
+  });
+
+  describe("without Intl.Segmenter", () => {
+    const original = (Intl as unknown as { Segmenter?: unknown }).Segmenter;
+    afterEach(() => {
+      (Intl as unknown as { Segmenter?: unknown }).Segmenter = original;
+      vi.restoreAllMocks();
+    });
+
+    it("treats the turn as one sentence, marked if the highlight is in it", () => {
+      (Intl as unknown as { Segmenter?: unknown }).Segmenter = undefined;
+      const turn = "One. Two. Three.";
+      expect(sentencesOf(turn, "Two.")).toEqual([{ text: turn, cited: true }]);
+      expect(sentencesOf(turn, "Four.")).toEqual([{ text: turn, cited: false }]);
+    });
   });
 });
