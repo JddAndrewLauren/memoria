@@ -484,11 +484,23 @@ def test_a_traversing_path_that_leaves_a_durable_class_is_refused(tmp_path):
 # instead route through `memoria.write` is an open operator decision
 # (issue #66, comment 5501089810), not settled by this guard - it only
 # records who writes today.
+#
+# `legacy_import` is the same open question a third time: #39 has it write a
+# freshly imported chapter's `draft.md` directly (`_write_draft`'s
+# `os.replace`), and `chapters/` IS in DURABLE_PATHS, so `memoria.write.create`
+# - which exists for exactly a new durable file - is what it would route
+# through. It is allowlisted on the same ground as `manuscript`, not for want
+# of a route: the briefs it writes in the same act go through `manuscript`,
+# which bypasses too (#66), so routing only the draft would split one import
+# across two write disciplines. `import_chapter` also takes no `Actor`, which
+# `create` requires to attribute the commit. Both fall out of the same open
+# operator decision as `manuscript`.
 ALLOWED_WRITERS = {
     "write.py",
     "records.py",
     "index.py",
     "manuscript.py",
+    "legacy_import.py",
     "changes.py",
     "ledger.py",
     "manifest.py",

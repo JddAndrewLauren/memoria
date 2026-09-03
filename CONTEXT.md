@@ -139,6 +139,25 @@ highlighted passage. Impact analysis is not a second mechanism — it is the aud
 re-run because an entry changed.
 _Avoid_: Review, check, validation, impact analysis, scan
 
+**Finding**:
+What the [[audit]] raises when a paragraph and what it is checked against disagree —
+a [[disagreement set]] plus prose saying how they disagree, a confidence, and the
+subject that raised it. It carries no category: which resolutions apply is read off
+the set, never stored as a label. Derived, not accumulated — nothing named a finding
+is stored anywhere, only the memoized audit verdict it is decoded back out of, so
+re-running the audit is what updates it. It may carry a proposed rewrite, which
+nothing applies without the author.
+_Avoid_: Issue, error, violation, warning, flag, conflict type
+
+**Disagreement set**:
+The members a [[finding]] is a disagreement between — the passage, and the entry,
+source, decision or brief it disagrees with. The sorted set of member *kinds* is the
+finding's identity: part 09 §18's table gives the resolutions for each shape, and a
+shape the table does not name is refused rather than silently offered none. A brief
+is a member but never a resolution target — that shape offers a conversation about
+the brief, never a rewrite of it.
+_Avoid_: Finding type, category, conflict, disagreement kind, evidence set
+
 **Not current**:
 The state of a paragraph whose audit judgement is missing or stale — never audited,
 edited since, touching an entry or subject prompt that has changed since, or (for

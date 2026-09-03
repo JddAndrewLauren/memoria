@@ -228,6 +228,39 @@ def append_search_global(
     )
 
 
+def append_assembly(
+    repository: Repository,
+    session_id: str,
+    *,
+    entries: list[dict],
+    fallbacks: list[dict],
+    unconfirmed: bool,
+    empty: bool,
+) -> None:
+    """Ledger one served ``assemble`` call (#38): a declared scope's
+    resolution, in the countable domain units §33.1 asks for and no others -
+    no token figure anywhere on this line (ADR-0001, part 14 §40).
+
+    ``entries`` names each resolved entry, what matched it, and its gathered
+    set's anchors - the sources behind it, carried as identifiers rather than
+    the paragraph text they name (that stays Tier 4, on demand, ledgered by
+    its own ``read`` call if one follows). ``fallbacks`` names every
+    unpromoted candidate the declared scope named instead - part 06 §8.4's
+    "assembly never dead-ends".
+    """
+    _append(
+        repository,
+        session_id,
+        {
+            "tool": "assemble",
+            "entries": entries,
+            "fallbacks": fallbacks,
+            "unconfirmed": unconfirmed,
+            "empty": empty,
+        },
+    )
+
+
 def _filters_dict(filters: SearchFilters | None) -> dict | None:
     """``asdict`` rather than a hand-picked field list: a filter `#12` adds
     later is ledgered automatically, instead of silently dropping until

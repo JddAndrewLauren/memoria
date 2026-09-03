@@ -1,11 +1,22 @@
-"""Memoized judgements and the staleness map (#37, part 06 §8.12).
+"""Memoized judgements and the staleness map (#37), and the audit itself, on
+demand only (#40, part 06 §8.10-§8.12).
 
-Covers the acceptance criteria: both key compositions, hash-comparison-only
+Covers #37's acceptance criteria: both key compositions, hash-comparison-only
 staleness with no model reachable, the whole-manuscript map, the five
 distinguishable causes, a subject-prompt edit staling every paragraph judged
 under it, an ingest that moves a gathered set staling only the affected audit
 verdicts (never the engagement judgements sharing the same paragraph), and
 `memoria rebuild` deriving the map.
+
+And #40's: an audit target is reached only by something naming it explicitly
+(never a scheduled or ingest-triggered path); the questions asked are the
+subjects' own, through the one scope resolver; a finding is a disagreement
+set with no category, and its resolutions are read from the set's shape;
+impact analysis is the same code path as the audit, not a second one; the
+model-engine appearances for Themes and Arcs are memoized, not computed
+fresh; a conflict with author testimony is served as policy for the model to
+report as a disagreement, never as an error; and no finding-resolution path
+can write a brief.
 """
 
 import ast
@@ -14,15 +25,35 @@ from pathlib import Path
 
 import pytest
 
+import memoria.audit as audit_module
 from memoria.audit import (
+    AuditRecordOutcome,
+    AuditTask,
+    AUTHOR_TESTIMONY_POLICY,
+    DisagreementMember,
+    Finding,
     ManuscriptParagraph,
+    ModelAppearance,
+    RecordedAuditItem,
+    RecordedDisagreementMember,
+    RecordedFinding,
     StalenessMap,
+    UnresolvableDisagreementShape,
+    audit_tasks_for_target,
     audit_verdict_key,
+    clear_verdict,
     compute_staleness_map,
     engagement_key,
     entry_hash,
+    finding_from_verdict,
+    finding_verdict,
+    findings_in_scope,
     gathered_set_hash,
     manuscript_paragraphs,
+    model_engine_appearances,
+    paragraph_at,
+    pending_for_target,
+    record_audit_batch,
     record_audit_verdict,
     record_engagement,
     subject_hash,
@@ -462,3 +493,641 @@ def test_a_memo_table_built_before_37_is_migrated_not_refused(tmp_path):
     finally:
         con.close()
     assert compute_staleness_map(repository).not_current == ()
+
+
+# --- AC: on demand only, never scheduled or ingest-triggered (#40) -----------
+
+
+def test_the_writing_functions_are_reachable_only_from_audit_py_and_the_mcp_server():
+    """AC: nothing triggers an audit automatically. `record_engagement`,
+    `record_audit_verdict` and `record_audit_batch` are the only functions
+    that ever cache a judgement, and a call to one of them appears nowhere
+    in the shipped source but here (where they are defined) and in the MCP
+    server's audit tools (`audit_pending`/`audit_record`) - never in ingest
+    (`memoria.index`), the extraction pass, the CLI, or the record
+    extractor. `memoria.index.rebuild` calling the *read-only*
+    `compute_staleness_map` is a different function and is unaffected."""
+    writing_functions = {"record_engagement", "record_audit_verdict", "record_audit_batch"}
+    allowed_files = {"audit.py", "server.py"}
+    for path in SRC_ROOT.rglob("*.py"):
+        if path.name in allowed_files:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = getattr(func, "attr", None) or getattr(func, "id", None)
+            assert name not in writing_functions, (
+                f"{path}: calls {name}(), which must only ever run from an "
+                "explicit audit request"
+            )
+
+
+def test_no_scheduler_or_background_task_infrastructure_exists():
+    """AC: nothing schedules an audit - there is no cron, timer, or
+    background-task machinery anywhere in the shipped source for a future
+    caller to hook one into."""
+    forbidden = (
+        "apscheduler",
+        "croniter",
+        "BackgroundTasks",
+        "threading.Timer",
+        "asyncio.create_task",
+        "celery",
+    )
+    for path in SRC_ROOT.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        for term in forbidden:
+            assert term not in text, f"{path.name} references {term!r}"
+
+
+def test_audit_py_imports_no_brief_writing_function():
+    """AC: no finding-resolution path can write a brief. This module never
+    imports `write_brief`, `confirm_brief`, or any of the brief creators -
+    structural, not a rule a caller has to remember (part 06 §8.10: "a
+    brief is never edited from a finding card")."""
+    tree = ast.parse((SRC_ROOT / "audit.py").read_text(encoding="utf-8"))
+    forbidden = {
+        "write_brief",
+        "confirm_brief",
+        "create_book",
+        "create_chapter",
+        "create_section",
+        "_write_brief_file",
+        "reorder_chapters",
+        "reorder_sections",
+    }
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "memoria.manuscript":
+            imported.update(alias.name for alias in node.names)
+    assert not (imported & forbidden), imported & forbidden
+
+
+# --- an on-demand target, and the paragraph lookup it needs -------------------
+
+
+def test_pending_for_target_scopes_to_chapter_section_or_passage(tmp_path):
+    """AC: an audit runs from an explicit act on a section, a chapter or a
+    highlighted passage. `pending_for_target` reads the whole-manuscript
+    staleness map and narrows it; the count shrinks with each added
+    constraint and never grows."""
+    repository = _repo(tmp_path)
+    write_builtin_subjects(repository)
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    _write_entry(repository, entry)
+
+    chapter1 = create_chapter(repository, "Chapter one.")
+    section1 = create_section(repository, chapter1.number, "About Bob.")
+    (section1.dir / "draft.md").write_text(
+        "Bob went to town.\n\nBob came home.", encoding="utf-8"
+    )
+    section2 = create_section(repository, chapter1.number, "Also about Bob.")
+    (section2.dir / "draft.md").write_text("Bob left again.", encoding="utf-8")
+
+    chapter2 = create_chapter(repository, "Chapter two.")
+    section3 = create_section(repository, chapter2.number, "Still about Bob.")
+    (section3.dir / "draft.md").write_text("Bob wrote a letter.", encoding="utf-8")
+
+    everything = pending_for_target(repository)
+    chapter_only = pending_for_target(repository, chapter_number=chapter1.number)
+    section_only = pending_for_target(
+        repository, chapter_number=chapter1.number, section_number=section1.number
+    )
+    passage_only = pending_for_target(
+        repository,
+        chapter_number=chapter1.number,
+        section_number=section1.number,
+        paragraph_index=2,
+    )
+
+    assert len(everything) > len(chapter_only) > len(section_only) > len(passage_only)
+    assert all(i.chapter_number == chapter1.number for i in chapter_only)
+    assert all(i.section_number == section1.number for i in section_only)
+    assert all(i.paragraph_index == 2 for i in passage_only)
+
+
+def test_pending_for_target_rejects_a_passage_without_a_section(tmp_path):
+    repository = _repo(tmp_path)
+    with pytest.raises(ValueError):
+        pending_for_target(repository, paragraph_index=1)
+
+
+def test_pending_for_target_rejects_a_section_without_a_chapter(tmp_path):
+    repository = _repo(tmp_path)
+    with pytest.raises(ValueError):
+        pending_for_target(repository, section_number=1)
+
+
+def test_paragraph_at_finds_by_position_and_none_when_gone(tmp_path):
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    repository = _basic_repo(
+        tmp_path, entry=entry, brief_text="About Bob.", draft="Bob went to town."
+    )
+
+    found = paragraph_at(repository, 1, 1, 1)
+
+    assert found is not None
+    assert found.text == "Bob went to town."
+    assert paragraph_at(repository, 1, 1, 2) is None
+    assert paragraph_at(repository, 9, 9, 9) is None
+
+
+# --- AC: the audit asks the subjects' own questions, through the scope
+# resolver ---------------------------------------------------------------
+
+
+def test_audit_tasks_for_target_carries_the_subjects_own_questions(tmp_path):
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    repository = _basic_repo(
+        tmp_path, entry=entry, brief_text="About Bob.", draft="Bob went to town."
+    )
+
+    tasks = audit_tasks_for_target(repository, chapter_number=1, section_number=1)
+
+    assert {t.kind for t in tasks} == {"engagement", "audit_verdict"}
+    people_subject = load_subject(repository, "SUB-people")
+    verdict_task = next(t for t in tasks if t.kind == "audit_verdict")
+    assert verdict_task.subject_prompt == people_subject.audit_questions
+    assert verdict_task.entry_audit_visible_body == "Bob is tall."
+    assert verdict_task.paragraph_text == "Bob went to town."
+    assert verdict_task.entry_id == "SUB-people/bob"
+    engagement_task = next(t for t in tasks if t.kind == "engagement")
+    assert people_subject.match in engagement_task.subject_prompt
+    assert people_subject.hazards in engagement_task.subject_prompt
+
+
+def test_audit_tasks_carry_the_gathered_set_for_an_audit_verdict_task_only(tmp_path):
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    repository = _basic_repo(
+        tmp_path, entry=entry, brief_text="About Bob.", draft="Bob went to town."
+    )
+    record = _record("SRC-000001", ["Bob mentioned here."])
+    write_normalized_records([record], repository.root / NORMALIZED_RELATIVE_PATH)
+    build_index(repository, [record])
+
+    tasks = audit_tasks_for_target(repository, chapter_number=1, section_number=1)
+
+    verdict_task = next(t for t in tasks if t.kind == "audit_verdict")
+    assert verdict_task.gathered_anchors
+    engagement_task = next(t for t in tasks if t.kind == "engagement")
+    assert engagement_task.gathered_anchors == ()
+
+
+def test_audit_tasks_for_target_is_bounded_by_the_scope_resolver(tmp_path):
+    """AC: bounded by the entries the section's brief resolves to, through
+    the one scope resolver - an entry the brief never names is never
+    served, current or not."""
+    repository = _repo(tmp_path)
+    write_builtin_subjects(repository)
+    bob = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    carol = Entry(id="SUB-people/carol", match_terms=["Carol"], body="Carol is short.")
+    _write_entry(repository, bob)
+    _write_entry(repository, carol)
+    chapter = create_chapter(repository, "A chapter.")
+    section = create_section(repository, chapter.number, "About Bob.")
+    (section.dir / "draft.md").write_text("Bob went to town.", encoding="utf-8")
+
+    tasks = audit_tasks_for_target(repository, chapter_number=chapter.number, section_number=section.number)
+
+    assert all(t.entry_id == "SUB-people/bob" for t in tasks)
+
+
+def test_audit_tasks_fill_the_limit_despite_vanished_paragraphs(tmp_path, monkeypatch):
+    """`limit` bounds the tasks served, not the pending rows walked: a
+    paragraph that vanished from draft.md between the staleness map and this
+    read is dropped, and dropping it must not under-fill the batch."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    draft = "\n\n".join(f"Bob did thing {n}." for n in range(1, 9))
+    repository = _basic_repo(
+        tmp_path, entry=entry, brief_text="About Bob.", draft=draft
+    )
+    real_paragraph_at = audit_module.paragraph_at
+
+    def _vanished_first_two(repo, chapter_number, section_number, paragraph_index):
+        if paragraph_index in (1, 2):
+            return None
+        return real_paragraph_at(repo, chapter_number, section_number, paragraph_index)
+
+    monkeypatch.setattr(audit_module, "paragraph_at", _vanished_first_two)
+
+    tasks = audit_tasks_for_target(
+        repository, chapter_number=1, section_number=1, limit=6
+    )
+
+    assert len(tasks) == 6
+    assert not any(t.anchor.startswith("01/01#1|") for t in tasks)
+    assert not any(t.anchor.startswith("01/01#2|") for t in tasks)
+
+
+# --- findings: disagreement sets, no category (#40, part 06 §8.10) -----------
+
+
+def test_finding_resolutions_are_read_from_the_disagreement_sets_shape():
+    passage_source = Finding(
+        disagreement_set=(
+            DisagreementMember("passage", "01/01#1"),
+            DisagreementMember("source", "src-000001-p1"),
+        ),
+        statement="disagreement",
+        confidence="high",
+        subject_id="SUB-people",
+    )
+    assert passage_source.available_resolutions == (
+        "rewrite the passage",
+        "exclude the source",
+    )
+
+    passage_entry_source = Finding(
+        disagreement_set=(
+            DisagreementMember("passage", "01/01#1"),
+            DisagreementMember("entry", "SUB-people/bob"),
+            DisagreementMember("source", "src-000001-p1"),
+        ),
+        statement="disagreement",
+        confidence="moderate",
+        subject_id="SUB-people",
+    )
+    assert len(passage_entry_source.available_resolutions) == 3
+
+
+def test_a_disagreement_set_naming_a_brief_never_offers_a_rewrite_of_it():
+    """AC: no finding-resolution path can write a brief - the one row that
+    can name a brief offers a conversation, never an edit."""
+    passage_brief = Finding(
+        disagreement_set=(
+            DisagreementMember("passage", "01/01#1"),
+            DisagreementMember("brief", "SEC-0001"),
+        ),
+        statement="disagreement",
+        confidence="low",
+        subject_id="SUB-themes",
+    )
+    resolutions = passage_brief.available_resolutions
+    assert "open a conversation about the brief" in resolutions
+    assert not any(
+        "update the brief" in r or "rewrite the brief" in r or "edit the brief" in r
+        for r in resolutions
+    )
+
+
+def test_a_disagreement_set_with_no_declared_shape_is_refused_loudly():
+    finding = Finding(
+        disagreement_set=(DisagreementMember("entry", "SUB-people/bob"),),
+        statement="malformed",
+        confidence="low",
+        subject_id="SUB-people",
+    )
+    with pytest.raises(UnresolvableDisagreementShape):
+        finding.available_resolutions
+    with pytest.raises(UnresolvableDisagreementShape):
+        finding_verdict(finding)
+
+
+def test_clear_and_finding_verdicts_round_trip_through_the_memo_value():
+    assert finding_from_verdict(clear_verdict()) is None
+
+    finding = Finding(
+        disagreement_set=(
+            DisagreementMember("passage", "01/01#1"),
+            DisagreementMember("entry", "SUB-people/bob"),
+        ),
+        statement="Bob's age is disputed.",
+        confidence="high",
+        subject_id="SUB-people",
+        patch="maybe fifty-nine",
+    )
+
+    round_tripped = finding_from_verdict(finding_verdict(finding))
+
+    assert round_tripped == finding
+
+
+# --- findings are derived, and impact analysis is the same code path (#40) --
+
+
+def test_findings_in_scope_reads_back_a_recorded_finding(tmp_path):
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    repository = _basic_repo(
+        tmp_path, entry=entry, brief_text="About Bob.", draft="Bob went to town."
+    )
+    paragraph = manuscript_paragraphs(repository)[0]
+    record_engagement(repository, paragraph, "SUB-people/bob", {"engages": True})
+    finding = Finding(
+        disagreement_set=(
+            DisagreementMember("passage", paragraph.slot),
+            DisagreementMember("entry", "SUB-people/bob"),
+        ),
+        statement="Contradicts the entry.",
+        confidence="high",
+        subject_id="SUB-people",
+    )
+    record_audit_verdict(repository, paragraph, "SUB-people/bob", finding_verdict(finding))
+
+    assert findings_in_scope(repository, chapter_number=1, section_number=1) == (finding,)
+    # And clear once actually settled/cleared, never accumulating alongside.
+    assert findings_in_scope(repository, chapter_number=1, section_number=2) == ()
+
+
+def test_findings_in_scope_reports_nothing_once_the_judgement_is_stale(tmp_path):
+    """AC: findings recompute and nothing accumulates - editing the entry
+    the finding rests on makes it stop being served, with nothing left over
+    to clean up."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    repository = _basic_repo(
+        tmp_path, entry=entry, brief_text="About Bob.", draft="Bob went to town."
+    )
+    paragraph = manuscript_paragraphs(repository)[0]
+    finding = Finding(
+        disagreement_set=(
+            DisagreementMember("passage", paragraph.slot),
+            DisagreementMember("entry", "SUB-people/bob"),
+        ),
+        statement="Contradicts the entry.",
+        confidence="high",
+        subject_id="SUB-people",
+    )
+    record_audit_verdict(repository, paragraph, "SUB-people/bob", finding_verdict(finding))
+    assert findings_in_scope(repository) == (finding,)
+
+    _write_entry(
+        repository, Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is short.")
+    )
+
+    assert findings_in_scope(repository) == ()
+
+
+def test_impact_analysis_and_the_audit_read_the_same_pending_function(tmp_path):
+    """AC: impact from a changed entry is the same code path as an audit.
+    Editing the prose and editing the entry both surface through
+    `pending_for_target` - the single function this module offers for "what
+    needs (re-)evaluation" - never a second, "impact analysis" function."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    repository = _basic_repo(
+        tmp_path, entry=entry, brief_text="About Bob.", draft="Bob went to town."
+    )
+    paragraph = manuscript_paragraphs(repository)[0]
+    record_engagement(repository, paragraph, "SUB-people/bob", {"engages": True})
+    record_audit_verdict(repository, paragraph, "SUB-people/bob", clear_verdict())
+    assert pending_for_target(repository, chapter_number=1, section_number=1) == ()
+
+    # Triggered from the prose end - a hand edit to the passage.
+    (repository.root / "chapters" / "01" / "sections" / "01" / "draft.md").write_text(
+        "Bob went to the capital instead.", encoding="utf-8"
+    )
+    from_prose = pending_for_target(repository, chapter_number=1, section_number=1)
+    assert {i.cause for i in from_prose} == {"paragraph_edited"}
+
+    # Re-audit clears it, then trigger from the other end - editing the entry.
+    paragraph = manuscript_paragraphs(repository)[0]
+    record_engagement(repository, paragraph, "SUB-people/bob", {"engages": True})
+    record_audit_verdict(repository, paragraph, "SUB-people/bob", clear_verdict())
+    assert pending_for_target(repository, chapter_number=1, section_number=1) == ()
+
+    _write_entry(
+        repository, Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is short.")
+    )
+    from_entry = pending_for_target(repository, chapter_number=1, section_number=1)
+    assert {i.cause for i in from_entry} == {"entry_changed"}
+
+
+def test_no_function_in_this_module_is_named_for_impact_analysis_separately():
+    """AC (structural half): there is no second, "impact analysis" entry
+    point beside the audit's own - a caller re-runs the same
+    `pending_for_target`/`audit_tasks_for_target` either way."""
+    import memoria.audit as audit_module
+
+    public_names = {name for name in dir(audit_module) if not name.startswith("_")}
+    assert not any("impact" in name.lower() for name in public_names)
+
+
+# --- the model engine for Themes and Arcs (#40, part 06 §8.11) --------------
+
+
+def test_model_engine_appearances_reads_back_current_engagement_judgements(tmp_path):
+    """AC: model-engine appearances are produced for Themes and Arcs and
+    memoized - there is no separate write here, only a read over what the
+    audit already cached."""
+    repository = _repo(tmp_path)
+    write_builtin_subjects(repository)
+    control = Entry(id="SUB-themes/control", match_terms=["Control"], body="About control.")
+    _write_entry(repository, control)
+    _section(repository, brief_text="About Control.", draft="Bob wrestled with control.")
+    paragraph = manuscript_paragraphs(repository)[0]
+
+    assert model_engine_appearances(repository) == ()
+
+    record_engagement(
+        repository,
+        paragraph,
+        "SUB-themes/control",
+        {"engages": True, "note": "frames episode as ambition"},
+    )
+
+    appearances = model_engine_appearances(repository)
+    assert appearances == (
+        ModelAppearance(
+            entry_id="SUB-themes/control", slot="01/01#1", note="frames episode as ambition"
+        ),
+    )
+    assert model_engine_appearances(repository, entry_id="SUB-themes/control") == appearances
+    assert model_engine_appearances(repository, entry_id="SUB-people/bob") == ()
+
+
+def test_model_engine_appearances_excludes_engages_false_and_lexical_subjects(tmp_path):
+    repository = _repo(tmp_path)
+    write_builtin_subjects(repository)
+    bob = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    control = Entry(id="SUB-themes/control", match_terms=["Control"], body="About control.")
+    _write_entry(repository, bob)
+    _write_entry(repository, control)
+    _section(
+        repository, brief_text="About Bob and Control.", draft="Bob wrestled with control."
+    )
+    paragraph = manuscript_paragraphs(repository)[0]
+
+    record_engagement(repository, paragraph, "SUB-people/bob", {"engages": True, "note": "matched Bob"})
+    record_engagement(
+        repository, paragraph, "SUB-themes/control", {"engages": False, "note": "not really"}
+    )
+
+    assert model_engine_appearances(repository) == ()
+
+
+def test_model_engine_appearances_goes_stale_the_same_way_engagement_does(tmp_path):
+    repository = _repo(tmp_path)
+    write_builtin_subjects(repository)
+    control = Entry(id="SUB-themes/control", match_terms=["Control"], body="About control.")
+    _write_entry(repository, control)
+    _section(repository, brief_text="About Control.", draft="Bob wrestled with control.")
+    paragraph = manuscript_paragraphs(repository)[0]
+    record_engagement(
+        repository, paragraph, "SUB-themes/control", {"engages": True, "note": "note"}
+    )
+    assert len(model_engine_appearances(repository)) == 1
+
+    _write_entry(
+        repository,
+        Entry(id="SUB-themes/control", match_terms=["Control"], body="Control means something else now."),
+    )
+
+    assert model_engine_appearances(repository) == ()
+
+
+# --- AC: author testimony is a disagreement, never an error -----------------
+
+
+def test_the_author_testimony_policy_is_defined_once_and_names_the_rule():
+    assert "outranks" in AUTHOR_TESTIMONY_POLICY
+    assert "author" in AUTHOR_TESTIMONY_POLICY.lower()
+
+
+def test_a_testimony_versus_evidence_conflict_records_as_a_finding_not_an_exception(tmp_path):
+    """A conflict with author testimony is reported as a disagreement,
+    never as an error: recording one goes through the same `Finding`/
+    `record_audit_verdict` path as any other, and there is no separate
+    "the author is wrong" exception type for it to raise instead."""
+    entry = Entry(
+        id="SUB-people/bob",
+        match_terms=["Bob"],
+        body="Bob was born in 1962.\n\n[source] Notes describe Bob as in his thirties.",
+    )
+    repository = _basic_repo(
+        tmp_path,
+        entry=entry,
+        brief_text="About Bob.",
+        draft="Bob, thirty-something, walked in.",
+    )
+    paragraph = manuscript_paragraphs(repository)[0]
+
+    finding = Finding(
+        disagreement_set=(
+            DisagreementMember("passage", paragraph.slot),
+            DisagreementMember("entry", "SUB-people/bob"),
+            DisagreementMember("source", "src-000001-p1"),
+        ),
+        statement=(
+            "The passage's age matches the notes, but the entry's testimony "
+            "(1962) outranks them - a disagreement, not an error."
+        ),
+        confidence="moderate",
+        subject_id="SUB-people",
+    )
+
+    record_audit_verdict(repository, paragraph, "SUB-people/bob", finding_verdict(finding))
+
+    assert findings_in_scope(repository) == (finding,)
+
+
+# --- record_audit_batch: the recording half of an audit run (#40) -----------
+
+
+def test_record_audit_batch_records_engagement_and_a_clear_verdict(tmp_path):
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    repository = _basic_repo(
+        tmp_path, entry=entry, brief_text="About Bob.", draft="Bob went to town."
+    )
+    paragraph = manuscript_paragraphs(repository)[0]
+    anchor = f"{paragraph.slot}|SUB-people/bob"
+
+    outcome = record_audit_batch(
+        repository,
+        [
+            RecordedAuditItem(anchor=anchor, kind="engagement", engages=True, note="mentions Bob"),
+            RecordedAuditItem(anchor=anchor, kind="audit_verdict", clear=True),
+        ],
+    )
+
+    assert outcome.accepted == (anchor, anchor)
+    assert outcome.rejected == ()
+    assert compute_staleness_map(repository).not_current == ()
+
+
+def test_record_audit_batch_records_a_finding(tmp_path):
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    repository = _basic_repo(
+        tmp_path, entry=entry, brief_text="About Bob.", draft="Bob went to town."
+    )
+    paragraph = manuscript_paragraphs(repository)[0]
+    anchor = f"{paragraph.slot}|SUB-people/bob"
+
+    outcome = record_audit_batch(
+        repository,
+        [
+            RecordedAuditItem(
+                anchor=anchor,
+                kind="audit_verdict",
+                finding=RecordedFinding(
+                    disagreement_set=[
+                        RecordedDisagreementMember(kind="passage", ref=paragraph.slot),
+                        RecordedDisagreementMember(kind="entry", ref="SUB-people/bob"),
+                    ],
+                    statement="Contradicts the entry.",
+                    confidence="high",
+                ),
+            )
+        ],
+    )
+
+    assert outcome.accepted == (anchor,)
+    findings = findings_in_scope(repository, chapter_number=1, section_number=1)
+    assert len(findings) == 1
+    assert findings[0].statement == "Contradicts the entry."
+    assert findings[0].subject_id == "SUB-people"
+
+
+def test_record_audit_batch_rejects_element_by_element(tmp_path):
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    repository = _basic_repo(
+        tmp_path, entry=entry, brief_text="About Bob.", draft="Bob went to town."
+    )
+    paragraph = manuscript_paragraphs(repository)[0]
+    good_anchor = f"{paragraph.slot}|SUB-people/bob"
+
+    outcome = record_audit_batch(
+        repository,
+        [
+            RecordedAuditItem(anchor="not-an-anchor", kind="engagement", engages=True),
+            RecordedAuditItem(
+                anchor=f"{paragraph.slot}|SUB-people/carol", kind="engagement", engages=True
+            ),
+            RecordedAuditItem(anchor=good_anchor, kind="engagement"),  # missing 'engages'
+            RecordedAuditItem(
+                anchor=good_anchor, kind="engagement", engages=True, note="mentions Bob"
+            ),
+        ],
+    )
+
+    assert outcome.accepted == (good_anchor,)
+    assert len(outcome.rejected) == 3
+
+
+def test_record_audit_batch_rejects_a_finding_with_no_declared_resolution(tmp_path):
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    repository = _basic_repo(
+        tmp_path, entry=entry, brief_text="About Bob.", draft="Bob went to town."
+    )
+    paragraph = manuscript_paragraphs(repository)[0]
+    anchor = f"{paragraph.slot}|SUB-people/bob"
+
+    outcome = record_audit_batch(
+        repository,
+        [
+            RecordedAuditItem(
+                anchor=anchor,
+                kind="audit_verdict",
+                finding=RecordedFinding(
+                    disagreement_set=[
+                        RecordedDisagreementMember(kind="entry", ref="SUB-people/bob"),
+                    ],
+                    statement="No passage in this set.",
+                    confidence="low",
+                ),
+            )
+        ],
+    )
+
+    assert outcome.accepted == ()
+    assert len(outcome.rejected) == 1
+    assert findings_in_scope(repository) == ()
