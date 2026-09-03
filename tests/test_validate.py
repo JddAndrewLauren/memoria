@@ -930,3 +930,35 @@ def test_validate_passes_a_repository_with_no_git_history(tmp_path):
     repo_root.mkdir(parents=True, exist_ok=True)
 
     assert validate(evidence_root, repo_root) == []
+
+
+# --- settlements: the form, and the session they trace to (#33) ---------------
+
+
+def test_validate_passes_a_well_formed_settlement(tmp_path):
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    _write_entry(
+        repo_root, "SUB-people/bob",
+        "Bob was born in 1962.\n\n"
+        "[settled] birth year 1962 — SUB-people/bob, chosen over SRC-000184 ¶12, 2026-09-02\n"
+        "Reason: memory\n"
+        "— SES-20260912-1432",
+    )
+
+    assert validate(evidence_root, repo_root) == []
+
+
+def test_validate_fails_a_settlement_missing_its_session(tmp_path):
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    _write_entry(
+        repo_root, "SUB-people/bob",
+        "[settled] birth year 1962 — SUB-people/bob, chosen over SRC-000184 ¶12, 2026-09-02\n"
+        "Reason: memory",
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert len(errors) == 1
+    assert "[settled]" in errors[0]
+    assert "session" in errors[0]
+    assert "subjects/people/bob.md" in errors[0].replace("\\", "/")

@@ -29,6 +29,8 @@ const BADGE_TONE: Record<string, Tone> = {
   source: "green",
   inferred: "amber",
   open: "neutral",
+  // A settlement (#33) is the author's own act, so it takes the author's colour.
+  settled: "blue",
 };
 
 // The audit-visible body is testimony and every badged statement except

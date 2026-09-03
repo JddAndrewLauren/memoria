@@ -289,28 +289,18 @@ def test_reading_an_unresolvable_chapter_or_section_id_names_it(tmp_path):
 # --- errors name what went wrong -------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("ref", "kind"),
-    [
-        ("CLM-0041", "CLM"),
-    ],
-)
-def test_a_not_yet_existing_kind_names_the_kind(tmp_path, ref, kind):
-    with pytest.raises(ReadError) as caught:
-        read(_repo(tmp_path), ref)
-
-    assert kind in str(caught.value)
-    assert "not resolvable in this build yet" in str(caught.value)
-
-
-def test_reading_a_nonexistent_decision_or_research_memo_names_it(tmp_path):
-    """DEC-/RES- are implemented (#30); an id that does not exist is an
-    ordinary named refusal, not the generic "not resolvable" message."""
+def test_reading_a_nonexistent_decision_memo_or_claim_names_it(tmp_path):
+    """DEC-/RES- (#30) and CLM- (#33) are implemented - every kind part 04
+    §4 names now is - so an id that does not exist is an ordinary named
+    refusal, never the generic "not resolvable in this build yet" one."""
     repository = _repo(tmp_path)
     with pytest.raises(ReadError, match="DEC-0088"):
         read(repository, "DEC-0088")
     with pytest.raises(ReadError, match="RES-20261018-003"):
         read(repository, "RES-20261018-003")
+    with pytest.raises(ReadError, match="CLM-0041") as caught:
+        read(repository, "CLM-0041")
+    assert "not resolvable in this build yet" not in str(caught.value)
 
 
 def test_an_unknown_kind_is_named_rather_than_treated_as_a_path(tmp_path):
@@ -722,17 +712,14 @@ def test_raw_refuses_a_binary_original_naming_its_type(tmp_path):
         read(repository, "SRC-000184", raw=True)
 
 
-def test_raw_over_an_unresolvable_reference_names_the_reference(tmp_path):
-    """The reference is judged before the raw capability is (#113 review).
-
-    `CLM-` resolves to no kind here, so that - not the raw refusal - is what
-    the caller has to fix first.
-    """
-    with pytest.raises(ReadError) as caught:
+def test_raw_refuses_a_resolvable_claim_reference(tmp_path):
+    """`CLM-` resolves (#33), so the raw guard - not "not resolvable" - is
+    what fires, before the claim is even looked for: a claim file carries
+    neither an `original_file` nor an overlay to strip. The reference is
+    still judged before the raw capability is (#113 review) - the unknown
+    kind test below is where that ordering now shows."""
+    with pytest.raises(ReadError, match="raw only serves"):
         read(_repo(tmp_path), "CLM-0041", raw=True)
-
-    assert "not resolvable in this build yet" in str(caught.value)
-    assert "raw only serves" not in str(caught.value)
 
 
 def test_raw_over_an_unknown_kind_names_the_kind(tmp_path):

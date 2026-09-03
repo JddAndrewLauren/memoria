@@ -43,7 +43,10 @@ SUBJECTS_RELATIVE_PATH = "subjects"
 _SLUG = r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*"
 _ENTRY_REF_RE = re.compile(rf"^SUB-{_SLUG}/{_SLUG}$")
 
-_BADGE_RE = re.compile(r"^\[(author|source|inferred|open)\]\s*")
+# The four badges of the write matrix (part 06 §8.2), and `[settled]` - a
+# settlement (§8.7, #33), written by `memoria.settlements` and read here so
+# it is a statement of its own kind rather than mistaken for testimony.
+_BADGE_RE = re.compile(r"^\[(author|source|inferred|open|settled)\]\s*")
 
 
 class SubjectError(Exception):
@@ -356,10 +359,11 @@ def classify_match_term(term: str) -> str:
 def parse_statements(body: str) -> list[Statement]:
     """An entry body's paragraphs, each with its badge if it has one.
 
-    Testimony (no badge) and Memoria's badged statements (``[author]``,
-    ``[source]``, ``[inferred]``, ``[open]``) are shared territory in the
-    same body (part 06 §8.2); this is what makes them distinguishable rather
-    than merely visually different.
+    Testimony (no badge), Memoria's badged statements (``[author]``,
+    ``[source]``, ``[inferred]``, ``[open]``) and the author's settlements
+    (``[settled]``, §8.7) are shared territory in the same body (part 06
+    §8.2); this is what makes them distinguishable rather than merely
+    visually different.
     """
     statements = []
     for paragraph in re.split(r"\n\s*\n", body.strip()):
@@ -379,8 +383,8 @@ def parse_statements(body: str) -> list[Statement]:
 def is_audit_visible(statement: Statement) -> bool:
     """Whether a statement belongs to the **audit-visible body** - the part
     of an entry assembly loads and the audit compares prose against
-    (CONTEXT.md, part 06 §8.2): testimony and every badged statement except
-    ``[open]``.
+    (CONTEXT.md, part 06 §8.2): testimony, settlements and every badged
+    statement except ``[open]``.
 
     One owner for the rule, called by ``memoria.audit.audit_visible_body``
     (which decides a memoization key) and by the entry view (#26, which

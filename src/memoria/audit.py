@@ -82,6 +82,7 @@ from memoria.index import connect, gather
 from memoria.manuscript import list_chapters, list_sections
 from memoria.repository import Repository
 from memoria.scope import resolve_scope
+from memoria.settlements import is_settled
 from memoria.subjects import (
     Entry,
     Subject,
@@ -846,7 +847,15 @@ def located_findings_in_scope(
     entry and re-running the audit therefore updates what this returns
     exactly the way editing prose does - the same mechanism, read from
     either end (#40's fifth acceptance criterion).
+
+    **A settled disagreement is not served** (#33, part 06 §8.7): a finding
+    whose disagreement set the entry has already settled
+    (``memoria.settlements.is_settled``) is dropped here rather than raised
+    again - the point of settling something is that it stops being raised.
+    The judgement itself is still recorded and still current, so the
+    paragraph does not read as not-current for it.
     """
+    entries = load_all_entries(repository)
     con = connect(repository)
     try:
         findings: list[LocatedFinding] = []
@@ -866,17 +875,20 @@ def located_findings_in_scope(
                 continue
             value = json.loads(row[0])
             finding = finding_from_verdict(value["verdict"])
-            if finding is not None:
-                findings.append(
-                    LocatedFinding(
-                        chapter_number=item.chapter_number,
-                        section_number=item.section_number,
-                        paragraph_index=item.paragraph_index,
-                        paragraph_text=item.text,
-                        entry_id=item.entry_id,
-                        finding=finding,
-                    )
+            if finding is None:
+                continue
+            if is_settled(entries[item.entry_id], finding.disagreement_set):
+                continue
+            findings.append(
+                LocatedFinding(
+                    chapter_number=item.chapter_number,
+                    section_number=item.section_number,
+                    paragraph_index=item.paragraph_index,
+                    paragraph_text=item.text,
+                    entry_id=item.entry_id,
+                    finding=finding,
                 )
+            )
         return tuple(findings)
     finally:
         con.close()

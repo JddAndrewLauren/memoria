@@ -423,12 +423,13 @@ gives.
 
 ### What it refuses, and how
 
-Reference kinds part 04 §4 defines but this build does not resolve —
-`CLM-` — return an error **naming the kind**, never a silent
-empty result. A kind that is not part of the scheme at all is named too, and
-distinguished from one that is merely unbuilt. `SUB-x` and `SUB-x/y` were on
-this list until issue #16, `CHG-` until ADR-0008, `SES-` (with or without a
-`#T` turn) until #28, and `RES-`/`DEC-` until #30.
+Every reference kind part 04 §4 defines now resolves. A kind that is not
+part of the scheme at all is named in the error, never a silent empty
+result; the "not resolvable in this build yet" message for a kind the plan
+names but nothing implements is kept for the next kind the plan adds. `SUB-x`
+and `SUB-x/y` were on that list until issue #16, `CHG-` until ADR-0008,
+`SES-` (with or without a `#T` turn) until #28, `RES-`/`DEC-` until #30, and
+`CLM-` until #33.
 
 Errors reach the model as `ToolError`, which is the SDK's anticipated-failure
 type: the call comes back `is_error` with the message intact. Any other

@@ -192,8 +192,22 @@ _Avoid_: Author note, recollection, memory, annotation
 
 **Settlement**:
 A recorded author resolution of a surfaced conflict, naming which side was chosen and
-when. Downstream passages relying on it inherit the resolution and stay silent.
+when. Downstream passages relying on it inherit the resolution and stay silent. It is
+click-authorized - an explicit author act, committed as the author's - and lives on
+the entry as a `[settled]` paragraph inside the [[audit-visible-body]], naming what
+was chosen over what, the reason, the date, and the session it happened in as
+provenance; nothing about it points at a manuscript paragraph. Every settlement
+accretes into a [[claim]].
 _Avoid_: Dismissal, decision, override, resolution
+
+**Claim**:
+A proposition with a truth value - a status, a confidence, supporting and
+contradicting evidence, and reasoning - addressable as `CLM-` and held one file each
+under `claims/`. Not a subject: the propositional layer that accretes from
+[[settlement]]s, born at the moment a disagreement was contested enough that the
+author had to settle it, and a superset of them, since the author may assert one
+outright. `read(CLM-…)` serves the file verbatim.
+_Avoid_: Fact, assertion, belief, sixth subject
 
 ### Ownership
 
