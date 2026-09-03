@@ -484,11 +484,19 @@ def test_a_traversing_path_that_leaves_a_durable_class_is_refused(tmp_path):
 # instead route through `memoria.write` is an open operator decision
 # (issue #66, comment 5501089810), not settled by this guard - it only
 # records who writes today.
+#
+# `legacy_import` is the same open question a third time: #39 has it write a
+# freshly imported chapter's `draft.md` directly (`_write_draft`'s
+# `os.replace`), in the same act as the `manuscript`-written briefs beside
+# it - `draft.md` has no write path of its own yet either way (#43, still
+# open), so there is nothing in `memoria.write` for it to route through
+# until #66 and #43 both land.
 ALLOWED_WRITERS = {
     "write.py",
     "records.py",
     "index.py",
     "manuscript.py",
+    "legacy_import.py",
     "changes.py",
     "ledger.py",
     "manifest.py",
