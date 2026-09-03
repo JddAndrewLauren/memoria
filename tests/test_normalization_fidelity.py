@@ -13,26 +13,32 @@ original" actually call, against every fixture the email converter handles.
 
 **What "verbatim" is, and where it stops.** The claim held here is
 containment: every paragraph a record carries appears, character for
-character, inside the text `GET /sources/{id}/raw` serves. It is deliberately
-one-directional - the raw file has far more in it than the record does
-(headers, the ZL footer, an excised quoted reply), and dropping material is
-what a converter is for. Inventing material is what it must never do.
+character, inside its original. It is deliberately one-directional - the
+original has far more in it than the record does (headers, the ZL footer, an
+excised quoted reply), and dropping material is what a converter is for.
+Inventing material is what it must never do.
 
-The claim is also bounded by transfer encoding, and the bound is worth
-stating because a future fixture will find it. `read_raw_source` serves the
+**The claim is bounded by transfer encoding.** `read_raw_source` serves the
 file decoded as UTF-8 but otherwise untouched, so a body written in
-quoted-printable reaches the reader as `=\\n`-wrapped source text while the
-record carries the decoded lines. Today's fixtures include a
-quoted-printable message (`plain.eml`) whose *body* happens to need no soft
-wraps, so containment holds for it too. If this test ever fails on a new
-fixture, the question to ask first is which of the two it is: a converter
-that invented text - a real defect - or a body whose encoding means the
-reader is comparing against source rather than against text, in which case
-the gate's step 7 needs to say so rather than this assertion being relaxed.
+quoted-printable reaches `GET /sources/{id}/raw` as `=\\n`-wrapped, `=XX`-escaped
+source text, while the record carries the decoded lines - a real soft wrap
+mid-word is exactly the case the raw route's bytes and the record's paragraph
+stop agreeing character for character. `quoted-printable-wrapped.eml` exists
+to hold that case down: for it, and for every other message whose body
+declares `quoted-printable` or `base64`, the comparison below is made against
+that body decoded the same way the converter decodes it
+(`memoria.normalize._decode_part`), not against the raw route's own bytes -
+the reader comparing a sentence by eye there is comparing against source, not
+against text, and knows it. A body with no such encoding (`7bit`/`8bit`/none)
+is still compared directly against what the raw route serves, because there
+decoding changes nothing and the stronger claim - literal agreement with the
+served bytes - continues to hold.
 """
 
 from __future__ import annotations
 
+import email
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -43,10 +49,52 @@ from fastapi.testclient import TestClient
 from memoria.index import build_index
 from memoria.normalize import normalize
 from memoria.records import load, read_all
-from memoria.repository import Repository
+from memoria.repository import Repository, require_evidence_root
 from memoria.web.app import create_app
 
 FIXTURES = Path(__file__).parent / "fixtures" / "enron"
+
+# The same repair `memoria.normalize` applies before parsing (docs/corpora/enron.md,
+# finding 1) - without it the stray line reads as the header/body separator and the
+# message below fails to parse at all.
+_BOGUS_HEADER_LINE = re.compile(rb"^Microsoft Mail Internet Headers Version [\d.]+\r?\n", re.MULTILINE)
+
+# The two encodings that change bytes on decode - the ones the raw route's "serve
+# the file untouched" stops being the same claim as "serve the file decoded".
+_DECODED_TRANSFER_ENCODINGS = {"quoted-printable", "base64"}
+
+
+def _decoded_body(repository, record_id):
+    """``record_id``'s original body, transfer-decoded the way
+    ``memoria.normalize._decode_part`` decodes it - the comparison target for a
+    quoted-printable or base64 body (this module's docstring). ``None`` when the
+    body declares no such encoding, meaning the raw route's own bytes already are
+    the decoded text.
+    """
+    record = load(repository, record_id)
+    path = require_evidence_root(repository) / record.original_file
+    message = email.message_from_bytes(_BOGUS_HEADER_LINE.sub(b"", path.read_bytes(), count=1))
+
+    body_part = message
+    if message.is_multipart():
+        body_part = next(
+            (
+                part
+                for part in message.walk()
+                if part.get_content_type() == "text/plain" and part.get_filename() is None
+            ),
+            None,
+        )
+        if body_part is None:
+            return None
+
+    encoding = (body_part.get("Content-Transfer-Encoding") or "").strip().lower()
+    if encoding not in _DECODED_TRANSFER_ENCODINGS:
+        return None
+
+    payload = body_part.get_payload(decode=True)
+    charset = body_part.get_content_charset() or "utf-8"
+    return payload.decode(charset, errors="replace").replace("\r\n", "\n")
 
 
 @pytest.fixture(scope="module")
@@ -102,6 +150,12 @@ def test_every_served_paragraph_is_verbatim_in_the_original(served):
         raw = client.get(f"/api/sources/{record_id}/raw")
         assert raw.status_code == 200, raw.text
         original = raw.json()["text"]
+        decoded_body = _decoded_body(repository, record_id)
+        # A transfer-encoded body is compared against its decoded original,
+        # not the raw route's own bytes (this module's docstring); anything
+        # else still meets the stronger claim - literal agreement with what
+        # the raw route serves.
+        comparison = decoded_body if decoded_body is not None else original
 
         for number in range(1, len(load(repository, record_id).paragraphs) + 1):
             anchor = f"{record_id.lower()}-p{number}"
@@ -109,12 +163,11 @@ def test_every_served_paragraph_is_verbatim_in_the_original(served):
             assert citation.status_code == 200, citation.text
             text = citation.json()["text"]
 
-            assert text in original, (
-                f"{anchor} was served text that is not in "
-                f"{load(repository, record_id).original_file} verbatim - "
-                "either the converter invented it, or this body's transfer "
-                "encoding means the raw file holds source rather than text "
-                "(see this module's docstring):\n"
+            assert text in comparison, (
+                f"{anchor} was served text the converter invented - it is not "
+                f"in {load(repository, record_id).original_file}'s "
+                f"{'decoded body' if decoded_body is not None else 'raw bytes'} "
+                "verbatim (see this module's docstring):\n"
                 f"served: {text!r}"
             )
             compared += 1
