@@ -416,7 +416,8 @@ def _render_transcript(turns: list[Turn], served_by_turn: dict[int, list[str]]) 
         blocks.append(f"{heading}\n\n{_escape_turn_text(turn.text)}")
         served = served_by_turn.get(turn.number)
         if served:
-            blocks.append(f"<small>Served: {', '.join(served)}</small>")
+            escaped_served = ", ".join(_escape_turn_text(citation) for citation in served)
+            blocks.append(f"<small>Served: {escaped_served}</small>")
     return "\n\n".join(blocks) + "\n"
 
 
