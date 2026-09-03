@@ -451,6 +451,18 @@ class RebuildReport:
     "reports what it regenerated and how long it took"), timed with
     ``time.monotonic`` rather than ``time.time`` so a clock adjustment
     mid-rebuild cannot report a negative duration.
+
+    ``phases`` splits that total by phase (#172), as ordered ``(name,
+    seconds)`` pairs in the order the phases ran: ``read records``
+    (``read_all``), ``index writes`` (``build_index`` less the time spent
+    inside ``embed_fn``), ``embedding`` (the one batched ``embed_fn`` call -
+    with ``memoria.embeddings.default_embed_fn`` that includes constructing
+    the model, which it does on every call), ``derive``, ``appearances`` and
+    ``staleness``. The ``embedding`` phase is present at ``0.0`` when no
+    ``embed_fn`` was supplied, so the names are the same on every report. The
+    phases sum to within ``elapsed_seconds``; the small remainder is the
+    timing itself. The ``changes/`` projection is not a phase here because
+    ``rebuild`` does not run it - the CLI does, and times it alongside.
     """
 
     records: list[NormalizedRecord]
@@ -458,6 +470,7 @@ class RebuildReport:
     appearances: AppearancesReport
     staleness: object
     elapsed_seconds: float
+    phases: tuple[tuple[str, float], ...]
 
 
 def build_index(
@@ -1153,8 +1166,38 @@ def rebuild(
     it.
     """
     started = time.monotonic()
+    phases: list[tuple[str, float]] = []
+    mark = started
+
+    def lap(name: str, *, less: float = 0.0) -> None:
+        nonlocal mark
+        now = time.monotonic()
+        phases.append((name, now - mark - less))
+        mark = now
+
+    # The embedding is timed from inside `build_index`'s one `embed_fn` call
+    # rather than by changing what `build_index` returns: wrapping the
+    # caller's function costs two clock reads and leaves `build_index` and
+    # its every other caller alone (#172).
+    embed_seconds = 0.0
+    timed_embed_fn: EmbedFn | None = None
+    if embed_fn is not None:
+
+        def timed_embed_fn(texts):
+            nonlocal embed_seconds
+            embed_started = time.monotonic()
+            try:
+                return embed_fn(texts)
+            finally:
+                embed_seconds += time.monotonic() - embed_started
+
     records = read_all(repository)
-    build_index(repository, records, reset_cache=reset_cache, embed_fn=embed_fn)
+    lap("read records")
+    build_index(
+        repository, records, reset_cache=reset_cache, embed_fn=timed_embed_fn
+    )
+    lap("index writes", less=embed_seconds)
+    phases.append(("embedding", embed_seconds))
     # Imported here rather than at module scope: `memoria.extraction` imports
     # this module for the schema and the connection, so the module-level
     # direction has to stay one-way. Nothing else is fetched from it - an
@@ -1167,7 +1210,9 @@ def rebuild(
         counts = extraction.derive(
             repository, recurrence_threshold=recurrence_threshold
         )
+    lap("derive")
     appearances_report = compute_appearances(repository)
+    lap("appearances")
     # Imported here for the same reason as `extraction` above: `memoria.audit`
     # imports this module (`connect`, `gather`), so the reverse direction
     # stays confined to this function rather than module scope. The map
@@ -1177,12 +1222,14 @@ def rebuild(
     from memoria import audit
 
     staleness_map = audit.compute_staleness_map(repository)
+    lap("staleness")
     return RebuildReport(
         records=records,
         counts=counts,
         appearances=appearances_report,
         staleness=staleness_map,
         elapsed_seconds=time.monotonic() - started,
+        phases=tuple(phases),
     )
 
 

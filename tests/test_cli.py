@@ -237,6 +237,34 @@ def test_rebuild_reports_how_long_it_took(tmp_path):
     assert float(match.group(1)) >= 0
 
 
+def test_rebuild_prints_one_line_per_phase(tmp_path):
+    """#172: after the total, where it went - one line per phase, the six
+    `index.rebuild` times plus the CLI's own `changes/` projection, in the
+    order they ran."""
+    (tmp_path / "pyproject.toml").write_text("")
+    env = {k: v for k, v in os.environ.items() if k != "MEMORIA_EVIDENCE_ROOT"}
+
+    result = run_cli("rebuild", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    total_at = next(i for i, l in enumerate(lines) if l.startswith("rebuild: completed in"))
+    phase_lines = lines[total_at + 1 :]
+    names = [
+        re.fullmatch(r"rebuild:   (.+?)\s+(\d+\.\d\d)s", line).group(1)
+        for line in phase_lines
+    ]
+    assert names == [
+        "read records",
+        "index writes",
+        "embedding",
+        "derive",
+        "appearances",
+        "staleness",
+        "changes projection",
+    ], result.stdout
+
+
 def test_seed_subjects_needs_no_corpus_at_all(tmp_path):
     """The subjects tree lives in the repository, not the corpus, so it must
     not demand an evidence root it never uses."""

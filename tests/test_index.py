@@ -548,6 +548,50 @@ def test_rebuild_reports_no_records_when_none_exist(tmp_path):
     assert rebuild(Repository(root=tmp_path)).records == []
 
 
+_PHASE_NAMES = (
+    "read records",
+    "index writes",
+    "embedding",
+    "derive",
+    "appearances",
+    "staleness",
+)
+
+
+def test_rebuild_reports_a_phase_breakdown(tmp_path):
+    """#172: the one wall-clock total could not say where an hour-long rebuild
+    went. Every phase is named, in the order it ran, non-negative, and the
+    phases sum to within the total - and the embedder is timed on its own,
+    from inside `build_index`'s one call, so the split between the SQLite
+    writes and the model is visible without changing `build_index`."""
+    records = [
+        _record("SRC-000001", ["The fox ran.", "The owl slept."]),
+        _record("SRC-000002", ["The heron flew."]),
+    ]
+    write_normalized_records(records, tmp_path / NORMALIZED_RELATIVE_PATH)
+    repository = Repository(root=tmp_path)
+
+    def slow_embed(texts):
+        time.sleep(0.05)
+        return [_basis_vector(i) for i, _ in enumerate(texts)]
+
+    report = rebuild(repository, embed_fn=slow_embed)
+
+    assert tuple(name for name, _ in report.phases) == _PHASE_NAMES
+    assert all(seconds >= 0 for _, seconds in report.phases)
+    assert sum(seconds for _, seconds in report.phases) <= report.elapsed_seconds
+    assert dict(report.phases)["embedding"] >= 0.05
+
+
+def test_rebuild_without_an_embedder_still_names_the_embedding_phase(tmp_path):
+    """The names are the same on every report, so a reader comparing a run
+    with the model to one without sees a zero rather than a missing row."""
+    report = rebuild(Repository(root=tmp_path))
+
+    assert tuple(name for name, _ in report.phases) == _PHASE_NAMES
+    assert dict(report.phases)["embedding"] == 0.0
+
+
 def test_search_over_the_full_corpus_returns_well_under_a_second(tmp_path):
     records = [
         _record(
