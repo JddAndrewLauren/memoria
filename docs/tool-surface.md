@@ -15,6 +15,7 @@ a gap nobody noticed.
 | `search_text(query, filters)` | **Forced** — issue #12, below |
 | `search_global(query, filters, summarize)` | **Forced** — issue #74, below |
 | `search_semantic(query, filters)` | **Forced** — issue #81, below |
+| `audit_pending(...)`, `audit_record(results)` | **Forced** — issue #40, below |
 | `expand`, `timeline`, `grep_repo`, `trace`, `backlinks`, `list` | Open; §25 does not commit to shipping them |
 
 ## Maintainer-class tools (ADR-0005, issue #17)
@@ -140,6 +141,68 @@ The extraction tools write derived rows to `.memoria/index.db`, and
 `extraction_finish` writes durable entry files under `subjects/` through
 `memoria.write`. The read tools' no-write test is scoped to the read tools for
 that reason; the narrowing is a decision, not drift.
+
+---
+
+## Audit tools — forced, issue #40
+
+```
+audit_pending(chapter_number, section_number=None, paragraph_index=None, limit=20) -> str
+audit_record(results: list[RecordedAuditItem]) -> str
+```
+
+A third class on the same server, the same shape as the extraction tools
+above and for the same reason (no model-driving service, `poc-plan.md` §3):
+`memoria.audit` cannot call a model, so running the audit is a conversation —
+`audit_pending` hands out paragraph/entry pairs that are missing or stale
+judgements, and `audit_record` takes the answers back. Unlike the extraction
+tools, this pair is not driven by a standing skill in this slice; it is
+reached only by something naming a target explicitly.
+
+### A target, not the whole manuscript
+
+`audit_pending` always names a target — a chapter, a chapter plus a section,
+or a section plus one highlighted passage (CONTEXT.md's "Audit": "a button on
+a section or a chapter, or on a highlighted passage"). There is no call that
+audits the whole book at once; a chapter-level request is the broadest target
+this tool accepts. Only judgements the staleness map (#37) already knows are
+missing or stale are served — a target with nothing not-current says so
+rather than re-serving what is already current.
+
+### What the model sends back
+
+`audit_record` takes a list of `RecordedAuditItem`, each an ``anchor`` (the
+one `audit_pending` served it under) plus either an engagement answer
+(``engages``, ``note``) or an audit-verdict answer (``clear``, or a
+``finding``: its disagreement set, a statement, a confidence, and an
+optional patch). A finding whose disagreement set matches no row in part 09
+§18's resolution table is rejected rather than cached — there is no shape
+that resolves by writing a brief.
+
+### Batch in, per-element out
+
+The same reasoning as `extraction_record`: one call per paragraph would spend
+a tool-call envelope on every paragraph in the target, and a batch that died
+on one bad element would throw away the rest. `audit_record` accepts or
+rejects each element on its own and reports both counts.
+
+### What is ledgered
+
+Nothing. `memoria.ledger` records what was served *by reference* (#13), and a
+manuscript paragraph carries no durable reference to record — the module
+docstring's "no paragraph carries a durable identity" applies here exactly as
+it does to the staleness map. No session id is minted for an audit call
+either, so no `sessions/` directory appears from calling these tools alone.
+
+### The author-testimony policy is served, not enforced
+
+Part 06 §8.6: author testimony outranks documentary evidence, and the audit
+must report a conflict with it as a disagreement, never as an error. This is
+a rule for the model answering the questions `audit_pending` serves, not
+something this adapter (or `memoria.audit`) can check mechanically — so every
+audit-verdict task carries `memoria.audit.AUTHOR_TESTIMONY_POLICY` verbatim,
+the same way `extraction_brief` serves its prompt verbatim rather than
+paraphrasing it.
 
 ---
 

@@ -47,6 +47,7 @@ ALLOWED_IMPORTS = {
     "memoria.ledger",      # #13: every served call is ledgered
     "memoria.extraction",  # #17: the extraction pass's tools
     "memoria.embeddings",  # #81: the local embedder search_semantic wires in
+    "memoria.audit",  # #40: the audit pass's tools
 }
 
 FILE_OPENING_CALLS = {"open", "read_text", "read_bytes", "write_text", "write_bytes"}
@@ -417,7 +418,9 @@ def test_the_tool_surface_is_the_read_tools_and_the_extraction_tools():
     beside it. #74 adds search_global, the one global tool over the
     extraction's clusters. #17 adds the extraction pass's tools, which are a
     second class on the same server: they write, and they are driven by the
-    `extraction` skill rather than reached for by a writing session.
+    `extraction` skill rather than reached for by a writing session. #40 adds
+    a third class of the same shape, the audit's tools - driven by an
+    explicit on-demand request, never by a skill running on its own.
 
     Pinned as an exact set, so a tool added without a decision fails here.
     """
@@ -440,6 +443,8 @@ def test_the_tool_surface_is_the_read_tools_and_the_extraction_tools():
         "extraction_cluster",
         "extraction_promote_candidate",
         "extraction_promote_cluster",
+        "audit_pending",
+        "audit_record",
     }
 
 

@@ -62,6 +62,7 @@ import sys
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
+import memoria.audit as audit
 import memoria.extraction as extraction
 from memoria.embeddings import default_embed_fn
 from memoria.index import (
@@ -99,7 +100,9 @@ mcp = MCPServer(
         "list - with summarize=true it also serves each cluster's memoized "
         "[inferred] summary, never evidence. The extraction_* tools run the "
         "archive-wide extraction pass, and are driven by the `extraction` "
-        "skill rather than reached for directly."
+        "skill rather than reached for directly. The audit_* tools run one "
+        "on-demand audit of a section, a chapter, or a highlighted passage - "
+        "call them only when the author explicitly asked for an audit."
     ),
 )
 
@@ -453,6 +456,124 @@ def render_global(result: extraction.GlobalSearchResult) -> str:
         lines += [f"{r.src_id} {r.anchor}" for r in group.results]
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks) + "\n\n" + result.scope
+
+
+# --- the audit, on demand only (#40) ------------------------------------------
+#
+# The same shape as the extraction tools above: this server hands out
+# paragraph/entry pairs that need judging and takes structured judgements
+# back, and never calls a model itself. Reached only by something explicitly
+# naming a target - a section, a chapter, or one highlighted passage - never
+# by anything scheduled or triggered by ingest (memoria.audit's module
+# docstring, test_audit.py's AST sweep).
+
+
+def render_audit_tasks(tasks: list[audit.AuditTask], remaining: int) -> str:
+    if not tasks:
+        return "Nothing to audit in this target - every judgement is current."
+    blocks = []
+    for task in tasks:
+        lines = [
+            f"anchor: {task.anchor}",
+            f"kind: {task.kind}",
+            f"not current because: {task.cause}",
+            "---",
+            "paragraph:",
+            task.paragraph_text,
+            "",
+            f"entry ({task.entry_id}) audit-visible body:",
+            task.entry_audit_visible_body,
+        ]
+        if task.kind == "engagement":
+            lines += [
+                "",
+                "Does this paragraph engage this entry at all? Answer with "
+                "engages (yes/no) and a short note on how.",
+                "",
+                f"subject: {task.subject_prompt}",
+            ]
+        else:
+            lines += [
+                "",
+                "Audit questions:",
+                task.subject_prompt,
+            ]
+            if task.gathered_anchors:
+                lines += [
+                    "",
+                    "gathered evidence - read each with read(ref) before answering:",
+                    *[f"- {a}" for a in task.gathered_anchors],
+                ]
+            lines += ["", audit.AUTHOR_TESTIMONY_POLICY]
+        blocks.append("\n".join(lines))
+    return (
+        "\n\n===\n\n".join(blocks)
+        + f"\n\nawaiting audit: {remaining} (including this batch)"
+    )
+
+
+@mcp.tool()
+def audit_pending(
+    chapter_number: int,
+    section_number: int | None = None,
+    paragraph_index: int | None = None,
+    limit: int = 20,
+) -> str:
+    """The next paragraph/entry judgements a target needs, verbatim.
+
+    A target is a chapter (``chapter_number`` alone), a section
+    (``+section_number``), or one highlighted passage
+    (``+paragraph_index``) - CONTEXT.md's "a button on a section or a
+    chapter, or on a highlighted passage". Only judgements that are missing
+    or stale (``memoria.audit``'s staleness map) are served; a target with
+    nothing not-current says so.
+
+    Send the answers back with ``audit_record``.
+    """
+    if limit < 1:
+        raise ToolError("limit must be at least 1")
+    try:
+        total = audit.pending_for_target(
+            repository(),
+            chapter_number=chapter_number,
+            section_number=section_number,
+            paragraph_index=paragraph_index,
+        )
+        tasks = audit.audit_tasks_for_target(
+            repository(),
+            chapter_number=chapter_number,
+            section_number=section_number,
+            paragraph_index=paragraph_index,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise ToolError(str(exc)) from exc
+    return render_audit_tasks(list(tasks), remaining=len(total))
+
+
+def render_audit_outcome(outcome: audit.AuditRecordOutcome, total: int) -> str:
+    lines = [f"accepted {len(outcome.accepted)} of {total}"]
+    lines += [f"rejected {anchor} - {reason}" for anchor, reason in outcome.rejected]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def audit_record(results: list[audit.RecordedAuditItem]) -> str:
+    """Cache one batch of audit judgements - engagement (``engages``,
+    ``note``) or audit verdicts (``clear``, or a ``finding``: its
+    disagreement set, a statement, a confidence, and an optional patch).
+
+    Send the whole batch in one call. Each element is accepted or rejected
+    on its own, the same shape ``extraction_record`` uses; re-send only what
+    was rejected, corrected against the reason given. A finding whose
+    disagreement set admits no declared resolution is rejected rather than
+    cached - part 06 §8.10's table is authoritative, and there is no row
+    that resolves by editing a brief.
+    """
+    if not results:
+        raise ToolError("no results to record")
+    outcome = audit.record_audit_batch(repository(), results)
+    return render_audit_outcome(outcome, len(results))
 
 
 # --- the extraction (#17) ----------------------------------------------------
