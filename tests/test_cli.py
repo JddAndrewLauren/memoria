@@ -1,8 +1,13 @@
 import hashlib
+import json
 import os
 import re
 import subprocess
 import sys
+
+from memoria import ledger
+from memoria.records import Read
+from memoria.repository import Repository
 
 
 def run_cli(*args, env=None, cwd=None):
@@ -341,3 +346,82 @@ def test_checkpoint_commits_a_dirty_durable_file(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert "committed 1 file(s) as CHG-" in result.stdout
+
+
+def test_derive_session_end_to_end_through_the_cli(tmp_path):
+    """#155: the command has no test of its own - `memoria.sessions` is unit
+    tested directly, but never driven through the CLI subcommand a real
+    caller actually runs. A small repository, a two-turn JSONL, one
+    subprocess call."""
+    (tmp_path / "pyproject.toml").write_text("")
+    jsonl_path = tmp_path / "claude-code-session.jsonl"
+    entries = [
+        {
+            "uuid": "u1",
+            "parentUuid": None,
+            "type": "user",
+            "timestamp": "2026-09-12T14:30:00+00:00",
+            "sessionId": "claude-code-session-uuid",
+            "message": {"role": "user", "content": "Hello?"},
+        },
+        {
+            "uuid": "a1",
+            "parentUuid": "u1",
+            "type": "assistant",
+            "timestamp": "2026-09-12T14:30:05+00:00",
+            "sessionId": "claude-code-session-uuid",
+            "message": {"role": "assistant", "content": [{"type": "text", "text": "Hi there."}]},
+        },
+    ]
+    jsonl_path.write_text(
+        "\n".join(json.dumps(entry) for entry in entries) + "\n", encoding="utf-8"
+    )
+    env = {k: v for k, v in os.environ.items() if k != "MEMORIA_EVIDENCE_ROOT"}
+
+    result = run_cli(
+        "derive-session", "SES-20260912-1432", str(jsonl_path), env=env, cwd=tmp_path
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "derived 2 turn(s)" in result.stdout
+    transcript = (
+        tmp_path / "sessions" / "2026" / "09" / "SES-20260912-1432" / "transcript.md"
+    )
+    assert transcript.is_file()
+    assert "Hello?" in transcript.read_text(encoding="utf-8")
+    assert (tmp_path / "sessions" / "2026" / "09" / "SES-20260912-1432" / "metadata.yaml").is_file()
+
+
+def test_derive_context_manifest_end_to_end_through_the_cli(tmp_path):
+    """#155: the sibling gap to the one above - `memoria.context_manifest`
+    is unit tested directly, but the `derive-context-manifest` subcommand
+    itself never runs. A small repository whose session already served one
+    read, then the actual subprocess call."""
+    (tmp_path / "pyproject.toml").write_text("")
+    repository = Repository(root=tmp_path)
+    ledger.append_read(
+        repository,
+        "SES-20260912-1432",
+        Read(ref="SRC-000184", citation="SRC-000184", text="A blue heron flew over."),
+    )
+    env = {k: v for k, v in os.environ.items() if k != "MEMORIA_EVIDENCE_ROOT"}
+
+    result = run_cli(
+        "derive-context-manifest", "SES-20260912-1432", env=env, cwd=tmp_path
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "wrote" in result.stdout
+    manifest_path = (
+        tmp_path
+        / "sessions"
+        / "2026"
+        / "09"
+        / "SES-20260912-1432"
+        / "context-manifest.json"
+    )
+    assert manifest_path.is_file()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["records_loaded"] == [
+        {"ref": "SRC-000184", "tokens": ledger.estimate_tokens("A blue heron flew over.")}
+    ]
