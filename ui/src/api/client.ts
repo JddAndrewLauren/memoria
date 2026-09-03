@@ -123,7 +123,10 @@ export function listEntries(subjectId: string): Promise<EntryListResponse> {
   return get(`/api/subjects/${encodeURIComponent(subjectId)}/entries`);
 }
 
-// The entry view's three reads (#26). Three rather than one: the entry is a
+// The entry view's three reads (#26). `readEntry` is the parsed read - the
+// statements and match terms the entry view wants - and not the raw file
+// `readRef` serves for the citation panel's SUB-x/y backlinks (#148). Three
+// rather than one: the entry is a
 // read of its *file*, while the gathered set and appearances are index reads
 // with their own build signal - and part 06 §8.11 keeps the last two apart
 // on purpose, since one is evidence to write from and the other is prose
