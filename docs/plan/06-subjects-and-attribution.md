@@ -557,7 +557,7 @@ Every durable interpretive statement must carry its epistemic status and provena
 
 ```markdown
 [source] Bob called on July 17.
-— [SRC-00184 ¶17](...)
+— SRC-000184 ¶17
 ```
 
 This means the cited source directly states or supports the assertion.
@@ -568,14 +568,14 @@ This means the cited source directly states or supports the assertion.
 
 ```markdown
 [author] I now think the conflict was primarily about autonomy.
-— [SES-20260912-1432 T017](...)
+— SES-20260912-1432#T017
 ```
 
 or:
 
 ```markdown
 [author] The conflict should be framed primarily around autonomy.
-— [CHG-20261014-003](...)
+— CHG-20261014-003
 ```
 
 The Curator must not turn the AI's suggestion into an `[author]` position merely
@@ -589,13 +589,14 @@ There must be identifiable author evidence.
 
 ```markdown
 [inferred] Fear of losing control appears to intensify after the acquisition.
-
-Basis:
-- [SRC-00184 ¶17](...)
-- [SES-20260912-1432 T017](...)
+— SRC-000184 ¶17
+— SES-20260912-1432#T017
 ```
 
-An inference should identify both its conclusion and its basis.
+An inference should identify both its conclusion and its basis. The basis lines
+stay in the statement's own paragraph, with no blank line before them: a blank
+line would end the badged paragraph and start an unbadged one, which parses as
+testimony (§8.2, §9.5), not provenance.
 
 For important inferences, the reasoning should be preserved as a claim rather than
 regenerated from scratch each time.

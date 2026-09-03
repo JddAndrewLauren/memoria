@@ -405,6 +405,13 @@ def _validate_entry_statements(repo_root: Path) -> list[str]:
     provenance, and §23 names the three assertion badges. An entry that does
     not parse is ``_validate_subjects``'s finding; a cited turn that does not
     resolve is ``_validate_session_turns``'s. Neither is repeated here.
+
+    An unbadged paragraph opening ``Basis:`` is also flagged (#187): the
+    blank-line-separated form part 06 §9.3 used to show splits under
+    ``subjects.parse_statements`` into an unprovenanced badged statement and
+    this unbadged one, which ``parse_statements`` reads as testimony. The
+    one-paragraph form is the grammar; this names the old shape rather than
+    silently loading it as the author's own words.
     """
     subjects_dir = repo_root / SUBJECTS_RELATIVE_PATH
     if not subjects_dir.is_dir():
@@ -429,6 +436,14 @@ def _validate_entry_statements(repo_root: Path) -> list[str]:
                     errors.append(f"{where}: {label!r} - {exc}")
                 continue
             if statement.badge not in ASSERTION_BADGES:
+                if statement.badge is None and statement.text.lower().startswith("basis:"):
+                    snippet = statement.text.splitlines()[0][:60]
+                    errors.append(
+                        f"{where}: unbadged paragraph {snippet!r} opens with 'Basis:' "
+                        "- this reads as testimony, not provenance; part 06 §9.3's "
+                        "one-paragraph form puts each '— <reference>' line directly "
+                        "under the badged statement, with no blank line before them"
+                    )
                 continue
             provenance = statement_provenance(statement)
             if not provenance:
