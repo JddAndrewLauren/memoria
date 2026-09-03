@@ -37,6 +37,7 @@ from memoria import (
     record_extractor,
     references,
     sessions,
+    settlements,
     subjects,
 )
 from memoria.repository import Repository, require_evidence_root
@@ -860,8 +861,8 @@ def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
     index still returns the paragraph, undecorated, rather than failing the
     read. It resolves no reference kind but ``SRC-``, ``SUB-``, ``CHP-``,
     ``SEC-``, ``CHG-``, ``SES-`` (whole or one ``#T`` turn, #28), ``DEC-``
-    and ``RES-`` (#30), and repository paths - the rest exist as a named
-    error, not as silence.
+    and ``RES-`` (#30), ``CLM-`` (#33), and repository paths - the rest
+    exist as a named error, not as silence.
     Ledgering the served read is the caller's job (``memoria.ledger``, #13):
     this function has no session to ledger against.
 
@@ -983,6 +984,15 @@ def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
         try:
             text = record_extractor.read_research_memo(repository, reference.memo_id)
         except record_extractor.RecordExtractorError as exc:
+            raise ReadError(str(exc)) from exc
+        return Read(ref=ref, citation=citation, text=text)
+
+    if isinstance(reference, references.ClaimReference):
+        # The claim file, verbatim (#33) - the same whole-file contract a
+        # research memo has.
+        try:
+            text = settlements.read_claim(repository, reference.claim_id)
+        except settlements.SettlementError as exc:
             raise ReadError(str(exc)) from exc
         return Read(ref=ref, citation=citation, text=text)
 

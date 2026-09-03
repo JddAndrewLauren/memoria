@@ -192,21 +192,16 @@ def test_parse_resolves_a_repository_path():
     assert str(reference.path) == "docs/poc-plan.md"
 
 
-@pytest.mark.parametrize(
-    ("ref", "kind"),
-    [
-        ("CLM-0041", "CLM"),
-    ],
-)
-def test_a_kind_the_archive_defines_but_this_build_lacks_is_a_value_not_a_path(
-    ref, kind
-):
-    """Part 04 §4 defines these; nothing resolves them yet.
-
-    They must not fall through to the path branch, which would turn "not
-    built" into "no such file" and hide the real answer.
-    """
-    assert references.parse(ref) == UnknownReference(kind=kind, known=True)
+def test_a_claim_reference_parses_and_canonicalises_its_id():
+    """The last kind part 04 §4 named that nothing resolved (#33); it left
+    ``NOT_YET_IMPLEMENTED_KINDS`` empty rather than falling through to the
+    path branch on its way out."""
+    assert references.parse("CLM-0041") == references.ClaimReference("CLM-0041")
+    assert references.parse("clm-0041") == references.ClaimReference("CLM-0041")
+    assert references.format_citation(references.ClaimReference("CLM-0041")) == "CLM-0041"
+    assert references.NOT_YET_IMPLEMENTED_KINDS == ()
+    with pytest.raises(references.BadReference, match="malformed claim reference"):
+        references.parse("CLM-41")
 
 
 def test_an_unheard_of_id_shaped_reference_is_unknown_rather_than_a_path():

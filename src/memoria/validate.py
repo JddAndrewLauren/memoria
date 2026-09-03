@@ -32,6 +32,7 @@ from memoria.records import NORMALIZED_RELATIVE_PATH, ReadError
 from memoria.records import read as read_ref
 from memoria.repository import Repository
 from memoria.sessions import SessionError
+from memoria.settlements import SETTLED_BADGE, SettlementError, parse_settlement
 from memoria.subjects import (
     SUBJECTS_RELATIVE_PATH,
     SubjectError,
@@ -389,6 +390,9 @@ def _validate_entry_statements(repo_root: Path) -> list[str]:
     cites an author-spoken transcript turn (#31, part 15 §23) - through the
     same ``record_extractor`` rules the write itself refuses on, so what the
     extractor may not write is what a hand edit may not leave behind either.
+    A ``[settled]`` paragraph holds ``memoria.settlements``' form, its
+    session provenance included (#33), through the same ``parse_settlement``
+    the read side uses.
 
     ``[open]`` is not checked: part 06 §9.4's own example carries no
     provenance, and §23 names the three assertion badges. An entry that does
@@ -410,9 +414,15 @@ def _validate_entry_statements(repo_root: Path) -> list[str]:
             continue
         where = entry_path.relative_to(repo_root).as_posix()
         for statement in parse_statements(entry.body):
+            label = f"[{statement.badge}] {statement.text.splitlines()[0][:60]}"
+            if statement.badge == SETTLED_BADGE:
+                try:
+                    parse_settlement(statement)
+                except SettlementError as exc:
+                    errors.append(f"{where}: {label!r} - {exc}")
+                continue
             if statement.badge not in ASSERTION_BADGES:
                 continue
-            label = f"[{statement.badge}] {statement.text.splitlines()[0][:60]}"
             provenance = statement_provenance(statement)
             if not provenance:
                 errors.append(f"{where}: no provenance on {label!r}")

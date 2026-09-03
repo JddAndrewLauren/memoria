@@ -270,10 +270,9 @@ def read(ref: str, raw: bool = False) -> str:
     paragraph with no curated overlay appended.
 
     A decision (`DEC-0088`) serves that decision's block from `decisions.md`;
-    a research memo (`RES-20261018-003`) serves the memo file, verbatim.
-
-    Reference kinds the archive defines but this build does not resolve yet -
-    CLM- - return an error naming the kind.
+    a research memo (`RES-20261018-003`) serves the memo file, verbatim; a
+    claim (`CLM-0041`) serves the claim file, verbatim. A settlement is read
+    on its entry (`SUB-people/bob`), and names the session it happened in.
     """
     try:
         result = read_ref(repository(), ref, raw=raw)

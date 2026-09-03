@@ -67,6 +67,11 @@ _BARE_DECISION_ID = re.compile(rf"^(?P<id>{_DECISION_ID})$", re.IGNORECASE)
 _RESEARCH_MEMO_ID = r"RES-\d{8}-\d{3}"
 _BARE_RESEARCH_MEMO_ID = re.compile(rf"^(?P<id>{_RESEARCH_MEMO_ID})$", re.IGNORECASE)
 
+# A claim (#33, part 06 §8.9): the flat four-digit `CLM-0041` the plan has
+# always written, one file each under `claims/`.
+_CLAIM_ID = r"CLM-\d{4}"
+_BARE_CLAIM_ID = re.compile(rf"^(?P<id>{_CLAIM_ID})$", re.IGNORECASE)
+
 # A derived session record (#28, part 04 §4): `SES-YYYYMMDD-HHMM`, plus the
 # optional random suffix `memoria.ledger` mints to keep two servers spawned
 # in the same minute from colliding. The date and time are canonicalised to
@@ -121,11 +126,12 @@ _ID_SHAPED = re.compile(r"^(?P<kind>[A-Z]{2,5})-")
 
 # Kinds part 04 §4 defines that nothing implements yet. Used only to tell
 # "not built yet" from "never heard of it" in the message; the mechanism that
-# rejects them is the shape rule above, not this list. `CHG`, `SUB`, `SES`,
-# `RES` and `DEC` are not here: they are implemented, below, and need their
-# own malformed-reference messages rather than the generic "not resolvable
-# in this build yet" one.
-NOT_YET_IMPLEMENTED_KINDS = ("CLM",)
+# rejects them is the shape rule above, not this list. Empty since #33: every
+# kind the scheme names is implemented below, each with its own
+# malformed-reference message rather than the generic "not resolvable in
+# this build yet" one. Kept so the next kind the plan adds has somewhere to
+# sit between being named and being built.
+NOT_YET_IMPLEMENTED_KINDS: tuple[str, ...] = ()
 
 # A subject or entry slug: lowercase, directory-name shaped (part 04 §2's
 # `subjects/people/bob.md`). Uppercase is refused rather than folded, the
@@ -208,6 +214,13 @@ class ResearchMemoReference:
 
 
 @dataclass(frozen=True)
+class ClaimReference:
+    """A claim, addressed by its stable ``CLM-`` id (#33)."""
+
+    claim_id: str
+
+
+@dataclass(frozen=True)
 class SubjectReference:
     """A subject, or one entry under it (part 04 §4's ``SUB-x`` / ``SUB-x/y``).
 
@@ -241,6 +254,7 @@ Reference = (
     | SessionReference
     | DecisionReference
     | ResearchMemoReference
+    | ClaimReference
     | UnknownReference
 )
 
@@ -324,6 +338,10 @@ def parse(ref: str) -> Reference:
     if match:
         return ResearchMemoReference(match.group("id").upper())
 
+    match = _BARE_CLAIM_ID.match(ref)
+    if match:
+        return ClaimReference(match.group("id").upper())
+
     match = _SESSION_TURN.match(ref)
     if match:
         return SessionReference(_canonical_session_id(match), int(match.group("turn")))
@@ -396,6 +414,11 @@ def parse(ref: str) -> Reference:
             raise BadReference(
                 f"malformed research memo reference: {ref!r} - expected a "
                 "RES-YYYYMMDD-NNN ID like RES-20261018-003"
+            )
+        if kind.upper() == "CLM":
+            raise BadReference(
+                f"malformed claim reference: {ref!r} - expected a four-digit "
+                "ID like CLM-0041"
             )
         if kind.upper() == "SES":
             raise BadReference(
@@ -478,6 +501,8 @@ def format_citation(reference: Reference) -> str:
         return reference.decision_id
     if isinstance(reference, ResearchMemoReference):
         return reference.memo_id
+    if isinstance(reference, ClaimReference):
+        return reference.claim_id
     if isinstance(reference, SessionReference):
         if reference.turn is None:
             return reference.session_id
