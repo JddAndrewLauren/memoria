@@ -864,6 +864,86 @@ def test_no_cluster_summary_is_ever_embedded(tmp_path):
     assert seen_texts == ["Bob went to town."]
 
 
+# --- the sqlite-vec extension is optional outside semantic search (#153) ----
+
+
+class _NoExtensionConnection:
+    """Wraps a real ``sqlite3.Connection`` but raises on
+    ``enable_load_extension``, simulating an interpreter whose ``sqlite3`` was
+    built with no loadable-extension support at all - the method itself
+    raises (``AttributeError`` on some builds, ``sqlite3.NotSupportedError``
+    on others) rather than merely failing to find an extension."""
+
+    def __init__(self, real):
+        self._real = real
+
+    def enable_load_extension(self, flag):
+        raise AttributeError("enable_load_extension is not available")
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+def _patch_no_extension_sqlite(monkeypatch):
+    real_connect = sqlite3.connect
+    monkeypatch.setattr(
+        "memoria.index.sqlite3.connect",
+        lambda *a, **k: _NoExtensionConnection(real_connect(*a, **k)),
+    )
+
+
+def test_text_search_survives_an_interpreter_with_no_extension_support(
+    tmp_path, monkeypatch
+):
+    """#153: opening the index for text search must never call
+    `enable_load_extension` or load `sqlite-vec` - `search_semantic` is the
+    only caller that needs the extension, and it degrades instead of
+    raising, so a session without loadable-extension support still gets
+    lexical search."""
+    records = [_record("SRC-000001", ["A fox ran through the woods."])]
+    repository = _index(tmp_path, records)
+
+    _patch_no_extension_sqlite(monkeypatch)
+
+    results = search(repository, "fox")
+    assert len(results) == 1
+    assert results[0].src_id == "SRC-000001"
+
+    def _must_not_be_called(texts):
+        raise AssertionError("embed_fn must not run when the extension can't load")
+
+    semantic = search_semantic(repository, "fox", embed_fn=_must_not_be_called)
+    assert semantic.results == ()
+    assert "cannot load extensions" in semantic.scope
+
+
+def test_connect_degrades_when_the_load_extension_capability_is_missing(
+    tmp_path, monkeypatch
+):
+    """`connect` serves extraction, audit, and every `read(ref)`'s overlay
+    decoration - none of which touch the vector table - so it must still
+    produce a working index on an interpreter that cannot load extensions,
+    just without `paragraph_vectors`."""
+    from memoria.index import connect
+
+    repository = Repository(root=tmp_path)
+    _patch_no_extension_sqlite(monkeypatch)
+
+    con = connect(repository)
+    try:
+        tables = {
+            row[0]
+            for row in con.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    finally:
+        con.close()
+
+    assert "paragraphs" in tables
+    assert "paragraph_vectors" not in tables
+
+
 # --- the rebuild rule (#17) --------------------------------------------------
 
 

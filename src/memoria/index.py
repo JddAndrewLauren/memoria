@@ -280,19 +280,28 @@ _DERIVED_DDL = (
     "PRIMARY KEY (entry_id, anchor)"
     ")",
     "CREATE INDEX IF NOT EXISTS appearances_entry ON appearances(entry_id)",
-    # The semantic index (#81, ADR-0007): one row per real paragraph, same
-    # key (`anchor`) as `paragraphs` and `records`, in this same database
-    # file - no second store. `embedding` is fixed-width at
-    # `EMBEDDING_DIMENSIONS` because `EMBEDDING_MODEL_NAME` is the one
-    # embedder this build ships (`memoria.embeddings`); a future model with a
-    # different width would need a new table, not a wider column. Always
-    # created, whether or not `build_index` is ever asked to populate it
-    # (`embed_fn=None` is the default) - an empty vector table is the same
-    # "not built yet" state `search_semantic` already has to handle for a
-    # missing `.memoria/index.db` entirely.
+)
+
+# The semantic index (#81, ADR-0007): one row per real paragraph, same key
+# (`anchor`) as `paragraphs` and `records`, in this same database file - no
+# second store. `embedding` is fixed-width at `EMBEDDING_DIMENSIONS` because
+# `EMBEDDING_MODEL_NAME` is the one embedder this build ships
+# (`memoria.embeddings`); a future model with a different width would need a
+# new table, not a wider column. Created whenever the `sqlite-vec` extension
+# loads, whether or not `build_index` is ever asked to populate it
+# (`embed_fn=None` is the default) - an empty vector table is the same "not
+# built yet" state `search_semantic` already has to handle for a missing
+# `.memoria/index.db` entirely.
+#
+# Kept out of `_DERIVED_DDL` (#153): that tuple runs with no extension
+# loaded, so every other derived table - the ones `search_text`, `gather`,
+# and the extraction depend on - comes up fine on an interpreter that cannot
+# load extensions at all. Only this one statement, and only the callers on
+# the semantic-search / vector-indexing path, ever touch `vec0`.
+_VECTOR_TABLE_DDL = (
     "CREATE VIRTUAL TABLE IF NOT EXISTS paragraph_vectors USING vec0("
     f"anchor TEXT PRIMARY KEY, embedding FLOAT[{EMBEDDING_DIMENSIONS}]"
-    ")",
+    ")"
 )
 
 
@@ -476,12 +485,24 @@ def build_index(
 
     con = sqlite3.connect(db_path)
     try:
-        _load_vec_extension(con)
+        # Loaded here, on the vector-indexing path, rather than assumed - an
+        # interpreter that cannot load extensions still gets every other
+        # derived table (#153); it just does not get a vector one, and
+        # nothing below tries to embed into a table that was never created.
+        try:
+            _load_vec_extension(con)
+            vector_available = True
+        except VectorExtensionUnavailable:
+            vector_available = False
         _ensure_preserved(con)
         for table in DERIVED_TABLES:
+            if table == "paragraph_vectors" and not vector_available:
+                continue
             con.execute(f"DROP TABLE IF EXISTS {table}")
         for statement in _DERIVED_DDL:
             con.execute(statement)
+        if vector_available:
+            con.execute(_VECTOR_TABLE_DDL)
         # Collected alongside the insert loop rather than re-read afterwards
         # - every real paragraph's anchor and text are already in hand here,
         # and a second pass over `records` would just recompute
@@ -516,7 +537,7 @@ def build_index(
                         record.email_to,
                     ),
                 )
-                if embed_fn is not None:
+                if embed_fn is not None and vector_available:
                     to_embed.append((anchor, paragraph))
         if to_embed:
             vectors = embed_fn([text for _, text in to_embed])
@@ -531,20 +552,48 @@ def build_index(
         con.close()
 
 
+class VectorExtensionUnavailable(Exception):
+    """This interpreter's ``sqlite3`` cannot load extensions at all (#153).
+
+    Raised by ``_load_vec_extension`` and caught only by callers on the
+    semantic-search / vector-indexing path (``build_index``, ``connect``'s
+    vector-table setup, ``search_semantic``) - every other caller must not
+    call ``_load_vec_extension`` in the first place, so this never reaches
+    them. Some interpreters are built without
+    ``sqlite3.Connection.enable_load_extension`` support at all (it raises
+    ``sqlite3.NotSupportedError``) or lack the method entirely
+    (``AttributeError``); either way the fix is the same - degrade the one
+    feature that needed it, not the whole index.
+    """
+
+
 def _load_vec_extension(con: sqlite3.Connection) -> None:
     """Register ``sqlite-vec``'s ``vec0`` module on ``con``.
 
-    Needed before *any* statement that names ``paragraph_vectors`` -
-    including the ``CREATE VIRTUAL TABLE IF NOT EXISTS`` in ``_DERIVED_DDL``
-    and the ``DROP TABLE`` that precedes it - so every function that runs
-    those (``build_index``, ``connect``) calls this first. Loading costs a
-    few milliseconds and no network; it is not the same event as
+    Needed before *any* statement that names ``paragraph_vectors`` - so
+    every function that runs one (``build_index``, ``connect``'s vector-table
+    setup, ``search_semantic``) calls this first. Loading costs a few
+    milliseconds and no network; it is not the same event as
     ``memoria.embeddings.default_embed_fn``'s model load, which is the one
     that reaches the network.
+
+    Raises ``VectorExtensionUnavailable`` rather than letting
+    ``con.enable_load_extension``'s own ``AttributeError`` or
+    ``sqlite3.NotSupportedError`` escape - one exception type every caller on
+    this path catches, regardless of which way this particular interpreter
+    lacks the capability (#153).
     """
-    con.enable_load_extension(True)
-    sqlite_vec.load(con)
-    con.enable_load_extension(False)
+    try:
+        con.enable_load_extension(True)
+    except (AttributeError, sqlite3.NotSupportedError) as exc:
+        raise VectorExtensionUnavailable(
+            "this interpreter's sqlite3 cannot load extensions; "
+            "semantic search and vector indexing are unavailable"
+        ) from exc
+    try:
+        sqlite_vec.load(con)
+    finally:
+        con.enable_load_extension(False)
 
 
 def _ensure_preserved(con: sqlite3.Connection) -> None:
@@ -648,15 +697,28 @@ def connect(repository: Repository) -> sqlite3.Connection:
     table" that the session has no way to act on. Every derived statement is
     ``IF NOT EXISTS`` for the same reason; ``build_index`` drops them first,
     so it still gets a clean regeneration rather than an update in place.
+
+    The vector table is the one exception (#153): it is only created here if
+    the ``sqlite-vec`` extension actually loads on this interpreter, so a
+    caller with no interest in semantic search - extraction, audit, ``gather``
+    and the overlay decoration every ``read(ref)`` runs, all of which reach
+    this database through ``connect`` and none of which touch
+    ``paragraph_vectors`` - still gets a working index on an interpreter that
+    cannot load extensions at all. ``search_semantic`` is the one caller that
+    needs the table and reports its absence itself.
     """
     db_path = repository.root / INDEX_RELATIVE_PATH
     db_path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(db_path)
     try:
-        _load_vec_extension(con)
         _ensure_preserved(con)
         for statement in _DERIVED_DDL:
             con.execute(statement)
+        try:
+            _load_vec_extension(con)
+            con.execute(_VECTOR_TABLE_DDL)
+        except VectorExtensionUnavailable:
+            pass
         _check_paragraphs_shape(con)
         con.commit()
     except BaseException:
@@ -922,6 +984,13 @@ def search_semantic(
     ``search`` gives for a missing ``.memoria/index.db`` (§7's "the corpus is
     not built is an answer, not a driver exception"), just also covering the
     narrower case where the index exists but the vector table does not.
+
+    An interpreter that cannot load extensions at all (#153) degrades the
+    same way, with the scope line naming that instead of a count: this is
+    the one caller that actually needs ``sqlite-vec``, so its absence is
+    reported here rather than raised - ``search_text`` never depended on it
+    to begin with, and every other caller of ``connect`` degrades silently
+    (it never needed the vector table either).
     """
     db_path = repository.root / INDEX_RELATIVE_PATH
     if not db_path.exists():
@@ -930,7 +999,10 @@ def search_semantic(
         )
     con = sqlite3.connect(db_path)
     try:
-        _load_vec_extension(con)
+        try:
+            _load_vec_extension(con)
+        except VectorExtensionUnavailable as exc:
+            return SemanticSearchResult(results=(), scope=str(exc))
         _check_paragraphs_shape(con)
         embedded = con.execute("SELECT COUNT(*) FROM paragraph_vectors").fetchone()[0]
         if not embedded:

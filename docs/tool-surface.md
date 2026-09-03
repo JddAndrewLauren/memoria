@@ -602,12 +602,16 @@ mechanism and is the contract this section serializes.
 A `sqlite-vec` `vec0` virtual table, `paragraph_vectors(anchor, embedding)`,
 beside the FTS5 `records` table in the same `.memoria/index.db` file — no
 second store, no vector database, no additional process. `memoria.index.
-build_index` creates it unconditionally (empty tables cost nothing) and
-populates it only when given an embedder (`embed_fn`); `memoria rebuild` —
-the actual "at rebuild" moment the ADR names — is the one caller that
-supplies the real one (`memoria.embeddings.default_embed_fn`), so deleting
-`.memoria/index.db` removes the vector table exactly as it removes the FTS5
-one, with no separate CLI verb or lifecycle (§42).
+build_index` creates it whenever the `sqlite-vec` extension loads (empty
+tables cost nothing) and populates it only when given an embedder
+(`embed_fn`); `memoria rebuild` — the actual "at rebuild" moment the ADR
+names — is the one caller that supplies the real one
+(`memoria.embeddings.default_embed_fn`), so deleting `.memoria/index.db`
+removes the vector table exactly as it removes the FTS5 one, with no
+separate CLI verb or lifecycle (§42). On an interpreter whose `sqlite3`
+cannot load extensions at all (#153), the table is simply not created —
+every other derived table still is, so only `search_semantic` degrades, with
+a scope line naming the missing extension instead of raising.
 
 `build_index`'s own default is `embed_fn=None` — skip — not the real
 embedder, and this is a deliberate reading of part 08 §12.1's "nothing that
