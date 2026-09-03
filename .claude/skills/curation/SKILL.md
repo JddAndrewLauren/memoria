@@ -23,16 +23,20 @@ doubt it is not a decision. Everything that is not a decision is `[open]`.
 1. `curation_status()`. It lists every session on disk and whether its
    transcript has been derived. A session with `no transcript yet` cannot be
    cited.
-2. To derive one, the author (or you, in a shell) runs:
+2. To derive one, run from inside the Claude Code session:
 
    ```
-   memoria derive-session <SES-id> <path to the Claude Code JSONL>
+   memoria derive-session <SES-id>
    ```
 
    The `SES-` id is the directory name under `sessions/` that the session's
-   own `events.jsonl` landed in. The JSONL is Claude Code's own record of that
-   conversation, under `~/.claude/projects/<cwd with / as ->/<uuid>.jsonl`;
-   the most recently modified file there is usually the session just held.
+   own `events.jsonl` landed in. With no path argument, the command resolves
+   Claude Code's own JSONL for the *current* session itself, from
+   `CLAUDE_CODE_SESSION_ID` in the environment - no path to find or guess at.
+   That variable exists only inside a Claude Code session, so this no-path
+   form works only from there; from a plain shell, the author passes the
+   transcript's JSONL path positionally:
+   `memoria derive-session <SES-id> <path-to-transcript.jsonl>`.
    Then **commit** the derived `sessions/` directory: the dirty-tree rule
    (part 08 §14.2) refuses every write while tracked files carry uncommitted
    changes, and `curation_status` names them.

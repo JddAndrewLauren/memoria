@@ -9,6 +9,7 @@ module accepts.
 
 import html
 import json
+import re
 
 import pytest
 import yaml
@@ -16,10 +17,12 @@ import yaml
 from memoria.records import ReadError, read
 from memoria.repository import Repository
 from memoria.sessions import (
+    CLAUDE_CODE_SESSION_ID_ENV_VAR,
     DerivationResult,
     SessionError,
     derive_session,
     read_session,
+    resolve_claude_transcript,
 )
 
 
@@ -526,3 +529,72 @@ def test_read_ref_on_a_session_with_no_events_still_surfaces_an_empty_manifest(t
     result = read(repository, "SES-20260912-1432")
 
     assert result.context_manifest["records_loaded"] == []
+
+
+# --- resolve_claude_transcript (#198) -----------------------------------------
+
+
+def test_resolve_claude_transcript_finds_the_single_match_under_a_fixture_root(tmp_path, monkeypatch):
+    monkeypatch.setenv(CLAUDE_CODE_SESSION_ID_ENV_VAR, "claude-code-session-uuid")
+    project_dir = tmp_path / "-home-john-some-project"
+    project_dir.mkdir()
+    transcript = project_dir / "claude-code-session-uuid.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+    other_project = tmp_path / "-home-john-other-project"
+    other_project.mkdir()
+    (other_project / "some-other-uuid.jsonl").write_text("{}\n", encoding="utf-8")
+
+    resolved = resolve_claude_transcript(projects_root=tmp_path)
+
+    assert resolved == transcript
+
+
+def test_resolve_claude_transcript_takes_the_id_as_an_explicit_argument_too(tmp_path):
+    project_dir = tmp_path / "-home-john-some-project"
+    project_dir.mkdir()
+    transcript = project_dir / "claude-code-session-uuid.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+
+    resolved = resolve_claude_transcript("claude-code-session-uuid", tmp_path)
+
+    assert resolved == transcript
+
+
+def test_resolve_claude_transcript_refuses_an_unset_env_var(tmp_path, monkeypatch):
+    monkeypatch.delenv(CLAUDE_CODE_SESSION_ID_ENV_VAR, raising=False)
+
+    with pytest.raises(SessionError, match=CLAUDE_CODE_SESSION_ID_ENV_VAR):
+        resolve_claude_transcript(projects_root=tmp_path)
+
+
+def test_resolve_claude_transcript_refuses_no_match(tmp_path, monkeypatch):
+    monkeypatch.setenv(CLAUDE_CODE_SESSION_ID_ENV_VAR, "claude-code-session-uuid")
+
+    with pytest.raises(SessionError, match=r"claude-code-session-uuid.*" + re.escape(str(tmp_path))):
+        resolve_claude_transcript(projects_root=tmp_path)
+
+
+def test_resolve_claude_transcript_reads_the_projects_root_from_its_env_var_too(tmp_path, monkeypatch):
+    from memoria.sessions import CLAUDE_PROJECTS_DIR_ENV_VAR
+
+    monkeypatch.setenv(CLAUDE_CODE_SESSION_ID_ENV_VAR, "claude-code-session-uuid")
+    monkeypatch.setenv(CLAUDE_PROJECTS_DIR_ENV_VAR, str(tmp_path))
+    project_dir = tmp_path / "-home-john-some-project"
+    project_dir.mkdir()
+    transcript = project_dir / "claude-code-session-uuid.jsonl"
+    transcript.write_text("{}\n", encoding="utf-8")
+
+    resolved = resolve_claude_transcript()
+
+    assert resolved == transcript
+
+
+def test_resolve_claude_transcript_refuses_more_than_one_match(tmp_path, monkeypatch):
+    monkeypatch.setenv(CLAUDE_CODE_SESSION_ID_ENV_VAR, "claude-code-session-uuid")
+    for name in ("project-a", "project-b"):
+        project_dir = tmp_path / name
+        project_dir.mkdir()
+        (project_dir / "claude-code-session-uuid.jsonl").write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(SessionError, match=r"claude-code-session-uuid.*" + re.escape(str(tmp_path))):
+        resolve_claude_transcript(projects_root=tmp_path)

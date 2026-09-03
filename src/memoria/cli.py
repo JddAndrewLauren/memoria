@@ -13,7 +13,7 @@ from memoria.index import INDEX_RELATIVE_PATH, IndexBuildError, IndexSchemaError
 from memoria.normalize import normalize as run_normalize
 from memoria.records import NORMALIZED_RELATIVE_PATH
 from memoria.repository import NoEvidenceRoot, from_env, require_evidence_root
-from memoria.sessions import SessionError, derive_session
+from memoria.sessions import SessionError, derive_session, resolve_claude_transcript
 from memoria.subjects import write_builtin_subjects
 from memoria.validate import validate, validate_warnings
 from memoria.write import Checkpointed, checkpoint
@@ -278,7 +278,15 @@ def main(argv=None):
     )
     derive_session_parser.add_argument("session_id", help="This session's SES- id")
     derive_session_parser.add_argument(
-        "jsonl_path", help="Path to the Claude Code session's own JSONL file"
+        "jsonl_path",
+        nargs="?",
+        default=None,
+        help=(
+            "Path to the Claude Code session's own JSONL file. Omit to "
+            "resolve it from CLAUDE_CODE_SESSION_ID under the Claude Code "
+            "projects directory (MEMORIA_CLAUDE_PROJECTS_DIR, or "
+            "~/.claude/projects)"
+        ),
     )
     derive_manifest_parser = subparsers.add_parser(
         "derive-context-manifest",
@@ -404,7 +412,10 @@ def main(argv=None):
 
     if args.command == "derive-session":
         try:
-            result = derive_session(repository, args.session_id, Path(args.jsonl_path))
+            jsonl_path = (
+                Path(args.jsonl_path) if args.jsonl_path is not None else resolve_claude_transcript()
+            )
+            result = derive_session(repository, args.session_id, jsonl_path)
         except SessionError as exc:
             print(f"derive-session: {exc}", file=sys.stderr)
             return 1

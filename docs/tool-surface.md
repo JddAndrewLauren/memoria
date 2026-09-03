@@ -896,7 +896,9 @@ Rewrite it using the corrected timeline.
 A human-authored commit stops at its `CHG-` id: what changed is in the commit,
 and Memoria does not invent why (part 07 §40). An AI commit's `authorized-by:`
 trailer names the session turn; the turn's text is quoted **verbatim** once the
-session is derived (`derive-session`), and reported as not yet derived before;
+session is derived (`derive-session`, which resolves Claude Code's own JSONL
+from `CLAUDE_CODE_SESSION_ID` when run with no path, #198), and reported as
+not yet derived before;
 `assembled from` is the session's context manifest (#29) — entries resolved,
 then records loaded, each taking in what the session read *and* what assembly
 (#38) resolved for it, since a draft authorized from the working context was

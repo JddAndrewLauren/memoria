@@ -48,7 +48,6 @@ conversation about the brief", and that is all the surface offers for it.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 from memoria import write
@@ -58,9 +57,10 @@ from memoria.audit import (
     LocatedFinding,
     located_findings_in_scope,
     manuscript_paragraphs,
+    paragraph_spans,
     pending_for_target,
 )
-from memoria.manuscript import list_chapters, resolve_section
+from memoria.manuscript import draft_relative_path, list_chapters, resolve_section
 from memoria.repository import Repository
 from memoria.scope import resolve_scope
 from memoria.section import sessions_that_touched
@@ -83,10 +83,6 @@ __all__ = [
 # Part 10 §21's tiers, highest first - the one ordering a finding list has
 # (part 06 §8.10: "confidence ... Not severity, and not kind of problem").
 CONFIDENCE_ORDER = ("high", "moderate", "low")
-
-# The same blank-line rule `memoria.audit._split_paragraphs` reads a draft
-# by, so the paragraph a finding names is the paragraph this splices.
-_BLANK_LINE = re.compile(r"\n\s*\n")
 
 
 class ReviewError(Exception):
@@ -147,11 +143,6 @@ def _chapter_number_of(repository: Repository, section_dir) -> int:
     raise ReviewError(f"no chapter holds {section_dir}")
 
 
-def _draft_relative_path(repository: Repository, section_id: str) -> str:
-    section = resolve_section(repository, section_id)
-    return (section.dir / DRAFT_FILENAME).relative_to(repository.root).as_posix()
-
-
 def review_section(repository: Repository, section_id: str) -> Review:
     """The Review for one ``SEC-`` id, at this call - see the module
     docstring. Raises ``memoria.manuscript.ManuscriptError`` for an id no
@@ -186,7 +177,7 @@ def review_section(repository: Repository, section_id: str) -> Review:
 
     token = None
     if draft_path.is_file():
-        token = write.serve(repository, _draft_relative_path(repository, section_id)).token
+        token = write.serve(repository, draft_relative_path(repository, section)).token
     entry_staleness: dict[str, str] = {}
     for item in findings:
         if item.entry_id in entry_staleness:
@@ -213,27 +204,6 @@ def review_section(repository: Repository, section_id: str) -> Review:
     )
 
 
-def paragraph_spans(text: str) -> list[tuple[int, int]]:
-    """The ``(start, end)`` byte span of every paragraph in ``text``, under
-    exactly the split ``memoria.audit`` reads paragraphs by: blank-line
-    separated, each stripped of surrounding whitespace, empty runs dropped.
-    ``text[start:end]`` is the paragraph as the audit saw it, and splicing
-    at that span leaves every other byte - the blank lines between
-    paragraphs included - untouched."""
-    spans: list[tuple[int, int]] = []
-    position = 0
-    boundaries = [match.span() for match in _BLANK_LINE.finditer(text)]
-    boundaries.append((len(text), len(text)))
-    for separator_start, separator_end in boundaries:
-        chunk = text[position:separator_start]
-        stripped = chunk.strip()
-        if stripped:
-            start = position + chunk.index(stripped)
-            spans.append((start, start + len(stripped)))
-        position = separator_end
-    return spans
-
-
 def apply_rewrite(
     repository: Repository,
     section_id: str,
@@ -253,7 +223,8 @@ def apply_rewrite(
     what sits between blank lines, and surrounding whitespace would either
     vanish on the next read or fuse two paragraphs.
     """
-    relative = _draft_relative_path(repository, section_id)
+    section = resolve_section(repository, section_id)
+    relative = draft_relative_path(repository, section)
     if not (repository.root / relative).is_file():
         raise ReviewError(f"{section_id} has no draft to rewrite")
     served = write.serve(repository, relative)

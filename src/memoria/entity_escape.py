@@ -23,7 +23,11 @@ Not every writer needs this. ``decisions.md`` entries open with
 could forge that boundary. ``questions.md`` has no anchors and no ids; its
 only boundary is the literal ``[open] `` prefix, which escaping ``&`` and
 ``<`` never protected either way - so ``record_extractor.record_question``
-does not call this module at all (see its docstring)."""
+does not call this module at all (see its docstring). A subject entry body
+(``record_extractor.record_statement`` / ``revise_statement``) is the same
+case: no anchors, no ids, only the ``[badge] `` prefix and the blank line
+between paragraphs, neither defended by escaping ``&`` and ``<`` - so those
+do not call this module either (#188, see their docstring)."""
 
 from __future__ import annotations
 

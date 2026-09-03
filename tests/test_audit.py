@@ -53,6 +53,7 @@ from memoria.audit import (
     manuscript_paragraphs,
     model_engine_appearances,
     paragraph_at,
+    paragraph_spans,
     pending_for_target,
     record_audit_batch,
     record_audit_verdict,
@@ -232,6 +233,27 @@ def test_manuscript_paragraphs_splits_on_blank_lines(tmp_path):
     ]
     assert paragraphs[0].slot == "01/01#1"
     assert paragraphs[1].slot == "01/01#2"
+
+
+def test_paragraph_spans_name_exactly_the_slices_split_paragraphs_returns():
+    """#195: one owner for the blank-line rule - ``_split_paragraphs`` is
+    expressed in terms of ``paragraph_spans``, so this is closer to a
+    structural guarantee than a coincidence, but it is the parity the two
+    callers (``authorship``, ``review``) rely on and is worth locking down
+    against a future edit to either that reintroduces a second rule."""
+    for text in (
+        "",
+        "First paragraph.\n\nSecond paragraph,\nstill one paragraph.\n",
+        "\n\nleading blank lines\n\nthen more\n",
+        "trailing content\n\n\n",
+        "one\n \nsplit on a whitespace-only line",
+        "a single paragraph, no blank line at all",
+        "CRLF paragraph one\r\n\r\nCRLF paragraph two\r\n",
+    ):
+        spans = paragraph_spans(text)
+        assert [text[start:end] for start, end in spans] == audit_module._split_paragraphs(
+            text
+        )
 
 
 def test_a_section_with_no_draft_contributes_no_paragraphs(tmp_path):

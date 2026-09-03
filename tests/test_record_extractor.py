@@ -697,6 +697,49 @@ def test_an_author_statement_is_revised_only_on_a_new_citing_turn(tmp_path):
     assert "[author] Keep Bob's knowledge ambiguous until chapter 10.\n— SES-20260912-1432#T002" in text
 
 
+def test_a_statement_with_markup_characters_round_trips_through_write_parse_locate_revise(tmp_path):
+    """#188: entry bodies are written unescaped, deliberately - the decision
+    ``_statement_block``'s docstring records, mirroring ``record_question``'s
+    for ``questions.md``. The text survives write, ``subjects.
+    parse_statements``, the extractor's own ``_locate`` and a revision,
+    byte-for-byte, at every stage - no escaping anywhere."""
+    from memoria.record_extractor import _locate, revise_statement
+    from memoria.subjects import parse_statements
+
+    text = 'Bob wrote "a < b", used X && Y, kept a literal &lt; string, and said 3 > 2.'
+    revised_text = (
+        'Later Bob said: b < a, Y && X now, still the literal &lt; stands, and 2 > 3.'
+    )
+    repository = _repo(tmp_path)
+    relative_path = _entry(repository, BOB, TESTIMONY)
+    _, token = _served(repository, BOB)
+
+    record = record_statement(repository, BOB, "source", text, ("SRC-000184 P17",), token)
+    assert record.text == text
+    written = (tmp_path / relative_path).read_text(encoding="utf-8")
+    assert f"[source] {text}\n— SRC-000184 ¶17" in written
+    assert "&amp;" not in written and "&gt;" not in written
+
+    entry, token = _served(repository, BOB)
+    (statement,) = [
+        s for s in parse_statements(entry.body) if s.badge == "source" and s.text.startswith(text)
+    ]
+    assert statement.text == f"{text}\n— SRC-000184 ¶17"
+
+    start, end = _locate(entry.body, statement)
+    assert entry.body[start:end] == f"[source] {text}\n— SRC-000184 ¶17"
+
+    revised = revise_statement(
+        repository, BOB, statement, "source", revised_text, ("SRC-000184 P17",), token,
+    )
+
+    after = (tmp_path / relative_path).read_text(encoding="utf-8")
+    assert revised.text == revised_text
+    assert f"[source] {revised_text}\n— SRC-000184 ¶17" in after
+    assert text not in after
+    assert "&amp;" not in after and "&gt;" not in after
+
+
 def test_a_memoria_note_is_outside_the_audit_visible_body_and_write_side_assembly(tmp_path):
     """The fifth checkbox, both halves: the note is in the file, and neither
     the audit's comparison text nor assembly's loaded Tier 2 carries it."""
