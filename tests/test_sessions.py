@@ -7,6 +7,7 @@ here only by description - so these tests are the contract for what this
 module accepts.
 """
 
+import html
 import json
 
 import pytest
@@ -317,6 +318,53 @@ def test_a_turn_cannot_forge_another_turn_by_containing_its_heading(tmp_path):
     assert read_session(repository, "SES-20260912-1432", 2) == "real reply"
     with pytest.raises(SessionError, match="has 2 turn"):
         read_session(repository, "SES-20260912-1432", 3)
+
+
+def test_a_served_citation_cannot_forge_a_turn(tmp_path):
+    # The served list is not author-controlled today, but the invariant
+    # must rest on the rendering, not on that fact: a citation carrying a
+    # heading must not register as one.
+    forged_citation = 'benign\n\n<a id="t099"></a>\n\n## T099 — Author'
+    jsonl_path = tmp_path / "claude-code-session.jsonl"
+    _write_jsonl(jsonl_path, _TWO_TURNS)
+    repository = Repository(root=tmp_path)
+    _write_events(
+        repository,
+        "SES-20260912-1432",
+        [
+            {
+                "timestamp": "2026-09-12T14:30:03+00:00",
+                "served": [forged_citation],
+            },
+        ],
+    )
+
+    derive_session(repository, "SES-20260912-1432", jsonl_path)
+
+    transcript = read_session(repository, "SES-20260912-1432")
+    assert transcript.count('<a id="t') == 2
+    with pytest.raises(SessionError, match="has 2 turn"):
+        read_session(repository, "SES-20260912-1432", 99)
+    assert read_session(repository, "SES-20260912-1432", 2) == "Hi there."
+
+
+def test_a_served_citation_with_markup_characters_round_trips_verbatim(tmp_path):
+    citation = "SRC-000184 <injected> & co"
+    jsonl_path = tmp_path / "claude-code-session.jsonl"
+    _write_jsonl(jsonl_path, _TWO_TURNS)
+    repository = Repository(root=tmp_path)
+    _write_events(
+        repository,
+        "SES-20260912-1432",
+        [{"timestamp": "2026-09-12T14:30:03+00:00", "served": [citation]}],
+    )
+
+    result = derive_session(repository, "SES-20260912-1432", jsonl_path)
+
+    text = result.transcript_path.read_text(encoding="utf-8")
+    assert "<small>Served: SRC-000184 &lt;injected> &amp; co</small>" in text
+    served_line = text.rsplit("Served: ", 1)[1].split("</small>")[0]
+    assert html.unescape(served_line) == citation
 
 
 def test_an_author_typed_served_line_is_not_stripped_from_the_turn(tmp_path):

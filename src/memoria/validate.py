@@ -6,20 +6,41 @@ normalized source records for dangling SRC- ID references and stale
 
 import hashlib
 import re
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
+from memoria.audit import DRAFT_FILENAME
+from memoria.authorship import AUTHORIZED_BY_TRAILER
+from memoria.changes import CHANGE_ID_TRAILER
 from memoria.index import list_overlay
+from memoria.manuscript import BOOK_RELATIVE_PATH, BRIEF_FILENAMES, CHAPTERS_RELATIVE_PATH
 from memoria.manifest import (
     DEFAULT_MANIFEST_RELATIVE_PATH,
     check_ledger,
     load_converter_pins,
     load_manifest,
 )
+from memoria.record_extractor import (
+    ASSERTION_BADGES,
+    RecordExtractorError,
+    check_author_evidence,
+    check_provenance,
+    statement_provenance,
+)
+from memoria.normalize import EMAIL_CONVERTER_VERSION
 from memoria.records import NORMALIZED_RELATIVE_PATH, ReadError
 from memoria.records import read as read_ref
 from memoria.repository import Repository
-from memoria.subjects import SUBJECTS_RELATIVE_PATH, SubjectError, parse_entry, parse_subject
+from memoria.sessions import SessionError
+from memoria.settlements import SETTLED_BADGE, SettlementError, parse_settlement
+from memoria.subjects import (
+    SUBJECTS_RELATIVE_PATH,
+    SubjectError,
+    parse_entry,
+    parse_statements,
+    parse_subject,
+)
 
 _SRC_ID_RE = re.compile(r"SRC-\d{6}", re.IGNORECASE)
 _RAW_SHA256_RE = re.compile(r"^raw_sha256:\s*(\S+)\s*$", re.MULTILINE)
@@ -35,6 +56,20 @@ _SESSION_TURN_CITATION_RE = re.compile(
 # this exact form as an illustration, and flagging that as an unresolved
 # citation would be a false positive doing the opposite of this check's job.
 _SESSION_CITATION_LOCATIONS = ("decisions.md", "questions.md", "research", SUBJECTS_RELATIVE_PATH)
+
+# The two trailers §41 tells manuscript commits apart by (ADR-0008,
+# memoria.authorship): a human-authored commit carries `change-id:`, an AI
+# manuscript commit `authorized-by:` naming its authorizing turn.
+_CHANGE_ID_TRAILER_RE = re.compile(rf"^{CHANGE_ID_TRAILER}: \S+$", re.MULTILINE)
+_AUTHORIZED_BY_TRAILER_RE = re.compile(
+    rf"^{AUTHORIZED_BY_TRAILER}: (?P<citation>.*)$", re.MULTILINE
+)
+_SESSION_TURN_CITATION_EXACT_RE = re.compile(
+    rf"^{_SESSION_TURN_CITATION_RE.pattern}$", re.IGNORECASE
+)
+# The two ways `git log` fails that mean "no history here" rather than "a
+# broken repository" - the same pair `memoria.changes` accepts.
+_NO_HISTORY = ("not a git repository", "does not have any commits yet")
 
 # The `convert` extra's own array in pyproject.toml (#79, part 05 §5.4), and
 # an exact `name[extras]==version` pin within it. Read with a small regex
@@ -60,7 +95,9 @@ def validate(
     resolves to an actual record, that every record's ``raw_sha256``
     still matches what the manifest records for its raw unit, and that
     every ``SES-...#T017`` citation names a turn an actual session
-    transcript carries (#28).
+    transcript carries (#28), and that every badged assertion in an entry
+    body carries provenance that terminates in original material, with an
+    ``[author]`` statement citing an author-spoken turn (#31, part 15 §23).
 
     Returns a list of human-readable error messages; an empty list means the
     corpus matches the manifest exactly and no SRC- ID is left unresolved.
@@ -113,11 +150,41 @@ def validate(
     errors.extend(_validate_normalized_src_ids(repo_root))
     errors.extend(_validate_raw_sha256_matches_manifest(repo_root, entries))
     errors.extend(_validate_subjects(repo_root))
+    errors.extend(_validate_entry_statements(repo_root))
     errors.extend(_validate_converter_pins(repo_root, manifest_path))
     errors.extend(_validate_gather_overlay(repo_root))
     errors.extend(_validate_session_turns(repo_root))
+    errors.extend(_validate_manuscript_authorization(repo_root))
 
     return errors
+
+
+def validate_warnings(
+    evidence_root: Path, manifest_relative_path: str = DEFAULT_MANIFEST_RELATIVE_PATH
+) -> list[str]:
+    """Non-fatal findings alongside ``validate()``'s errors - today, just the
+    manifest's failed-conversion units (#106). A unit whose converter raised
+    gets no record and no ``validate()`` error either (there is nothing to
+    check it against); reporting it here, not in ``validate()``'s own list,
+    is what lets a corpus with one corrupt pdf still validate.
+
+    Empty when the manifest is missing (``validate()`` already reports that
+    as an error) or lists no failed unit.
+    """
+    evidence_root = Path(evidence_root)
+    manifest_path = evidence_root / manifest_relative_path
+    if not manifest_path.is_file():
+        return []
+    entries = load_manifest(manifest_path)
+    failed_ids = sorted(
+        entry.id for entry in entries if not entry.deleted and "failed" in entry.extra
+    )
+    if not failed_ids:
+        return []
+    return [
+        f"{len(failed_ids)} unit(s) failed to convert and have no record: "
+        + ", ".join(failed_ids)
+    ]
 
 
 def _pinned_converter_versions(repo_root: Path) -> dict[str, str]:
@@ -143,11 +210,17 @@ def _validate_converter_pins(repo_root: Path, manifest_path: Path) -> list[str]:
     longer pins (#79, part 05 §5.4) - a pin bumped without the
     ``memoria normalize`` run that would have reconverted against it, or a
     manifest edited by hand. A suffix the manifest has never recorded a
-    converter for is not an error: nothing has converted it yet."""
+    converter for is not an error: nothing has converted it yet.
+
+    The email converter (``.eml``/``.mbox``/``.msg``, #104) is the
+    standard library plus this package's own code, so its pin is
+    ``normalize.EMAIL_CONVERTER_VERSION`` rather than a pyproject.toml
+    line; a manifest recording an older ``email N`` is the same drift."""
     manifest_converters = load_converter_pins(manifest_path)
     if not manifest_converters:
         return []
     pinned = _pinned_converter_versions(repo_root)
+    pinned["email"] = EMAIL_CONVERTER_VERSION
 
     errors = []
     for suffix, recorded in sorted(manifest_converters.items()):
@@ -316,3 +389,197 @@ def _validate_subjects(repo_root: Path) -> list[str]:
                 )
 
     return errors
+
+
+def _validate_entry_statements(repo_root: Path) -> list[str]:
+    """Every assertion badge in an entry body carries provenance, every
+    provenance reference is original material, and an ``[author]`` statement
+    cites an author-spoken transcript turn (#31, part 15 §23) - through the
+    same ``record_extractor`` rules the write itself refuses on, so what the
+    extractor may not write is what a hand edit may not leave behind either.
+    A ``[settled]`` paragraph holds ``memoria.settlements``' form, its
+    session provenance included (#33), through the same ``parse_settlement``
+    the read side uses.
+
+    ``[open]`` is not checked: part 06 §9.4's own example carries no
+    provenance, and §23 names the three assertion badges. An entry that does
+    not parse is ``_validate_subjects``'s finding; a cited turn that does not
+    resolve is ``_validate_session_turns``'s. Neither is repeated here.
+    """
+    subjects_dir = repo_root / SUBJECTS_RELATIVE_PATH
+    if not subjects_dir.is_dir():
+        return []
+    repository = Repository(root=repo_root)
+
+    errors = []
+    for entry_path in sorted(subjects_dir.glob("*/*.md")):
+        if entry_path.name == "_subject.md":
+            continue
+        try:
+            entry = parse_entry(entry_path.read_text(encoding="utf-8"), source=str(entry_path))
+        except SubjectError:
+            continue
+        where = entry_path.relative_to(repo_root).as_posix()
+        for statement in parse_statements(entry.body):
+            label = f"[{statement.badge}] {statement.text.splitlines()[0][:60]}"
+            if statement.badge == SETTLED_BADGE:
+                try:
+                    parse_settlement(statement)
+                except SettlementError as exc:
+                    errors.append(f"{where}: {label!r} - {exc}")
+                continue
+            if statement.badge not in ASSERTION_BADGES:
+                continue
+            provenance = statement_provenance(statement)
+            if not provenance:
+                errors.append(f"{where}: no provenance on {label!r}")
+                continue
+            citations = []
+            for ref in provenance:
+                try:
+                    citations.append(check_provenance(ref))
+                except RecordExtractorError as exc:
+                    errors.append(f"{where}: {label!r} cites {exc}")
+            if statement.badge == "author":
+                try:
+                    check_author_evidence(repository, tuple(citations))
+                except RecordExtractorError as exc:
+                    if not isinstance(exc.__cause__, SessionError):
+                        errors.append(f"{where}: {label!r} - {exc}")
+    return errors
+
+
+def _validate_manuscript_authorization(repo_root: Path) -> list[str]:
+    """Every AI manuscript write carries an identifiable authorization (#42,
+    part 15 §23, Invariant 9) - **including a write to a brief**, which is
+    manuscript-class and has an AI write path of its own.
+
+    Git history is the record (§41): a commit touching a manuscript file -
+    a section's ``draft.md`` or one of the three briefs - is human-authored
+    if it carries a ``change-id:`` trailer (ADR-0008: every human-authored
+    commit does, checkpoints and surface writes alike) and is otherwise an
+    AI manuscript write, which must carry ``authorized-by:`` naming a
+    ``SES-...#T`` turn. A commit with neither is exactly the write this
+    check exists to fail, and the message names both readings, because git
+    cannot tell an AI write that skipped ``memoria.authorship`` from a hand
+    commit that skipped the checkpoint - and by ADR-0008 the second is not
+    a human-authored commit either.
+
+    The turn must resolve once the session is derived: a citation naming a
+    turn its transcript does not carry is not identifiable. Before
+    derivation - the session that wrote it may still be running - the
+    citation's form is what can be checked, and the transcript check takes
+    over when ``derive-session`` lands the record.
+    """
+    repository = Repository(root=repo_root)
+    try:
+        commits = _manuscript_commits(repo_root)
+    except _GitLogFailed as exc:
+        return [str(exc)]
+    errors = []
+    for sha, short_sha, body in commits:
+        if _CHANGE_ID_TRAILER_RE.search(body):
+            continue
+        for path in _files_for(repo_root, sha):
+            kind = _manuscript_file_kind(path)
+            if kind is None:
+                continue
+            what = "AI write to a brief" if kind == "brief" else "AI manuscript write"
+            trailer = _AUTHORIZED_BY_TRAILER_RE.search(body)
+            if trailer is None:
+                errors.append(
+                    f"unauthorized {what}: commit {short_sha} touches {path} with "
+                    f"no {AUTHORIZED_BY_TRAILER} trailer - an AI manuscript write "
+                    f"names the SES-...#T turn that authorized it, and a human "
+                    f"change carries a {CHANGE_ID_TRAILER}"
+                )
+                continue
+            citation = trailer.group("citation").strip()
+            if not _SESSION_TURN_CITATION_EXACT_RE.match(citation):
+                errors.append(
+                    f"unauthorized {what}: commit {short_sha} touches {path} with "
+                    f"an {AUTHORIZED_BY_TRAILER} trailer that is not a SES-...#T "
+                    f"citation: {citation!r}"
+                )
+                continue
+            session_id = citation.split("#", 1)[0]
+            if not _transcript_exists(repository, session_id):
+                continue
+            try:
+                read_ref(repository, citation)
+            except ReadError as exc:
+                errors.append(
+                    f"unauthorized {what}: commit {short_sha} touches {path}, "
+                    f"authorized by {citation}, a turn that session's transcript "
+                    f"does not carry ({exc})"
+                )
+    return errors
+
+
+def _manuscript_file_kind(path: str) -> str | None:
+    """``"brief"``, ``"prose"``, or ``None`` for a file that is not
+    manuscript-class. Only what a chapter or section directory holds under
+    the brief filenames or ``draft.md`` counts - ``manuscript`` owns those
+    names and this only asks it."""
+    if path == BOOK_RELATIVE_PATH:
+        return "brief"
+    if not path.startswith(f"{CHAPTERS_RELATIVE_PATH}/"):
+        return None
+    name = path.rsplit("/", 1)[-1]
+    if name in BRIEF_FILENAMES:
+        return "brief"
+    if name == DRAFT_FILENAME:
+        return "prose"
+    return None
+
+
+class _GitLogFailed(Exception):
+    """``git log`` failed for a reason other than "no history here"."""
+
+
+def _manuscript_commits(repo_root: Path) -> list[tuple[str, str, str]]:
+    """``(sha, short_sha, message)`` for every non-merge commit reachable
+    from ``HEAD`` that touches a manuscript path. Empty - not an error - for
+    a directory that is not a git repository or has no commits yet; any
+    other git failure is ``_GitLogFailed``, reported as one error rather
+    than passed off as a clean history."""
+    result = subprocess.run(
+        [
+            "git", "log", "--no-merges", "--format=%H%x1f%h%x1f%B%x1e",
+            "--", BOOK_RELATIVE_PATH, CHAPTERS_RELATIVE_PATH,
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        reason = " ".join(
+            part.strip() for part in (result.stdout, result.stderr) if part.strip()
+        )
+        if any(phrase in reason for phrase in _NO_HISTORY):
+            return []
+        raise _GitLogFailed(f"git log failed: {reason}")
+    commits = []
+    for block in result.stdout.split("\x1e"):
+        block = block.strip("\n")
+        if not block:
+            continue
+        sha, short_sha, body = block.split("\x1f", 2)
+        commits.append((sha, short_sha, body))
+    return commits
+
+
+def _files_for(repo_root: Path, sha: str) -> list[str]:
+    result = subprocess.run(
+        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", sha],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    return [line for line in result.stdout.splitlines() if line]
+
+
+def _transcript_exists(repository: Repository, session_id: str) -> bool:
+    from memoria.sessions import transcript_path
+
+    return transcript_path(repository, session_id).is_file()

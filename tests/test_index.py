@@ -9,6 +9,7 @@ import pytest
 import sqlite_vec
 
 from memoria import extraction as ex
+from memoria import index as idx
 from memoria.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL_NAME
 from memoria.index import (
     INDEX_RELATIVE_PATH,
@@ -18,7 +19,9 @@ from memoria.index import (
     SNIPPET_MATCH_START,
     Appearance,
     GatheredSource,
+    IndexBuildError,
     SearchFilters,
+    appeared_entry_ids,
     appearances_supported,
     build_index,
     compute_appearances,
@@ -683,6 +686,47 @@ def test_build_index_populates_one_vector_per_real_paragraph(tmp_path):
     assert anchors == {"src-000001-p1", "src-000001-p2"}
 
 
+def test_build_index_raises_when_embedder_returns_fewer_vectors_than_paragraphs(
+    tmp_path,
+):
+    """#154: an embedder that drops a paragraph must fail the build loudly,
+    naming both counts, rather than silently truncating the semantic index -
+    ``zip`` would otherwise stop at the shorter sequence and leave later
+    paragraphs unsearchable with no error at all. Checked against a rebuild
+    over an already-populated vector table, so "no partially populated
+    vector table is left behind" has a prior, known-good state to fail out
+    of rather than an empty file."""
+    records = [
+        _record(
+            "SRC-000001",
+            ["A blue heron flew over the pond.", "Nothing about birds here."],
+        )
+    ]
+    repository = Repository(root=tmp_path)
+    good_embed_fn = _fake_embed_fn(
+        {
+            "A blue heron flew over the pond.": _basis_vector(0),
+            "Nothing about birds here.": _basis_vector(1),
+        }
+    )
+    build_index(repository, records, embed_fn=good_embed_fn)
+
+    def _short_embed_fn(texts):
+        return [_basis_vector(0)]  # one vector for two paragraphs
+
+    with pytest.raises(IndexBuildError, match="1 vector.*2 paragraph"):
+        build_index(repository, records, embed_fn=_short_embed_fn)
+
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.enable_load_extension(True)
+    sqlite_vec.load(con)
+    con.enable_load_extension(False)
+    try:
+        assert con.execute("SELECT COUNT(*) FROM paragraph_vectors").fetchone()[0] == 0
+    finally:
+        con.close()
+
+
 def test_search_semantic_finds_the_nearest_paragraph_by_meaning(tmp_path):
     """The point of the feature: a query with none of a paragraph's own
     wording still finds it, because the two embed close together."""
@@ -861,6 +905,86 @@ def test_no_cluster_summary_is_ever_embedded(tmp_path):
     build_index(repository, records, embed_fn=_recording_embed_fn)
 
     assert seen_texts == ["Bob went to town."]
+
+
+# --- the sqlite-vec extension is optional outside semantic search (#153) ----
+
+
+class _NoExtensionConnection:
+    """Wraps a real ``sqlite3.Connection`` but raises on
+    ``enable_load_extension``, simulating an interpreter whose ``sqlite3`` was
+    built with no loadable-extension support at all - the method itself
+    raises (``AttributeError`` on some builds, ``sqlite3.NotSupportedError``
+    on others) rather than merely failing to find an extension."""
+
+    def __init__(self, real):
+        self._real = real
+
+    def enable_load_extension(self, flag):
+        raise AttributeError("enable_load_extension is not available")
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+def _patch_no_extension_sqlite(monkeypatch):
+    real_connect = sqlite3.connect
+    monkeypatch.setattr(
+        "memoria.index.sqlite3.connect",
+        lambda *a, **k: _NoExtensionConnection(real_connect(*a, **k)),
+    )
+
+
+def test_text_search_survives_an_interpreter_with_no_extension_support(
+    tmp_path, monkeypatch
+):
+    """#153: opening the index for text search must never call
+    `enable_load_extension` or load `sqlite-vec` - `search_semantic` is the
+    only caller that needs the extension, and it degrades instead of
+    raising, so a session without loadable-extension support still gets
+    lexical search."""
+    records = [_record("SRC-000001", ["A fox ran through the woods."])]
+    repository = _index(tmp_path, records)
+
+    _patch_no_extension_sqlite(monkeypatch)
+
+    results = search(repository, "fox")
+    assert len(results) == 1
+    assert results[0].src_id == "SRC-000001"
+
+    def _must_not_be_called(texts):
+        raise AssertionError("embed_fn must not run when the extension can't load")
+
+    semantic = search_semantic(repository, "fox", embed_fn=_must_not_be_called)
+    assert semantic.results == ()
+    assert "cannot load extensions" in semantic.scope
+
+
+def test_connect_degrades_when_the_load_extension_capability_is_missing(
+    tmp_path, monkeypatch
+):
+    """`connect` serves extraction, audit, and every `read(ref)`'s overlay
+    decoration - none of which touch the vector table - so it must still
+    produce a working index on an interpreter that cannot load extensions,
+    just without `paragraph_vectors`."""
+    from memoria.index import connect
+
+    repository = Repository(root=tmp_path)
+    _patch_no_extension_sqlite(monkeypatch)
+
+    con = connect(repository)
+    try:
+        tables = {
+            row[0]
+            for row in con.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    finally:
+        con.close()
+
+    assert "paragraphs" in tables
+    assert "paragraph_vectors" not in tables
 
 
 # --- the rebuild rule (#17) --------------------------------------------------
@@ -1241,6 +1365,80 @@ def test_a_pinned_source_stays_in_the_set_even_when_matching_would_not_find_it(
 
     result = {g.anchor: g.pinned for g in gather(repository, "SUB-people/bob")}
     assert result == {"src-000001-p1": False, "src-000001-p2": True}
+
+
+def test_paragraphs_by_anchor_chunks_under_sqlites_own_variable_ceiling(
+    tmp_path, monkeypatch
+):
+    """#132: the paragraphs-by-anchor query used to build one
+    `anchor IN (?,?...)` list sized to the whole gathered set - unbounded
+    with the paragraph count, and able to exceed SQLite's own
+    bound-parameter ceiling on the real archive, at which point the query
+    raised and the overlay was silently dropped archive-wide. Lowered here
+    to a real, tiny ceiling via `setlimit` (Python's sqlite3, 3.11+) so this
+    proves the fix against SQLite's actual enforcement, not an assumption
+    about what it is: an unchunked query over these anchors genuinely fails
+    against this connection, while `_paragraphs_by_anchor` still returns
+    every row, correctly."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    paragraphs = [f"Bob was here, paragraph {i}." for i in range(10)]
+    repository = _gather_repo(tmp_path, paragraphs, [entry])
+    anchors = {f"src-000001-p{i}" for i in range(1, 11)}
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 3)
+    placeholders = ",".join("?" for _ in anchors)
+    with pytest.raises(sqlite3.OperationalError, match="too many SQL variables"):
+        con.execute(
+            f"SELECT anchor, src_id FROM paragraphs WHERE anchor IN ({placeholders})",
+            tuple(anchors),
+        )
+    monkeypatch.setattr(idx, "_ANCHOR_CHUNK_SIZE", 2)
+
+    rows = idx._paragraphs_by_anchor(con, anchors)
+
+    assert {anchor for anchor, _ in rows} == anchors
+
+
+def test_gather_is_correct_past_a_forced_anchor_chunk_boundary(tmp_path, monkeypatch):
+    """#132 AC 1/3: the same chunking, exercised through the public
+    `gather()` with the real chunk size forced tiny, so the gathered set
+    spans several chunks without needing tens of thousands of paragraphs -
+    the result must still be the full, correctly-ordered set, not silently
+    truncated to one chunk."""
+    monkeypatch.setattr(idx, "_ANCHOR_CHUNK_SIZE", 2)
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    paragraphs = [f"Bob was here, paragraph {i}." for i in range(5)]
+    repository = _gather_repo(tmp_path, paragraphs, [entry])
+
+    result = gather(repository, "SUB-people/bob")
+
+    assert [g.anchor for g in result] == [f"src-000001-p{i}" for i in range(1, 6)]
+
+
+def test_overlay_for_anchor_opens_one_connection_regardless_of_entry_count(
+    tmp_path, monkeypatch
+):
+    """#132 AC 2: the per-read fan-out over entries must not multiply
+    `gather`'s own per-entry cost - a fresh `connect()` (DDL plus commit)
+    for every entry on disk, on every non-raw read. One shared connection,
+    regardless of how many entries there are."""
+    entries = [
+        Entry(id=f"SUB-people/e{i}", match_terms=[f"word{i}"], body="")
+        for i in range(20)
+    ]
+    repository = _gather_repo(tmp_path, ["Nothing relevant here."], entries)
+    calls = []
+    real_connect = idx.connect
+
+    def counting_connect(repo):
+        calls.append(repo)
+        return real_connect(repo)
+
+    monkeypatch.setattr(idx, "connect", counting_connect)
+
+    idx.overlay_for_anchor(repository, "src-000001-p1")
+
+    assert len(calls) == 1
 
 
 def test_the_gathered_set_carries_no_id():
@@ -1744,6 +1942,18 @@ def test_an_empty_appearances_list_means_two_different_things(tmp_path):
     assert list_appearances(repository, "SUB-themes/control") == []
     assert appearances_supported("SUB-people/bob") is True
     assert appearances_supported("SUB-themes/control") is False
+
+
+def test_appeared_entry_ids_over_a_missing_index_returns_no_entries(tmp_path):
+    """#155: the branch `list_appearances` and `appeared_entry_ids` share -
+    a fresh clone, no `.memoria/index.db` yet - is exercised by every
+    `list_appearances` caller in this file but never directly for
+    `appeared_entry_ids` itself, the read `drift.compute_drift` uses for
+    the covered side of a brief's drift."""
+    repository = Repository(root=tmp_path)
+
+    assert appeared_entry_ids(repository) == frozenset()
+    assert not (tmp_path / INDEX_RELATIVE_PATH).exists()
 
 
 def test_appearances_report_names_the_themes_and_arcs_gap(tmp_path):

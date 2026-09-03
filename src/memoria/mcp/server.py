@@ -81,10 +81,12 @@ from memoria.ledger import (
     append_search,
     append_search_global,
     append_search_semantic,
+    append_trace,
     session_id_from_env,
 )
 from memoria.records import Read, ReadError, read as read_ref, real_paragraphs
 from memoria.repository import NoEvidenceRoot, Repository, from_env
+from memoria.trace import Trace, TraceError, trace as trace_ref
 
 mcp = MCPServer(
     "memoria",
@@ -102,7 +104,10 @@ mcp = MCPServer(
         "archive-wide extraction pass, and are driven by the `extraction` "
         "skill rather than reached for directly. The audit_* tools run one "
         "on-demand audit of a section, a chapter, or a highlighted passage - "
-        "call them only when the author explicitly asked for an audit."
+        "call them only when the author explicitly asked for an audit. "
+        "trace(ref) answers why a paragraph of manuscript prose says what it "
+        "says: the commit that last touched it, the session turn that "
+        "authorized an AI write, and what that session had loaded."
     ),
 )
 
@@ -265,10 +270,9 @@ def read(ref: str, raw: bool = False) -> str:
     paragraph with no curated overlay appended.
 
     A decision (`DEC-0088`) serves that decision's block from `decisions.md`;
-    a research memo (`RES-20261018-003`) serves the memo file, verbatim.
-
-    Reference kinds the archive defines but this build does not resolve yet -
-    CLM- - return an error naming the kind.
+    a research memo (`RES-20261018-003`) serves the memo file, verbatim; a
+    claim (`CLM-0041`) serves the claim file, verbatim. A settlement is read
+    on its entry (`SUB-people/bob`), and names the session it happened in.
     """
     try:
         result = read_ref(repository(), ref, raw=raw)
@@ -286,6 +290,75 @@ def read(ref: str, raw: bool = False) -> str:
         raise ToolError(str(exc)) from exc
     append_read(repository(), session_id(), result)
     return render(result)
+
+
+def render_trace(result: Trace) -> str:
+    """Shape a paragraph's provenance (#42, part 10 §20) into what the model
+    sees: the paragraph verbatim between the same ``---`` delimiters a
+    paragraph read uses, then one block per commit in its blame, most recent
+    first - a human change's ``CHG-`` id, or an AI write's authorizing turn
+    quoted verbatim and what its session assembled from. A turn's text is
+    session record served to the model, so it is quoted whole rather than
+    summarized, the discipline every read keeps."""
+    lines = [f"ref: {result.citation}", f"path: {result.path}", "---", result.text, "---"]
+    if result.uncommitted_lines:
+        lines.append(
+            f"uncommitted: {result.uncommitted_lines} line(s) not yet committed - "
+            "no provenance until checkpointed"
+        )
+    if not result.steps and not result.uncommitted_lines:
+        lines.append("no commit touches this paragraph")
+    for step in result.steps:
+        lines.append(
+            f"commit: {step.sha} {step.date} by {step.author} ({step.lines} line(s))"
+        )
+        if step.change_id:
+            lines.append(f"  human change: {step.change_id}")
+        elif step.authorized_by:
+            scope = f" (scope: {step.authorized_scope})" if step.authorized_scope else ""
+            lines.append(f"  authorized by: {step.authorized_by}{scope}")
+            if step.authorizing_turn is None:
+                lines.append("  turn: not derived yet - this session has no transcript")
+            else:
+                lines.append("  turn:")
+                lines.append(step.authorizing_turn)
+            lines.append(
+                "  assembled from: "
+                + (", ".join(step.assembled_from) if step.assembled_from else "nothing ledgered")
+            )
+        else:
+            lines.append(
+                "  neither a change-id nor an authorized-by trailer: not a human "
+                "change and not an authorized AI write (memoria validate fails this)"
+            )
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def trace(ref: str) -> str:
+    """Why a paragraph of manuscript prose says what it says (#42).
+
+    Takes one paragraph of a section - `SEC-0001 P7` - and composes its
+    provenance from facts that already exist, storing nothing: `git blame`
+    to the commit(s) that last touched its lines; the commit's trailers to
+    a human change (`CHG-`) or to the session turn that authorized an AI
+    write; that turn's text, verbatim, once the session is derived; and
+    the session's context manifest for what was loaded to write from.
+
+    Blame coarsens under reflow: a human rewrap after an AI rewrite is the
+    last thing that touched those lines, and the trace says so.
+    """
+    try:
+        result = trace_ref(repository(), ref)
+    except TraceError as exc:
+        raise ToolError(str(exc)) from exc
+    served = [result.citation] + [
+        step.authorized_by
+        for step in result.steps
+        if step.authorized_by and step.authorizing_turn is not None
+    ]
+    append_trace(repository(), session_id(), ref, served)
+    return render_trace(result)
 
 
 def render_search(results: list[SearchResult]) -> str:

@@ -13,7 +13,10 @@ filename".
 import ast
 from pathlib import Path
 
+from memoria import extraction as ex
+from memoria.index import build_index, compute_appearances, list_appearances
 from memoria.manuscript import Brief
+from memoria.records import NORMALIZED_RELATIVE_PATH, NormalizedRecord, write_normalized_records
 from memoria.repository import Repository
 from memoria.scope import ScopeResolution, resolve_scope
 from memoria.subjects import Entry, entry_to_markdown
@@ -175,6 +178,55 @@ def test_resolve_scope_is_deterministic_at_a_repository_revision(tmp_path):
 def test_resolve_scope_returns_a_scope_resolution(tmp_path):
     repository = _repo(tmp_path)
     assert isinstance(resolve_scope(repository, _brief("Anything.")), ScopeResolution)
+
+
+# --- one helper builds an entry's match terms for all three callers (#156) --
+
+
+def _book(record_id: str, paragraphs: list[str]) -> NormalizedRecord:
+    return NormalizedRecord(
+        id=record_id,
+        source_type="book",
+        recorded_date="Oct. 22.",
+        event_date="Oct. 22.",
+        date_confidence="unresolved",
+        contemporaneous=True,
+        original_file="raw/vol-01/text.txt",
+        original_locator="Journal I, entry dated Oct. 22.",
+        paragraphs=paragraphs,
+    )
+
+
+def test_resolve_scope_appearances_and_licensing_agree_on_an_entrys_terms(tmp_path):
+    """The rule for an entry's match terms - its implicit name plus its
+    word-shaped match terms - has one owner in `scope.match_terms_for`
+    (#156). This drives all three callers - `resolve_scope`,
+    `index.compute_appearances` and `extraction._licensing_terms` - over the
+    same entry and checks they agree, so a caller that quietly grows its own
+    copy again shows up here rather than as a silent divergence later.
+
+    ``SUB-people/carol`` is entry-shaped (`classify_match_term`) and must be
+    excluded by all three, the same as `resolve_scope`'s own
+    `test_resolve_scope_ignores_entry_and_relation_shaped_match_terms`."""
+    entry = Entry(
+        id="SUB-people/bob", match_terms=["Robert", "SUB-people/carol"], body=""
+    )
+    _write_entry(tmp_path, entry)
+    repository = _repo(tmp_path)
+
+    resolution = resolve_scope(
+        repository, _brief("Bob, also known as Robert, appears here.")
+    )
+    assert resolution.matched_by["SUB-people/bob"] == ("bob", "Robert")
+
+    book = _book("SRC-000001", ["Bob was here.", "Robert was here.", "Carol was here."])
+    write_normalized_records([book], tmp_path / NORMALIZED_RELATIVE_PATH)
+    build_index(repository, [book])
+    compute_appearances(repository)
+    notes = {a.note for a in list_appearances(repository, "SUB-people/bob")}
+    assert notes == {'matched "bob"', 'matched "Robert"'}
+
+    assert ex._licensing_terms(entry) == {"bob": "", "robert": "Robert"}
 
 
 # --- the resolver is the one seam (#36) --------------------------------------

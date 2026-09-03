@@ -48,6 +48,7 @@ ALLOWED_IMPORTS = {
     "memoria.extraction",  # #17: the extraction pass's tools
     "memoria.embeddings",  # #81: the local embedder search_semantic wires in
     "memoria.audit",  # #40: the audit pass's tools
+    "memoria.trace",  # #42: trace(ref), provenance composed from git and the session
 }
 
 FILE_OPENING_CALLS = {"open", "read_text", "read_bytes", "write_text", "write_bytes"}
@@ -420,7 +421,9 @@ def test_the_tool_surface_is_the_read_tools_and_the_extraction_tools():
     second class on the same server: they write, and they are driven by the
     `extraction` skill rather than reached for by a writing session. #40 adds
     a third class of the same shape, the audit's tools - driven by an
-    explicit on-demand request, never by a skill running on its own.
+    explicit on-demand request, never by a skill running on its own. #42
+    adds trace, the one provenance tool part 11 §26 names - a read of what
+    git and the session records already hold, storing nothing.
 
     Pinned as an exact set, so a tool added without a decision fails here.
     """
@@ -430,6 +433,7 @@ def test_the_tool_surface_is_the_read_tools_and_the_extraction_tools():
         "search_text",
         "search_semantic",
         "search_global",
+        "trace",
         "extraction_brief",
         "extraction_next_paragraphs",
         "extraction_record",

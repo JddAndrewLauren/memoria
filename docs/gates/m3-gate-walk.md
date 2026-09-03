@@ -60,10 +60,19 @@ entry is about, so gathering is seen to select two records out of three rather
 than to return everything.
 
 The claim step 7 makes about the whole corpus — that every served paragraph
-appears verbatim in its original — is also asserted in
+appears verbatim in its original — is bounded by transfer encoding: the raw
+route serves a message's file decoded as UTF-8 but otherwise untouched, so a
+quoted-printable or base64 body reaches it as `=`-wrapped, `=XX`-escaped
+source text rather than the text the record carries. This corpus's three
+messages are all `7bit`, so the walk shows the stronger claim — the served
+paragraph agrees with the raw route's own bytes character for character. The
+same claim, bounded the other way, is also asserted in
 `tests/test_normalization_fidelity.py`, over the `tests/fixtures/enron/`
-messages, through the same two HTTP routes. The walk demonstrates it for a
-reader; the pytest file is what keeps it from regressing between walks.
+messages, through the same two HTTP routes — there a quoted-printable fixture
+(`quoted-printable-wrapped.eml`) is compared against its *decoded* original
+instead, which is the honest form of the claim for a body the raw view shows
+as source. The walk demonstrates the claim for a reader; the pytest file is
+what keeps it, both halves, from regressing between walks.
 
 ## Setup
 
@@ -130,7 +139,11 @@ exactly is asserted.
    its own tab: the raw bytes of the unnormalized file, with `original_locator`
    above them. Compare a sentence against what the slide-over showed. That
    comparison is the point of the gate — it is what says normalization invented
-   nothing.
+   nothing. This corpus's messages are `7bit`, so the raw route's bytes are the
+   sentence's own text; a quoted-printable or base64 body (not in this corpus,
+   see "The corpus" above) would show up `=`-wrapped source instead, and the
+   comparison would be against that body decoded, not against the raw route's
+   bytes.
 
 ## Result
 

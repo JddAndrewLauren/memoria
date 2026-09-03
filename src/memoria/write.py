@@ -158,6 +158,8 @@ def write(
     token: str,
     content: str,
     actor: Actor,
+    *,
+    trailers: tuple[tuple[str, str], ...] = (),
 ) -> WriteResult:
     """Apply one write to one durable file, gated by its staleness token.
 
@@ -181,6 +183,13 @@ def write(
     is known to be going ahead but before the machine touches the file, so
     a human edit is always committed as theirs first and a write that is
     rejected or refused leaves no commit behind at all.
+
+    ``trailers`` are ``(key, value)`` pairs appended to the commit message as
+    git trailers, after the ``change-id:`` a human actor's commit carries.
+    §41's AI manuscript commit is the caller that needs them: it is
+    "committed with references to their authorizing interaction", and the
+    reference has to ride on the commit itself (``memoria.authorship``), not
+    on a sidecar that could drift from it.
     """
     path = _confined(repository, PurePosixPath(relative_path))
     if _current_token(path) != token:
@@ -188,7 +197,7 @@ def write(
     if not actor.human:
         checkpoint(repository)
     _replace_atomically(path, content)
-    _commit(repository, relative_path, actor)
+    _commit(repository, relative_path, actor, trailers)
     return Written(path=relative_path)
 
 
@@ -197,6 +206,8 @@ def create(
     relative_path: str,
     content: str,
     actor: Actor,
+    *,
+    trailers: tuple[tuple[str, str], ...] = (),
 ) -> WriteResult:
     """Bring one new durable file into being, and commit it.
 
@@ -232,7 +243,7 @@ def create(
         checkpoint(repository)
     path.parent.mkdir(parents=True, exist_ok=True)
     _replace_atomically(path, content)
-    _commit(repository, relative_path, actor)
+    _commit(repository, relative_path, actor, trailers)
     return Written(path=relative_path)
 
 
@@ -277,7 +288,12 @@ def _replace_atomically(path: Path, content: str) -> None:
         raise
 
 
-def _commit(repository: Repository, relative_path: str, actor: Actor) -> None:
+def _commit(
+    repository: Repository,
+    relative_path: str,
+    actor: Actor,
+    trailers: tuple[tuple[str, str], ...] = (),
+) -> None:
     # Env, not `--author`, so the commit needs no `user.name`/`user.email`
     # configured for this repository - the identity is `actor`, in full,
     # author and committer alike.
@@ -301,13 +317,17 @@ def _commit(repository: Repository, relative_path: str, actor: Actor) -> None:
             env=env, ok=(0, 1)) == 0:
         return
     message = f"write: {relative_path}"
+    lines = []
     if actor.human:
         # ADR-0008: every human-authored commit carries a change-id trailer,
         # checkpoints and writes through the write path alike. Minted here,
         # right before the commit that consumes it, off the same ledger
         # `checkpoint` mints from - never positionally, so a later rebase
         # cannot renumber it.
-        message = f"{message}\n\n{changes.CHANGE_ID_TRAILER}: {changes.next_change_id(repository)}"
+        lines.append(f"{changes.CHANGE_ID_TRAILER}: {changes.next_change_id(repository)}")
+    lines.extend(f"{key}: {value}" for key, value in trailers)
+    if lines:
+        message = f"{message}\n\n" + "\n".join(lines)
     _git(
         repository,
         ["commit", "-m", message, "--", relative_path],

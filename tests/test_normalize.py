@@ -5,6 +5,7 @@ import io
 import mailbox
 import re
 import sqlite3
+import struct
 from dataclasses import replace
 from email.message import EmailMessage
 
@@ -70,6 +71,27 @@ def _email_message(
             maintype="application",
             subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             filename=filename,
+        )
+    return message
+
+
+def _html_email_message(*, from_, to, date, message_id, subject, html_body, attachment=None):
+    """A message whose only body part is HTML (#104) - `set_content(...,
+    subtype="html")` alone is a non-multipart text/html message; adding an
+    attachment wraps it in multipart/mixed with the html part as the only
+    body part, exercising the multipart walk in `_email_body_text` instead
+    of its non-multipart branch."""
+    message = EmailMessage()
+    message["From"] = from_
+    message["To"] = to
+    message["Subject"] = subject
+    message["Date"] = date
+    message["Message-ID"] = message_id
+    message.set_content(html_body, subtype="html")
+    if attachment is not None:
+        filename, content_bytes = attachment
+        message.add_attachment(
+            content_bytes, maintype="application", subtype="octet-stream", filename=filename
         )
     return message
 
@@ -219,6 +241,122 @@ def _make_pdf(pages):
     return _pdf_from_objects(objects)
 
 
+# --- .msg (#104): a hand-built OLE2/CFB (Compound File Binary), the same
+# "no writer library is a project dependency" reasoning as the docx/pdf
+# fixtures above - `olefile` can only overwrite an existing stream of the
+# same size, so there is no reading library this could be built through.
+# Every stream these fixtures need is well under the mini-FAT cutoff
+# (4096 bytes), so this only ever needs one regular FAT sector and however
+# many mini-FAT/mini-stream sectors the streams' own bytes round up to; it
+# does not attempt to support anything larger.
+
+_OLE_FREESECT = 0xFFFFFFFF
+_OLE_ENDOFCHAIN = 0xFFFFFFFE
+_OLE_FATSECT = 0xFFFFFFFD
+_OLE_NOSTREAM = 0xFFFFFFFF
+_OLE_SECTOR = 512
+_OLE_MINI_SECTOR = 64
+
+
+def _ole_pad(data, size):
+    return data + b"\x00" * (-len(data) % size)
+
+
+def _make_msg(streams):
+    """A minimal valid `.msg` file: one stream per ``(name, text)`` pair,
+    each a direct child of the root storage - the shape a real `.msg`'s own
+    top-level MAPI properties take. ``text`` is encoded UTF-16LE, the way
+    Outlook always writes a ``...001F`` (``PT_UNICODE``) stream."""
+    encoded = [(name, text.encode("utf-16-le")) for name, text in streams]
+
+    mini_blob = bytearray()
+    starts = []
+    next_mini = 0
+    for _name, data in encoded:
+        starts.append(next_mini if data else _OLE_NOSTREAM)
+        mini_blob += _ole_pad(data, _OLE_MINI_SECTOR)
+        next_mini += -(-len(data) // _OLE_MINI_SECTOR) if data else 0
+    total_mini_sectors = next_mini
+
+    mini_fat = [_OLE_FREESECT] * total_mini_sectors
+    for (_name, data), start in zip(encoded, starts):
+        if not data:
+            continue
+        n_mini = -(-len(data) // _OLE_MINI_SECTOR)
+        for j in range(n_mini):
+            mini_fat[start + j] = start + j + 1 if j < n_mini - 1 else _OLE_ENDOFCHAIN
+    mini_fat_bytes = b"".join(struct.pack("<L", v) for v in mini_fat)
+    minifat_sector_count = -(-len(mini_fat_bytes) // _OLE_SECTOR) if mini_fat_bytes else 0
+    if mini_fat_bytes:
+        used = len(mini_fat_bytes)
+        padded = minifat_sector_count * _OLE_SECTOR
+        mini_fat_bytes += struct.pack("<L", _OLE_FREESECT) * ((padded - used) // 4)
+
+    ministream_sector_count = -(-len(mini_blob) // _OLE_SECTOR) if mini_blob else 0
+    ministream_bytes = _ole_pad(bytes(mini_blob), _OLE_SECTOR)
+
+    entries_count = 1 + len(encoded)
+    dir_sector_count = -(-entries_count // 4)
+
+    first_dir = 1
+    first_minifat = first_dir + dir_sector_count
+    first_ministream = first_minifat + minifat_sector_count
+    total_sectors = first_ministream + ministream_sector_count
+    assert total_sectors <= 128, "fixture too large for one FAT sector"
+
+    def name_field(name):
+        raw = name.encode("utf-16-le") + b"\x00\x00"
+        namelen = len(raw)
+        return raw + b"\x00" * (64 - len(raw)), namelen
+
+    direntry_fmt = "<64sHBBIII16sIQQIII"
+    dir_entries = []
+    raw, namelen = name_field("Root Entry")
+    dir_entries.append(struct.pack(
+        direntry_fmt, raw, namelen, 5, 1, _OLE_NOSTREAM, _OLE_NOSTREAM,
+        1 if encoded else _OLE_NOSTREAM, b"\x00" * 16, 0, 0, 0,
+        first_ministream if mini_blob else _OLE_ENDOFCHAIN, len(mini_blob), 0,
+    ))
+    for i, (name, data) in enumerate(encoded):
+        raw, namelen = name_field(name)
+        sid = i + 1
+        right = sid + 1 if sid + 1 < entries_count else _OLE_NOSTREAM
+        dir_entries.append(struct.pack(
+            direntry_fmt, raw, namelen, 2, 1, _OLE_NOSTREAM, right, _OLE_NOSTREAM,
+            b"\x00" * 16, 0, 0, 0, starts[i], len(data), 0,
+        ))
+    empty_entry = struct.pack(
+        direntry_fmt, b"\x00" * 64, 0, 0, 0, _OLE_NOSTREAM, _OLE_NOSTREAM,
+        _OLE_NOSTREAM, b"\x00" * 16, 0, 0, 0, 0, 0, 0,
+    )
+    while len(dir_entries) < dir_sector_count * 4:
+        dir_entries.append(empty_entry)
+    dir_bytes = b"".join(dir_entries)
+
+    fat = [_OLE_FREESECT] * 128
+    fat[0] = _OLE_FATSECT
+    for lo, count in (
+        (first_dir, dir_sector_count),
+        (first_minifat, minifat_sector_count),
+        (first_ministream, ministream_sector_count),
+    ):
+        for s in range(lo, lo + count):
+            fat[s] = s + 1 if s + 1 < lo + count else _OLE_ENDOFCHAIN
+    fat_bytes = b"".join(struct.pack("<L", v) for v in fat)
+
+    header = struct.pack(
+        "<8s16sHHHHHHLLLLLLLLLL",
+        b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", b"\x00" * 16,
+        0x003E, 3, 0xFFFE, 9, 6, 0,
+        0, 0, 1, first_dir, 0, 0x1000,
+        first_minifat if minifat_sector_count else _OLE_ENDOFCHAIN,
+        minifat_sector_count, _OLE_ENDOFCHAIN, 0,
+    )
+    header += struct.pack("<L", 0) + struct.pack("<L", _OLE_FREESECT) * 108
+
+    return bytes(header) + fat_bytes + dir_bytes + mini_fat_bytes + ministream_bytes
+
+
 def test_normalize_converts_a_new_plain_text_unit(tmp_path):
     evidence_root = tmp_path / "evidence"
     _write_raw_file(evidence_root, "a.txt", "First paragraph.\n\nSecond paragraph.")
@@ -273,6 +411,69 @@ def test_a_unit_whose_converter_raises_is_reported_and_the_pass_goes_on(tmp_path
     assert report.converted == ["SRC-000002"]
     (record,) = read_all(repository)
     assert record.id == "SRC-000002"
+
+
+def test_a_failed_units_manifest_entry_records_the_failure(tmp_path):
+    """#106: the manifest marks a failed unit with its reason, the converter
+    pin that failed, and the raw hash it failed on - so a later run can tell
+    whether anything changed since."""
+    evidence_root = tmp_path / "evidence"
+    _write_raw_file(evidence_root, "a.pdf", "not a pdf at all")
+    repository = Repository(root=tmp_path / "repo")
+
+    report = normalize(repository, evidence_root)
+
+    (entry,) = load_manifest(evidence_root / DEFAULT_MANIFEST_RELATIVE_PATH)
+    failure = entry.extra["failed"]
+    assert failure["reason"] == report.failed["SRC-000001"]
+    assert failure["converter"] == CONVERTERS[".pdf"][1]()
+    assert failure["raw_sha256"] == entry.sha256
+
+
+def test_a_second_run_over_an_unchanged_failed_unit_skips_it_without_retrying(tmp_path):
+    evidence_root = tmp_path / "evidence"
+    _write_raw_file(evidence_root, "a.pdf", "not a pdf at all")
+    repository = Repository(root=tmp_path / "repo")
+    normalize(repository, evidence_root)
+
+    report = normalize(repository, evidence_root)
+
+    assert report.failed == {}
+    assert report.skipped_failed == ["SRC-000001"]
+
+
+def test_a_failed_unit_retries_after_its_converter_pin_bumps(tmp_path, monkeypatch):
+    evidence_root = tmp_path / "evidence"
+    _write_raw_file(evidence_root, "a.pdf", "not a pdf at all")
+    repository = Repository(root=tmp_path / "repo")
+    normalize(repository, evidence_root)
+
+    from memoria import normalize as normalize_module
+
+    monkeypatch.setitem(
+        normalize_module.CONVERTERS,
+        ".pdf",
+        (normalize_module.convert_pdf, lambda: "pdfplumber 999"),
+    )
+    report = normalize(repository, evidence_root)
+
+    assert report.skipped_failed == []
+    assert list(report.failed) == ["SRC-000001"]
+
+
+def test_a_failed_unit_retries_and_succeeds_once_its_content_changes(tmp_path):
+    evidence_root = tmp_path / "evidence"
+    full = _write_raw_file(evidence_root, "a.pdf", "not a pdf at all")
+    repository = Repository(root=tmp_path / "repo")
+    normalize(repository, evidence_root)
+
+    full.write_bytes(_make_pdf(["Real content."]))
+    report = normalize(repository, evidence_root)
+
+    assert report.skipped_failed == []
+    assert report.converted == ["SRC-000001"]
+    (entry,) = load_manifest(evidence_root / DEFAULT_MANIFEST_RELATIVE_PATH)
+    assert "failed" not in entry.extra
 
 
 def test_a_run_over_unchanged_input_produces_no_diff(tmp_path):
@@ -1175,3 +1376,204 @@ def test_reconverting_a_pdf_with_force_all_is_byte_identical(tmp_path):
 
     assert report.converted == ["SRC-000001"]
     assert record_path.read_bytes() == before
+
+
+# --- .msg (#104) -----------------------------------------------------------
+
+
+def test_a_msg_file_converts_to_one_record_with_frontmatter_and_quoted_reply_split(tmp_path):
+    """A `.msg` whose `PR_TRANSPORT_MESSAGE_HEADERS` property carries the
+    original RFC822 header block - the common case for a message that
+    reached Outlook over SMTP - gets exactly the frontmatter and
+    quoted-reply handling a `.eml` with the same headers/body already gets
+    (part 05 §5.2, §5.4): the reassembled text goes through the very same
+    converter."""
+    evidence_root = tmp_path / "evidence"
+    headers = (
+        "From: alice@example.com\r\n"
+        "To: bob@example.com\r\n"
+        "Cc: carol@example.com\r\n"
+        "Subject: Q3 numbers\r\n"
+        "Date: Mon, 17 Oct 2011 09:00:00 -0500\r\n"
+        "Message-ID: <msg1@x>\r\n"
+    )
+    body = (
+        "Here are the numbers.\r\n\r\n"
+        "On Mon, 17 Oct 2011, bob@example.com wrote:\r\n"
+        "> anything to add?"
+    )
+    msg_path = evidence_root / "raw" / "message.msg"
+    msg_path.parent.mkdir(parents=True, exist_ok=True)
+    msg_path.write_bytes(
+        _make_msg(
+            [
+                ("__substg1.0_007D001F", headers),
+                ("__substg1.0_1000001F", body),
+            ]
+        )
+    )
+    repository = Repository(root=tmp_path / "repo")
+
+    report = normalize(repository, evidence_root)
+
+    assert len(report.unconvertible) == 1  # the .msg file itself
+    (record,) = read_all(repository)
+    assert record.source_type == "email"
+    assert record.email_from == "alice@example.com"
+    assert record.email_to == "bob@example.com"
+    assert record.email_cc == "carol@example.com"
+    assert record.subject == "Q3 numbers"
+    assert record.paragraphs == ["Here are the numbers."]
+    assert record.quoted_excised is True
+    assert record.converter == EMAIL_CONVERTER_VERSION
+
+
+def test_a_msg_file_with_no_transport_headers_falls_back_to_mapi_properties(tmp_path):
+    """A `.msg` composed in Outlook and never sent over SMTP carries no
+    `PR_TRANSPORT_MESSAGE_HEADERS` - only the handful of MAPI properties
+    MarkItDown's own (unused) `.msg` converter reads. No `Date` property
+    means no invented date, the same "unresolved" gap a bare `.txt` file
+    has, and no `Message-ID` means the record threads to itself."""
+    evidence_root = tmp_path / "evidence"
+    msg_path = evidence_root / "raw" / "local.msg"
+    msg_path.parent.mkdir(parents=True, exist_ok=True)
+    msg_path.write_bytes(
+        _make_msg(
+            [
+                ("__substg1.0_0037001F", "Draft only"),
+                ("__substg1.0_0C1F001F", "alice@example.com"),
+                ("__substg1.0_0E04001F", "bob@example.com"),
+                ("__substg1.0_1000001F", "Not sent yet."),
+            ]
+        )
+    )
+    repository = Repository(root=tmp_path / "repo")
+
+    normalize(repository, evidence_root)
+
+    (record,) = read_all(repository)
+    assert record.subject == "Draft only"
+    assert record.email_from == "alice@example.com"
+    assert record.email_to == "bob@example.com"
+    assert record.email_cc == ""
+    assert record.paragraphs == ["Not sent yet."]
+    assert record.date_confidence == "unresolved"
+    assert record.thread_id == record.id
+
+
+def test_a_msg_stale_header_is_stripped_with_its_folded_continuation_lines(tmp_path):
+    """Real Outlook transport headers are nearly always multipart with a
+    folded `boundary=` continuation under `Content-Type`. Dropping only
+    the `Content-Type:` line left that continuation folded onto the header
+    above it - `Message-ID` here, so `thread_id` absorbed the boundary and
+    threading for the message was dead (#191 review, round 1). Every
+    stale header goes together with its continuation lines; the headers
+    around it survive intact."""
+    evidence_root = tmp_path / "evidence"
+    headers = (
+        "From: alice@example.com\r\n"
+        "To: bob@example.com\r\n"
+        "Subject: Q3 numbers\r\n"
+        "Date: Mon, 17 Oct 2011 09:00:00 -0500\r\n"
+        "Message-ID: <msg1@x>\r\n"
+        "Content-Type: multipart/alternative;\r\n"
+        '\tboundary="_000_abc_"\r\n'
+        "MIME-Version: 1.0\r\n"
+        "In-Reply-To: <msg0@x>\r\n"
+    )
+    msg_path = evidence_root / "raw" / "message.msg"
+    msg_path.parent.mkdir(parents=True, exist_ok=True)
+    msg_path.write_bytes(
+        _make_msg(
+            [
+                ("__substg1.0_007D001F", headers),
+                ("__substg1.0_1000001F", "Here are the numbers."),
+            ]
+        )
+    )
+    repository = Repository(root=tmp_path / "repo")
+
+    normalize(repository, evidence_root)
+
+    (record,) = read_all(repository)
+    assert record.thread_id == "msg1@x"
+    assert record.event_date == "Mon, 17 Oct 2011 09:00:00 -0500"
+    assert record.date_confidence == "exact"
+    assert record.paragraphs == ["Here are the numbers."]
+
+
+def test_an_unreadable_msg_is_a_failed_unit_and_the_pass_goes_on(tmp_path):
+    """A renamed or truncated `.msg` (not an OLE2 file at all) used to raise
+    out of the container read and end the whole run with nothing
+    normalized, where the same bytes as a `.pdf` are recorded as one
+    failed unit (#106). It now gets exactly that bookkeeping: named in
+    the report with its reason, marked in the manifest, and the rest of
+    the corpus still converts."""
+    evidence_root = tmp_path / "evidence"
+    _write_raw_file(evidence_root, "a.msg", "not an OLE2 file")
+    _write_raw_file(evidence_root, "b.txt", "After it.")
+    repository = Repository(root=tmp_path / "repo")
+
+    report = normalize(repository, evidence_root)
+
+    assert list(report.failed) == ["SRC-000001"]
+    assert "NotOleFileError" in report.failed["SRC-000001"]
+    assert report.converted == ["SRC-000002"]
+    assert report.unconvertible == []
+    (record,) = read_all(repository)
+    assert record.paragraphs == ["After it."]
+    broken, _ = load_manifest(evidence_root / DEFAULT_MANIFEST_RELATIVE_PATH)
+    assert broken.extra["failed"]["converter"] == EMAIL_CONVERTER_VERSION
+    assert validate(evidence_root, tmp_path) == []
+
+
+def test_email_container_suffixes_enter_the_manifest_converters_map(tmp_path):
+    """`.eml`/`.mbox` converted but were never entered in the manifest's
+    `converters` map (`CONVERTERS`, #79's own map, covers only docx/pdf/
+    txt) - the gap the issue's own notes point at. `.msg` joins them as a
+    third suffix through the same fix, and all three share one pin since
+    they share one converter."""
+    evidence_root = tmp_path / "evidence"
+    _write_mbox(
+        evidence_root,
+        "thread.mbox",
+        [
+            _email_message(
+                from_="alice@example.com", to="bob@example.com",
+                date="Mon, 17 Oct 2011 09:00:00 -0500", message_id="<m1@x>",
+                body="Kickoff message.",
+            ),
+        ],
+    )
+    repository = Repository(root=tmp_path / "repo")
+
+    normalize(repository, evidence_root)
+
+    pins = load_converter_pins(evidence_root / DEFAULT_MANIFEST_RELATIVE_PATH)
+    assert pins[".mbox"] == EMAIL_CONVERTER_VERSION
+
+
+# --- HTML-only email bodies (#104) ------------------------------------------
+
+
+def test_an_html_only_body_produces_real_paragraphs_not_a_stub(tmp_path):
+    """An `.eml`/`.mbox` message whose only body part is HTML used to
+    produce a stub record - no paragraphs, the same outcome an unreadable
+    pdf gets (part 05 §5.4). MarkItDown's HTML converter - already a
+    lazily-imported dependency via `convert_docx` - now runs instead, only
+    when no plain-text part exists."""
+    evidence_root = tmp_path / "evidence"
+    message = _html_email_message(
+        from_="alice@example.com", to="bob@example.com",
+        date="Mon, 17 Oct 2011 09:00:00 -0500", message_id="<html1@x>",
+        subject="Q3 report",
+        html_body="<p>Hello <b>world</b>.</p><p>Second paragraph.</p>",
+        attachment=("notes.txt", b"pretend-notes"),
+    )
+    _write_mbox(evidence_root, "thread.mbox", [message])
+    repository = Repository(root=tmp_path / "repo")
+
+    normalize(repository, evidence_root)
+
+    (record,) = [r for r in read_all(repository) if r.source_type == "email"]
+    assert record.paragraphs == ["Hello **world**.", "Second paragraph."]

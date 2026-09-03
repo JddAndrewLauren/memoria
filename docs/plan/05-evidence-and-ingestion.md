@@ -130,9 +130,18 @@ citation to a paragraph deep in a long report is followable to a page, which is 
 paragraph: the paragraph splitter skips it, so it never earns an anchor, an index row or
 an extraction read.
 
-**Email parsing is Memoria's own** — the standard library for mbox and `.eml`,
-MarkItDown's Outlook converter only when the export is `.msg` — because the boundary,
-the headers and the quoted-reply policy are all decisions the converter cannot make.
+**Email parsing is Memoria's own** — the standard library for mbox and `.eml`, and for
+`.msg` too (#104): `.msg`'s own `PR_TRANSPORT_MESSAGE_HEADERS` MAPI property is the
+original RFC822 header block for a message that reached Outlook over SMTP, read directly
+via `olefile` and reassembled into the same header/body text `email.message_from_string`
+parses for every other export, so `.msg` shares the exact boundary, header and
+quoted-reply handling `.eml`/`.mbox` get rather than a second, separate one.
+**MarkItDown's own Outlook converter is not used**: it reads the identical `PR_BODY`
+property with no reformatting, but exposes only Subject/From/To (no Cc, Date,
+Message-ID or threading) wrapped in markdown scaffolding that would have to be parsed
+back apart — strictly worse than reading the properties directly. A `.msg` with no
+transport-headers property (composed in Outlook, never sent) falls back to the same
+handful of properties (Subject/From/To/Cc), read the same direct way.
 
 **Quoted replies are cut and dropped.** Most exported messages carry the earlier thread
 quoted below; left in, every message re-indexes its ancestors, search hits land on the

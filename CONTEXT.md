@@ -192,8 +192,22 @@ _Avoid_: Author note, recollection, memory, annotation
 
 **Settlement**:
 A recorded author resolution of a surfaced conflict, naming which side was chosen and
-when. Downstream passages relying on it inherit the resolution and stay silent.
+when. Downstream passages relying on it inherit the resolution and stay silent. It is
+click-authorized - an explicit author act, committed as the author's - and lives on
+the entry as a `[settled]` paragraph inside the [[audit-visible-body]], naming what
+was chosen over what, the reason, the date, and the session it happened in as
+provenance; nothing about it points at a manuscript paragraph. Every settlement
+accretes into a [[claim]].
 _Avoid_: Dismissal, decision, override, resolution
+
+**Claim**:
+A proposition with a truth value - a status, a confidence, supporting and
+contradicting evidence, and reasoning - addressable as `CLM-` and held one file each
+under `claims/`. Not a subject: the propositional layer that accretes from
+[[settlement]]s, born at the moment a disagreement was contested enough that the
+author had to settle it, and a superset of them, since the author may assert one
+outright. `read(CLM-…)` serves the file verbatim.
+_Avoid_: Fact, assertion, belief, sixth subject
 
 ### Ownership
 
@@ -261,6 +275,19 @@ The thing that receives a `SRC-` ID and becomes one normalized record — a file
 message inside an email export. Numbered once by the manifest ledger on first sight and
 never renumbered.
 _Avoid_: Source file, document, input, item
+
+**Authorization**:
+What an AI manuscript write must have before it applies: the session turn in
+which the author gave it, and exactly what it covers — one paragraph, a
+section's whole draft, or one brief. Memoria may propose a rewrite on its own
+and refuses to apply it without one; a write outside what it covers is refused,
+and the covered paragraph is spliced in with every other byte of the file left
+as it was. A brief's authorization covers that brief alone, one level below
+prose — never prose beside it, never two briefs, never a batch. Recorded on the
+commit as `authorized-by: SES-…#T008` and `authorized-scope:`, one commit per
+write; `memoria validate` fails a manuscript commit carrying neither that nor a
+[[change-id]], and `trace()` walks the trailer back to the turn.
+_Avoid_: Approval, permission, consent, sign-off, apply flag
 
 ### Writing to the repository
 

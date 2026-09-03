@@ -16,7 +16,8 @@ a gap nobody noticed.
 | `search_global(query, filters, summarize)` | **Forced** — issue #74, below |
 | `search_semantic(query, filters)` | **Forced** — issue #81, below |
 | `audit_pending(...)`, `audit_record(results)` | **Forced** — issue #40, below |
-| `expand`, `timeline`, `grep_repo`, `trace`, `backlinks`, `list` | Open; §25 does not commit to shipping them |
+| `trace(ref)` | **Forced** — issue #42, below |
+| `expand`, `timeline`, `grep_repo`, `backlinks`, `list` | Open; §25 does not commit to shipping them |
 
 ## Maintainer-class tools (ADR-0005, issue #17)
 
@@ -422,12 +423,13 @@ gives.
 
 ### What it refuses, and how
 
-Reference kinds part 04 §4 defines but this build does not resolve —
-`CLM-` — return an error **naming the kind**, never a silent
-empty result. A kind that is not part of the scheme at all is named too, and
-distinguished from one that is merely unbuilt. `SUB-x` and `SUB-x/y` were on
-this list until issue #16, `CHG-` until ADR-0008, `SES-` (with or without a
-`#T` turn) until #28, and `RES-`/`DEC-` until #30.
+Every reference kind part 04 §4 defines now resolves. A kind that is not
+part of the scheme at all is named in the error, never a silent empty
+result; the "not resolvable in this build yet" message for a kind the plan
+names but nothing implements is kept for the next kind the plan adds. `SUB-x`
+and `SUB-x/y` were on that list until issue #16, `CHG-` until ADR-0008,
+`SES-` (with or without a `#T` turn) until #28, `RES-`/`DEC-` until #30, and
+`CLM-` until #33.
 
 Errors reach the model as `ToolError`, which is the SDK's anticipated-failure
 type: the call comes back `is_error` with the message intact. Any other
@@ -602,12 +604,16 @@ mechanism and is the contract this section serializes.
 A `sqlite-vec` `vec0` virtual table, `paragraph_vectors(anchor, embedding)`,
 beside the FTS5 `records` table in the same `.memoria/index.db` file — no
 second store, no vector database, no additional process. `memoria.index.
-build_index` creates it unconditionally (empty tables cost nothing) and
-populates it only when given an embedder (`embed_fn`); `memoria rebuild` —
-the actual "at rebuild" moment the ADR names — is the one caller that
-supplies the real one (`memoria.embeddings.default_embed_fn`), so deleting
-`.memoria/index.db` removes the vector table exactly as it removes the FTS5
-one, with no separate CLI verb or lifecycle (§42).
+build_index` creates it whenever the `sqlite-vec` extension loads (empty
+tables cost nothing) and populates it only when given an embedder
+(`embed_fn`); `memoria rebuild` — the actual "at rebuild" moment the ADR
+names — is the one caller that supplies the real one
+(`memoria.embeddings.default_embed_fn`), so deleting `.memoria/index.db`
+removes the vector table exactly as it removes the FTS5 one, with no
+separate CLI verb or lifecycle (§42). On an interpreter whose `sqlite3`
+cannot load extensions at all (#153), the table is simply not created —
+every other derived table still is, so only `search_semantic` degrades, with
+a scope line naming the missing extension instead of raising.
 
 `build_index`'s own default is `embed_fn=None` — skip — not the real
 embedder, and this is a deliberate reading of part 08 §12.1's "nothing that
@@ -797,6 +803,65 @@ belong beside the anchors in `served`.
 by `tests/test_extraction.py` — the same shape `search_text`'s core function has,
 and for the same reason (§16's "the `SUBJECTS` tree needs the same grouping to
 show a cluster before the author promotes it").
+
+## `trace(ref)` — forced 2026-09-03, issue #42
+
+Provenance as a tool (part 11 §26), composed rather than stored (part 04 §4.1,
+part 10 §20). Implemented by `memoria.trace`; the tool is one call and a
+rendering.
+
+### What it accepts
+
+One paragraph of a section's prose, positionally: `SEC-0001 ¶7` or
+`SEC-0001 P7`, the same `¶`/`P` pair a source paragraph takes. The form is
+for a live question and is **never a durable pointer** — §4.1 rules those out
+for manuscript prose, and `read(SEC-0001 ¶7)` serves the paragraph as it is
+right now for the same reason. Anything else — a bare section, a brief, a
+source paragraph, a path — is refused naming what trace does take.
+
+### What it returns
+
+The paragraph verbatim between `---` delimiters, then one block per commit
+that last touched its lines, most recent first, each composed on the call
+from records that already exist:
+
+```text
+ref: SEC-0001 ¶7
+path: chapters/02/sections/01/draft.md
+---
+<the paragraph>
+---
+commit: 31cb8d2 2026-11-03 10:41 by Memoria (3 line(s))
+  authorized by: SES-20261103-1041#T008 (scope: SEC-0001 ¶7)
+  turn:
+Rewrite it using the corrected timeline.
+  assembled from: SUB-people/bob, SUB-timeline/chronology, SRC-000184
+```
+
+A human-authored commit stops at its `CHG-` id: what changed is in the commit,
+and Memoria does not invent why (part 07 §40). An AI commit's `authorized-by:`
+trailer names the session turn; the turn's text is quoted **verbatim** once the
+session is derived (`derive-session`), and reported as not yet derived before;
+`assembled from` is the session's context manifest (#29) — entries resolved,
+then records loaded — built live from `events.jsonl`. Lines with no commit yet
+are counted as uncommitted, not traced. A commit with neither trailer is named
+as such: `memoria validate` fails it.
+
+### The accepted cost
+
+Blame coarsens under reflow. A human rewrap after an AI rewrite is the last
+thing that touched those lines, so the trace reports the rewrap's `CHG-` and
+the AI commit drops out of the chain — a loss of precision, never of
+correctness, pinned by a test. §20 names the falsifying observation: blame
+attributing a paragraph so badly that the account misleads.
+
+### What is ledgered
+
+A `trace` line carrying the paragraph's citation and every authorizing turn
+whose text it quoted — each a reference `read(ref)` accepts. Commit facts and
+manifest references are identifiers, not text served, and are not listed. The
+context manifest does not project `trace` lines; like the extraction and audit
+tools, they are in the ledger and not in the manifest's four categories.
 
 ## `events.jsonl` — the read ledger, forced 2026-09-01, issue #13
 

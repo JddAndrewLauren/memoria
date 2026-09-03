@@ -55,6 +55,7 @@ from memoria.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL_NAME, Embed
 from memoria.records import NormalizedRecord, real_paragraphs, read_all
 from memoria.repository import Repository
 from memoria.subjects import (
+    Entry,
     OverlayAct,
     SubjectError,
     classify_match_term,
@@ -110,7 +111,14 @@ INDEX_RELATIVE_PATH = ".memoria/index.db"
 # into a passage, so the anchor there is a paragraph's position within its
 # section's `draft.md`, recomputed fresh on every call rather than stored
 # anywhere else - an aid to diagnosis, not a citation).
-PRESERVED_TABLES = ("memoria_schema", "memo")
+#
+# `human_touched` (#32, part 08 §14.2) is the third preserved table: the
+# human-touched flag is "set once, monotonic, never recomputed", and a table
+# `rebuild` dropped would recompute it by construction. Its rows are not
+# model output - `memoria.human_touched` re-derives them from git history,
+# which is why `--reset-cache` may still delete the file - but they are
+# state a rebuild has no business touching.
+PRESERVED_TABLES = ("memoria_schema", "memo", "human_touched")
 
 # Everything else. Dropped and regenerated on every `memoria rebuild`, which
 # is §42's contract made mechanical.
@@ -140,7 +148,7 @@ DERIVED_TABLES = (
 MEMO_SCHEMA_VERSION = "1"
 
 # The column list `memo` is created with, and the one `_widen_memo_kinds`
-# rewrites a pre-#37 table into - one definition, so they cannot drift.
+# rewrites any out-of-date table into - one definition, so they cannot drift.
 _MEMO_COLUMNS = (
     "key TEXT PRIMARY KEY, "
     "kind TEXT NOT NULL CHECK (kind IN ("
@@ -163,6 +171,18 @@ _PRESERVED_DDL = (
     # looks a row up by `anchor`.
     "CREATE TABLE IF NOT EXISTS memo(" + _MEMO_COLUMNS + ")",
     "CREATE INDEX IF NOT EXISTS memo_kind_anchor ON memo(kind, anchor)",
+    # One row per statement a non-Curator commit changed (#32). `statement`
+    # is `memoria.human_touched.statement_key`'s whitespace-normalized form
+    # of the badged paragraph - the key a reflow cannot move - and `commit_sha`
+    # names the non-Curator commit that set it, so "why is this flagged" is
+    # answerable. Rows are only ever inserted; the pass that sets them
+    # records the `HEAD` it read up to under `memoria_schema`'s
+    # `human_touched_head`, and the next pass walks on from there.
+    "CREATE TABLE IF NOT EXISTS human_touched("
+    "entry_id TEXT NOT NULL, statement TEXT NOT NULL, "
+    "commit_sha TEXT NOT NULL, flagged_at TEXT NOT NULL, "
+    "PRIMARY KEY (entry_id, statement)"
+    ")",
 )
 
 _DERIVED_DDL = (
@@ -280,24 +300,46 @@ _DERIVED_DDL = (
     "PRIMARY KEY (entry_id, anchor)"
     ")",
     "CREATE INDEX IF NOT EXISTS appearances_entry ON appearances(entry_id)",
-    # The semantic index (#81, ADR-0007): one row per real paragraph, same
-    # key (`anchor`) as `paragraphs` and `records`, in this same database
-    # file - no second store. `embedding` is fixed-width at
-    # `EMBEDDING_DIMENSIONS` because `EMBEDDING_MODEL_NAME` is the one
-    # embedder this build ships (`memoria.embeddings`); a future model with a
-    # different width would need a new table, not a wider column. Always
-    # created, whether or not `build_index` is ever asked to populate it
-    # (`embed_fn=None` is the default) - an empty vector table is the same
-    # "not built yet" state `search_semantic` already has to handle for a
-    # missing `.memoria/index.db` entirely.
+)
+
+# The semantic index (#81, ADR-0007): one row per real paragraph, same key
+# (`anchor`) as `paragraphs` and `records`, in this same database file - no
+# second store. `embedding` is fixed-width at `EMBEDDING_DIMENSIONS` because
+# `EMBEDDING_MODEL_NAME` is the one embedder this build ships
+# (`memoria.embeddings`); a future model with a different width would need a
+# new table, not a wider column. Created whenever the `sqlite-vec` extension
+# loads, whether or not `build_index` is ever asked to populate it
+# (`embed_fn=None` is the default) - an empty vector table is the same "not
+# built yet" state `search_semantic` already has to handle for a missing
+# `.memoria/index.db` entirely.
+#
+# Kept out of `_DERIVED_DDL` (#153): that tuple runs with no extension
+# loaded, so every other derived table - the ones `search_text`, `gather`,
+# and the extraction depend on - comes up fine on an interpreter that cannot
+# load extensions at all. Only this one statement, and only the callers on
+# the semantic-search / vector-indexing path, ever touch `vec0`.
+_VECTOR_TABLE_DDL = (
     "CREATE VIRTUAL TABLE IF NOT EXISTS paragraph_vectors USING vec0("
     f"anchor TEXT PRIMARY KEY, embedding FLOAT[{EMBEDDING_DIMENSIONS}]"
-    ")",
+    ")"
 )
 
 
 class IndexSchemaError(Exception):
     """The index file on disk cannot be opened under this build's rules."""
+
+
+class IndexBuildError(Exception):
+    """``embed_fn`` returned a different number of vectors than paragraphs it
+    was given (#154).
+
+    Raised before ``build_index``'s single ``commit()``, so the whole build -
+    the vector table included - rolls back with the rest of the pending
+    transaction: closing a connection with no ``commit()`` discards it, the
+    same way any other mid-build exception already does here. A caller sees
+    either a fully rebuilt index or, on a schema-fresh repository, no
+    ``.memoria/index.db`` at all - never a ``paragraph_vectors`` table
+    silently missing the paragraphs an embedder dropped."""
 
 
 @dataclass
@@ -439,6 +481,12 @@ def build_index(
     rebuild`` is the one caller that does, so the every-`build_index`-call
     test suite this repository already has never triggers a real model load.
 
+    An ``embed_fn`` that returns fewer vectors than the paragraphs it was
+    handed raises ``IndexBuildError`` naming both counts (#154), rather than
+    letting ``zip`` silently pair only the shorter sequence and leave a
+    truncated tail of paragraphs unsearchable with no error at all. See
+    ``IndexBuildError`` for what a caller finds on disk afterward.
+
     Takes the frozen ``Repository`` value, like ``search`` and every other
     core function that names a location (ADR-0004): the index path is a fact
     about a repository, not an argument a caller composes.
@@ -476,12 +524,24 @@ def build_index(
 
     con = sqlite3.connect(db_path)
     try:
-        _load_vec_extension(con)
+        # Loaded here, on the vector-indexing path, rather than assumed - an
+        # interpreter that cannot load extensions still gets every other
+        # derived table (#153); it just does not get a vector one, and
+        # nothing below tries to embed into a table that was never created.
+        try:
+            _load_vec_extension(con)
+            vector_available = True
+        except VectorExtensionUnavailable:
+            vector_available = False
         _ensure_preserved(con)
         for table in DERIVED_TABLES:
+            if table == "paragraph_vectors" and not vector_available:
+                continue
             con.execute(f"DROP TABLE IF EXISTS {table}")
         for statement in _DERIVED_DDL:
             con.execute(statement)
+        if vector_available:
+            con.execute(_VECTOR_TABLE_DDL)
         # Collected alongside the insert loop rather than re-read afterwards
         # - every real paragraph's anchor and text are already in hand here,
         # and a second pass over `records` would just recompute
@@ -516,10 +576,16 @@ def build_index(
                         record.email_to,
                     ),
                 )
-                if embed_fn is not None:
+                if embed_fn is not None and vector_available:
                     to_embed.append((anchor, paragraph))
         if to_embed:
             vectors = embed_fn([text for _, text in to_embed])
+            if len(vectors) != len(to_embed):
+                raise IndexBuildError(
+                    f"embedder returned {len(vectors)} vectors for "
+                    f"{len(to_embed)} paragraphs; the semantic index was not "
+                    "built"
+                )
             for (anchor, _text), vector in zip(to_embed, vectors):
                 con.execute(
                     "INSERT INTO paragraph_vectors (anchor, embedding) "
@@ -531,20 +597,48 @@ def build_index(
         con.close()
 
 
+class VectorExtensionUnavailable(Exception):
+    """This interpreter's ``sqlite3`` cannot load extensions at all (#153).
+
+    Raised by ``_load_vec_extension`` and caught only by callers on the
+    semantic-search / vector-indexing path (``build_index``, ``connect``'s
+    vector-table setup, ``search_semantic``) - every other caller must not
+    call ``_load_vec_extension`` in the first place, so this never reaches
+    them. Some interpreters are built without
+    ``sqlite3.Connection.enable_load_extension`` support at all (it raises
+    ``sqlite3.NotSupportedError``) or lack the method entirely
+    (``AttributeError``); either way the fix is the same - degrade the one
+    feature that needed it, not the whole index.
+    """
+
+
 def _load_vec_extension(con: sqlite3.Connection) -> None:
     """Register ``sqlite-vec``'s ``vec0`` module on ``con``.
 
-    Needed before *any* statement that names ``paragraph_vectors`` -
-    including the ``CREATE VIRTUAL TABLE IF NOT EXISTS`` in ``_DERIVED_DDL``
-    and the ``DROP TABLE`` that precedes it - so every function that runs
-    those (``build_index``, ``connect``) calls this first. Loading costs a
-    few milliseconds and no network; it is not the same event as
+    Needed before *any* statement that names ``paragraph_vectors`` - so
+    every function that runs one (``build_index``, ``connect``'s vector-table
+    setup, ``search_semantic``) calls this first. Loading costs a few
+    milliseconds and no network; it is not the same event as
     ``memoria.embeddings.default_embed_fn``'s model load, which is the one
     that reaches the network.
+
+    Raises ``VectorExtensionUnavailable`` rather than letting
+    ``con.enable_load_extension``'s own ``AttributeError`` or
+    ``sqlite3.NotSupportedError`` escape - one exception type every caller on
+    this path catches, regardless of which way this particular interpreter
+    lacks the capability (#153).
     """
-    con.enable_load_extension(True)
-    sqlite_vec.load(con)
-    con.enable_load_extension(False)
+    try:
+        con.enable_load_extension(True)
+    except (AttributeError, sqlite3.NotSupportedError) as exc:
+        raise VectorExtensionUnavailable(
+            "this interpreter's sqlite3 cannot load extensions; "
+            "semantic search and vector indexing are unavailable"
+        ) from exc
+    try:
+        sqlite_vec.load(con)
+    finally:
+        con.enable_load_extension(False)
 
 
 def _ensure_preserved(con: sqlite3.Connection) -> None:
@@ -581,28 +675,42 @@ def _ensure_preserved(con: sqlite3.Connection) -> None:
 
 
 def _widen_memo_kinds(con: sqlite3.Connection) -> None:
-    """Rewrite a ``memo`` table built before #37 so it accepts the two
-    judgement kinds, keeping every row.
+    """Rewrite a ``memo`` table built to an older ``_MEMO_COLUMNS`` into the
+    current one, keeping every row - and every column a row already had.
 
     ``memo`` is preserved, so ``rebuild`` never drops it, and ``CREATE TABLE
     IF NOT EXISTS`` leaves an existing table exactly as it is - which means
-    the old two-kind CHECK constraint would otherwise survive forever and
-    the first ``memoria.audit`` write would fail with a bare
-    ``sqlite3.IntegrityError``. The rows are model output the author paid
-    for, so this is not a ``MEMO_SCHEMA_VERSION`` bump (that forces
-    ``--reset-cache``): it is a lossless copy into the current DDL. SQLite
-    cannot alter a CHECK in place, hence create-copy-drop-rename.
+    an old CHECK constraint (#37's two judgement kinds) or an old, narrower
+    column set would otherwise survive forever, and the first write past it
+    would fail with a bare ``sqlite3.IntegrityError`` or ``OperationalError``.
+    The rows are model output the author paid for, so this is not a
+    ``MEMO_SCHEMA_VERSION`` bump (that forces ``--reset-cache``): it is a
+    lossless copy into the current DDL. SQLite cannot alter a CHECK in
+    place, hence create-copy-drop-rename.
+
+    The copied column list is never hand-maintained: it is read back from
+    ``memo_widened`` (built with ``_MEMO_COLUMNS``, the same definition
+    ``memo`` itself is created with) via ``PRAGMA table_info``, filtered to
+    the columns the old table actually has. A column ``_MEMO_COLUMNS`` adds
+    is left for its own ``DEFAULT`` to fill in on existing rows.
     """
     row = con.execute(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memo'"
     ).fetchone()
-    if row is None or "'engagement'" in row[0]:
+    if row is None:
+        return
+    current_columns = row[0][row[0].index("(") + 1 : row[0].rindex(")")]
+    if current_columns == _MEMO_COLUMNS:
         return
     con.execute("DROP TABLE IF EXISTS memo_widened")
     con.execute("CREATE TABLE memo_widened(" + _MEMO_COLUMNS + ")")
+    old_columns = {r[1] for r in con.execute("PRAGMA table_info(memo)")}
+    shared_columns = ", ".join(
+        r[1] for r in con.execute("PRAGMA table_info(memo_widened)") if r[1] in old_columns
+    )
     con.execute(
-        "INSERT INTO memo_widened (key, kind, anchor, value, written_at) "
-        "SELECT key, kind, anchor, value, written_at FROM memo"
+        f"INSERT INTO memo_widened ({shared_columns}) "
+        f"SELECT {shared_columns} FROM memo"
     )
     con.execute("DROP TABLE memo")
     con.execute("ALTER TABLE memo_widened RENAME TO memo")
@@ -648,15 +756,28 @@ def connect(repository: Repository) -> sqlite3.Connection:
     table" that the session has no way to act on. Every derived statement is
     ``IF NOT EXISTS`` for the same reason; ``build_index`` drops them first,
     so it still gets a clean regeneration rather than an update in place.
+
+    The vector table is the one exception (#153): it is only created here if
+    the ``sqlite-vec`` extension actually loads on this interpreter, so a
+    caller with no interest in semantic search - extraction, audit, ``gather``
+    and the overlay decoration every ``read(ref)`` runs, all of which reach
+    this database through ``connect`` and none of which touch
+    ``paragraph_vectors`` - still gets a working index on an interpreter that
+    cannot load extensions at all. ``search_semantic`` is the one caller that
+    needs the table and reports its absence itself.
     """
     db_path = repository.root / INDEX_RELATIVE_PATH
     db_path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(db_path)
     try:
-        _load_vec_extension(con)
         _ensure_preserved(con)
         for statement in _DERIVED_DDL:
             con.execute(statement)
+        try:
+            _load_vec_extension(con)
+            con.execute(_VECTOR_TABLE_DDL)
+        except VectorExtensionUnavailable:
+            pass
         _check_paragraphs_shape(con)
         con.commit()
     except BaseException:
@@ -922,6 +1043,13 @@ def search_semantic(
     ``search`` gives for a missing ``.memoria/index.db`` (§7's "the corpus is
     not built is an answer, not a driver exception"), just also covering the
     narrower case where the index exists but the vector table does not.
+
+    An interpreter that cannot load extensions at all (#153) degrades the
+    same way, with the scope line naming that instead of a count: this is
+    the one caller that actually needs ``sqlite-vec``, so its absence is
+    reported here rather than raised - ``search_text`` never depended on it
+    to begin with, and every other caller of ``connect`` degrades silently
+    (it never needed the vector table either).
     """
     db_path = repository.root / INDEX_RELATIVE_PATH
     if not db_path.exists():
@@ -930,7 +1058,10 @@ def search_semantic(
         )
     con = sqlite3.connect(db_path)
     try:
-        _load_vec_extension(con)
+        try:
+            _load_vec_extension(con)
+        except VectorExtensionUnavailable as exc:
+            return SemanticSearchResult(results=(), scope=str(exc))
         _check_paragraphs_shape(con)
         embedded = con.execute("SELECT COUNT(*) FROM paragraph_vectors").fetchone()[0]
         if not embedded:
@@ -1217,6 +1348,100 @@ def _lexical_match(con: sqlite3.Connection, term: str) -> list[str]:
     ]
 
 
+# SQLite's own bound-parameter ceiling (`SQLITE_MAX_VARIABLE_NUMBER`) is 999
+# on a pre-3.32 build and 32766 from 3.32 on; this stays well under either so
+# an `anchor IN (?,?...)` query never reaches it regardless of which SQLite
+# the running Python was built against (#132 - a gathered set that grew with
+# the paragraph count could otherwise hit "too many SQL variables" and, via
+# `overlay_for_anchor`'s broad ``except sqlite3.Error``, silently drop the
+# overlay archive-wide rather than raise).
+_ANCHOR_CHUNK_SIZE = 500
+
+
+def _paragraphs_by_anchor(
+    con: sqlite3.Connection, anchors: set[str]
+) -> list[tuple[str, str]]:
+    """``(anchor, src_id)`` for every anchor in ``anchors``, queried in
+    chunks of ``_ANCHOR_CHUNK_SIZE`` so the ``IN`` list's parameter count
+    cannot scale past SQLite's ceiling with the size of a gathered set
+    (#132). One SQL variable per anchor either way - chunking only bounds
+    how many go into a single statement."""
+    ordered = sorted(anchors)
+    rows: list[tuple[str, str]] = []
+    for start in range(0, len(ordered), _ANCHOR_CHUNK_SIZE):
+        chunk = ordered[start : start + _ANCHOR_CHUNK_SIZE]
+        placeholders = ",".join("?" for _ in chunk)
+        rows.extend(
+            con.execute(
+                f"SELECT anchor, src_id FROM paragraphs WHERE anchor IN ({placeholders})",
+                chunk,
+            )
+        )
+    return rows
+
+
+def _gathered_anchors(
+    con: sqlite3.Connection, entry_id: str, entry: Entry
+) -> set[str]:
+    """The gathered set's anchors alone (part 06 §8.3) - the matching logic
+    ``gather`` runs, without the ``paragraphs`` join that attaches
+    ``src_id``.
+
+    Takes a connection the caller already holds open and an ``Entry`` the
+    caller already loaded, so a caller testing many entries against one
+    anchor (``overlay_for_anchor``) pays for one connection and one entry
+    read each, not one of each per entry (#132 - a `gather()` per entry, on
+    every non-raw read, was linear in the number of entries on disk)."""
+    anchors: set[str] = {
+        row[0]
+        for row in con.execute(
+            "SELECT anchor FROM placements WHERE entry_id = ?", (entry_id,)
+        )
+    }
+    # Entry/relation-shaped match terms are intersected with each other
+    # (co-occurrence), then unioned into `anchors` alongside the word-shaped
+    # terms' lexical matches - see `gather`'s docstring.
+    cooccurrence: set[str] | None = None
+    for term in entry.match_terms:
+        kind = classify_match_term(term)
+        if kind == "word":
+            anchors.update(_lexical_match(con, term))
+        elif kind == "entry":
+            term_anchors = {
+                row[0]
+                for row in con.execute(
+                    "SELECT anchor FROM placements WHERE entry_id = ?", (term,)
+                )
+            }
+            cooccurrence = (
+                term_anchors if cooccurrence is None else cooccurrence & term_anchors
+            )
+        else:  # "relation"
+            left, verb, right = (part.strip() for part in term.split(" -> "))
+            term_anchors = {
+                row[0]
+                for row in con.execute(
+                    "SELECT anchor FROM relations "
+                    "WHERE from_ref = ? AND verb = ? AND to_ref = ?",
+                    (left, verb, right),
+                )
+            }
+            cooccurrence = (
+                term_anchors if cooccurrence is None else cooccurrence & term_anchors
+            )
+    if cooccurrence:
+        anchors.update(cooccurrence)
+
+    # The overlay lives on the entry itself (#21), already loaded above - no
+    # query against this index needed.
+    for act in entry.overlay:
+        if act.action == "exclude":
+            anchors.discard(act.anchor)
+        else:
+            anchors.add(act.anchor)
+    return anchors
+
+
 def gather(repository: Repository, entry_id: str) -> list[GatheredSource]:
     """The gathered set (part 06 §8.3): every paragraph this entry's subject
     matched, plus the author's pin/exclude overlay.
@@ -1266,70 +1491,17 @@ def gather(repository: Repository, entry_id: str) -> list[GatheredSource]:
         return []
     con = connect(repository)
     try:
-        anchors: set[str] = {
-            row[0]
-            for row in con.execute(
-                "SELECT anchor FROM placements WHERE entry_id = ?", (entry_id,)
-            )
-        }
-        # Entry/relation-shaped match terms are intersected with each other
-        # (co-occurrence), then unioned into `anchors` alongside the
-        # word-shaped terms' lexical matches - see the docstring.
-        cooccurrence: set[str] | None = None
-        for term in entry.match_terms:
-            kind = classify_match_term(term)
-            if kind == "word":
-                anchors.update(_lexical_match(con, term))
-            elif kind == "entry":
-                term_anchors = {
-                    row[0]
-                    for row in con.execute(
-                        "SELECT anchor FROM placements WHERE entry_id = ?", (term,)
-                    )
-                }
-                cooccurrence = (
-                    term_anchors
-                    if cooccurrence is None
-                    else cooccurrence & term_anchors
-                )
-            else:  # "relation"
-                left, verb, right = (part.strip() for part in term.split(" -> "))
-                term_anchors = {
-                    row[0]
-                    for row in con.execute(
-                        "SELECT anchor FROM relations "
-                        "WHERE from_ref = ? AND verb = ? AND to_ref = ?",
-                        (left, verb, right),
-                    )
-                }
-                cooccurrence = (
-                    term_anchors
-                    if cooccurrence is None
-                    else cooccurrence & term_anchors
-                )
-        if cooccurrence:
-            anchors.update(cooccurrence)
-
-        # The overlay lives on the entry itself (#21), already loaded above
-        # - no query against this index needed.
-        overlay = {act.anchor: act.action for act in entry.overlay}
-        for anchor, action in overlay.items():
-            if action == "exclude":
-                anchors.discard(anchor)
-            else:
-                anchors.add(anchor)
-
+        anchors = _gathered_anchors(con, entry_id, entry)
         if not anchors:
             return []
-        placeholders = ",".join("?" for _ in anchors)
-        rows = con.execute(
-            f"SELECT anchor, src_id FROM paragraphs WHERE anchor IN ({placeholders})",
-            tuple(anchors),
-        ).fetchall()
+        rows = _paragraphs_by_anchor(con, anchors)
     finally:
         con.close()
 
-    pinned = {anchor for anchor, action in overlay.items() if action == "pin"}
+    # Last action per anchor wins, matching `_gathered_anchors`'s own
+    # discard-then-add application of `entry.overlay` in list order.
+    last_action = {act.anchor: act.action for act in entry.overlay}
+    pinned = {anchor for anchor, action in last_action.items() if action == "pin"}
     return sorted(
         (
             GatheredSource(src_id=src_id, anchor=anchor, pinned=anchor in pinned)
@@ -1366,10 +1538,15 @@ def overlay_for_anchor(repository: Repository, anchor: str) -> ReadOverlay | Non
     intended entry, and the same pin/exclude overlay it applies, just read
     backwards from the anchor rather than forward from one entry. A
     placements-only version under-reports exactly the recall ``gather``
-    itself exists to mitigate (part 06 §8.3's "central risk"), so this calls
-    ``gather`` once per entry rather than duplicating its matching logic - a
-    second, drifting copy of that logic would be worse than the extra
-    queries.
+    itself exists to mitigate (part 06 §8.3's "central risk"), so this reuses
+    ``gather``'s own matching logic (``_gathered_anchors``) once per entry
+    rather than duplicating it - a second, drifting copy would be worse than
+    the extra queries. It reuses one connection across every entry rather
+    than calling ``gather`` itself per entry, though (#132): ``gather``
+    opens its own connection and joins the anchor set back against
+    ``paragraphs`` for a ``src_id`` this caller does not need, and paying
+    for both once per entry on every non-raw read made this the hot path's
+    dominant cost.
 
     ``exclusions`` names every entry that has excluded this anchor, whether
     or not it was otherwise gathered - the curator act itself, not just its
@@ -1394,17 +1571,22 @@ def overlay_for_anchor(repository: Repository, anchor: str) -> ReadOverlay | Non
     if not db_path.exists():
         return ReadOverlay(entry_links=[], exclusions=[], citing_settlements=[])
     try:
-        # `entry_links` still comes out of the index, by way of `gather`, so
-        # an unreadable index means no overlay at all. Probed up front rather
-        # than left to `gather` so the answer does not depend on whether any
-        # entries happen to be on disk to trigger a read.
-        connect(repository).close()
+        # `entry_links` still comes out of the index, by way of
+        # `_gathered_anchors`, so an unreadable index means no overlay at
+        # all. Opened up front, once, rather than left to the per-entry
+        # loop so the answer does not depend on whether any entries happen
+        # to be on disk to trigger a read (and so every entry shares the
+        # one open connection - #132).
         entries = load_all_entries(repository)
-        entry_links = sorted(
-            entry_id
-            for entry_id in entries
-            if any(g.anchor == anchor for g in gather(repository, entry_id))
-        )
+        con = connect(repository)
+        try:
+            entry_links = sorted(
+                entry_id
+                for entry_id, entry in entries.items()
+                if anchor in _gathered_anchors(con, entry_id, entry)
+            )
+        finally:
+            con.close()
     except (IndexSchemaError, sqlite3.Error):
         return None
     # Off the entry files, not the index: #21 moved the overlay onto the
@@ -1542,9 +1724,10 @@ def compute_appearances(repository: Repository) -> AppearancesReport:
     keeps (§42).
     """
     # Imported here, not at module scope, for the same reason `rebuild` does
-    # it: `memoria.extraction` imports this module, so the reverse import
-    # must stay local to avoid a cycle.
-    from memoria.extraction import implicit_name_term
+    # it for `implicit_name_term`: `memoria.extraction` imports this module,
+    # and `memoria.scope` imports `memoria.extraction`, so the reverse
+    # import must stay local to avoid a cycle.
+    from memoria.scope import match_terms_for
 
     entries = load_all_entries(repository)
     con = connect(repository)
@@ -1560,10 +1743,7 @@ def compute_appearances(repository: Repository) -> AppearancesReport:
                 skipped_subjects.add(subject_id)
                 continue
 
-            terms = {implicit_name_term(entry_id)}
-            for term in entry.match_terms:
-                if classify_match_term(term) == "word":
-                    terms.add(term)
+            terms = set(match_terms_for(entry_id, entry))
 
             # Each anchor gets one note, from the first (alphabetically) term
             # that matched it - deterministic, and enough to say how it was

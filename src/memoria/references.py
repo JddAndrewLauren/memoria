@@ -38,6 +38,14 @@ _CHAPTER_ID = r"CHP-\d{4}"
 _SECTION_ID = r"SEC-\d{4}"
 _BARE_CHAPTER_ID = re.compile(rf"^(?P<id>{_CHAPTER_ID})$", re.IGNORECASE)
 _BARE_SECTION_ID = re.compile(rf"^(?P<id>{_SECTION_ID})$", re.IGNORECASE)
+# One paragraph of a section's prose (#42), in the same `¶`/`P` form a
+# source paragraph takes below. Positional and deliberately *not* durable:
+# part 04 §4.1 says nothing canonical points at a paragraph of manuscript
+# prose, so this is a form for a live question - `trace(SEC-0001 ¶7)`, a
+# read of what ¶7 says right now - never one to store in a record.
+_SECTION_PARAGRAPH = re.compile(
+    rf"^(?P<id>{_SECTION_ID})\s*(?:¶|P)\s*(?P<n>\d+)$", re.IGNORECASE
+)
 
 # A human-authored commit (ADR-0008): a per-day sequence, not the `HHMM` form
 # part 04 §4 originally showed - minute resolution collides once writes
@@ -58,6 +66,11 @@ _BARE_DECISION_ID = re.compile(rf"^(?P<id>{_DECISION_ID})$", re.IGNORECASE)
 # was chosen "as a `RES-` ID already uses").
 _RESEARCH_MEMO_ID = r"RES-\d{8}-\d{3}"
 _BARE_RESEARCH_MEMO_ID = re.compile(rf"^(?P<id>{_RESEARCH_MEMO_ID})$", re.IGNORECASE)
+
+# A claim (#33, part 06 §8.9): the flat four-digit `CLM-0041` the plan has
+# always written, one file each under `claims/`.
+_CLAIM_ID = r"CLM-\d{4}"
+_BARE_CLAIM_ID = re.compile(rf"^(?P<id>{_CLAIM_ID})$", re.IGNORECASE)
 
 # A derived session record (#28, part 04 §4): `SES-YYYYMMDD-HHMM`, plus the
 # optional random suffix `memoria.ledger` mints to keep two servers spawned
@@ -113,11 +126,12 @@ _ID_SHAPED = re.compile(r"^(?P<kind>[A-Z]{2,5})-")
 
 # Kinds part 04 §4 defines that nothing implements yet. Used only to tell
 # "not built yet" from "never heard of it" in the message; the mechanism that
-# rejects them is the shape rule above, not this list. `CHG`, `SUB`, `SES`,
-# `RES` and `DEC` are not here: they are implemented, below, and need their
-# own malformed-reference messages rather than the generic "not resolvable
-# in this build yet" one.
-NOT_YET_IMPLEMENTED_KINDS = ("CLM",)
+# rejects them is the shape rule above, not this list. Empty since #33: every
+# kind the scheme names is implemented below, each with its own
+# malformed-reference message rather than the generic "not resolvable in
+# this build yet" one. Kept so the next kind the plan adds has somewhere to
+# sit between being named and being built.
+NOT_YET_IMPLEMENTED_KINDS: tuple[str, ...] = ()
 
 # A subject or entry slug: lowercase, directory-name shaped (part 04 §2's
 # `subjects/people/bob.md`). Uppercase is refused rather than folded, the
@@ -155,9 +169,12 @@ class ChapterReference:
 @dataclass(frozen=True)
 class SectionReference:
     """A section, addressed by its stable ``SEC-`` ID rather than its
-    (renumberable) directory (#35)."""
+    (renumberable) directory (#35), and optionally one paragraph of its
+    prose (#42) - positional, 1-based, and never a durable pointer (see
+    ``_SECTION_PARAGRAPH``)."""
 
     section_id: str
+    paragraph: int | None = None
 
 
 @dataclass(frozen=True)
@@ -197,6 +214,13 @@ class ResearchMemoReference:
 
 
 @dataclass(frozen=True)
+class ClaimReference:
+    """A claim, addressed by its stable ``CLM-`` id (#33)."""
+
+    claim_id: str
+
+
+@dataclass(frozen=True)
 class SubjectReference:
     """A subject, or one entry under it (part 04 §4's ``SUB-x`` / ``SUB-x/y``).
 
@@ -230,6 +254,7 @@ Reference = (
     | SessionReference
     | DecisionReference
     | ResearchMemoReference
+    | ClaimReference
     | UnknownReference
 )
 
@@ -297,6 +322,10 @@ def parse(ref: str) -> Reference:
     if match:
         return SectionReference(match.group("id").upper())
 
+    match = _SECTION_PARAGRAPH.match(ref)
+    if match:
+        return SectionReference(match.group("id").upper(), int(match.group("n")))
+
     match = _BARE_CHANGE_ID.match(ref)
     if match:
         return ChangeReference(match.group("id").upper())
@@ -308,6 +337,10 @@ def parse(ref: str) -> Reference:
     match = _BARE_RESEARCH_MEMO_ID.match(ref)
     if match:
         return ResearchMemoReference(match.group("id").upper())
+
+    match = _BARE_CLAIM_ID.match(ref)
+    if match:
+        return ClaimReference(match.group("id").upper())
 
     match = _SESSION_TURN.match(ref)
     if match:
@@ -382,6 +415,11 @@ def parse(ref: str) -> Reference:
                 f"malformed research memo reference: {ref!r} - expected a "
                 "RES-YYYYMMDD-NNN ID like RES-20261018-003"
             )
+        if kind.upper() == "CLM":
+            raise BadReference(
+                f"malformed claim reference: {ref!r} - expected a four-digit "
+                "ID like CLM-0041"
+            )
         if kind.upper() == "SES":
             raise BadReference(
                 f"malformed session reference: {ref!r} - expected a "
@@ -454,13 +492,17 @@ def format_citation(reference: Reference) -> str:
     if isinstance(reference, ChapterReference):
         return reference.chapter_id
     if isinstance(reference, SectionReference):
-        return reference.section_id
+        if reference.paragraph is None:
+            return reference.section_id
+        return f"{reference.section_id} ¶{reference.paragraph}"
     if isinstance(reference, ChangeReference):
         return reference.change_id
     if isinstance(reference, DecisionReference):
         return reference.decision_id
     if isinstance(reference, ResearchMemoReference):
         return reference.memo_id
+    if isinstance(reference, ClaimReference):
+        return reference.claim_id
     if isinstance(reference, SessionReference):
         if reference.turn is None:
             return reference.session_id

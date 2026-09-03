@@ -27,6 +27,11 @@ function stubFetch(isBuilt: boolean) {
           status: 200,
         });
       }
+      if (url.includes("/api/manuscript")) {
+        return new Response(JSON.stringify({ chapters: [], is_built: isBuilt }), {
+          status: 200,
+        });
+      }
       return new Response(JSON.stringify({}), { status: 200 });
     }),
   );
@@ -63,9 +68,9 @@ describe("the app shell on a fresh checkout", () => {
     // an honest empty state, not an error and not a bare zero.
     expect(await screen.findByText(/no sources yet/i)).toBeInTheDocument();
     expect(await screen.findByText(/no subjects yet/i)).toBeInTheDocument();
-    // MANUSCRIPT is present and labelled, not hidden, even though it is
-    // always empty at M3.
-    expect(screen.getByText(/empty until m5/i)).toBeInTheDocument();
+    // MANUSCRIPT is present and labelled, not hidden - and honest about a
+    // repository with no chapters/ directory (#43).
+    expect(await screen.findByText(/no manuscript yet/i)).toBeInTheDocument();
     expect(screen.getByText("Manuscript")).toBeInTheDocument();
     expect(screen.getByText("Subjects")).toBeInTheDocument();
     expect(screen.getByText("Sources")).toBeInTheDocument();

@@ -29,6 +29,24 @@ export type GatheredSetResponse = components["schemas"]["GatheredSetResponse"];
 export type AppearanceOut = components["schemas"]["AppearanceOut"];
 export type AppearancesResponse = components["schemas"]["AppearancesResponse"];
 export type MatchTermsResponse = components["schemas"]["MatchTermsResponse"];
+export type ManuscriptOutline = components["schemas"]["ManuscriptOutline"];
+export type OutlineChapterOut = components["schemas"]["OutlineChapterOut"];
+export type OutlineSectionOut = components["schemas"]["OutlineSectionOut"];
+export type SectionView = components["schemas"]["SectionView"];
+export type SectionParagraphOut = components["schemas"]["SectionParagraphOut"];
+export type NotCurrentOut = components["schemas"]["NotCurrentOut"];
+export type ScopeEntryOut = components["schemas"]["ScopeEntryOut"];
+export type DecisionOut = components["schemas"]["DecisionOut"];
+export type QuestionOut = components["schemas"]["QuestionOut"];
+export type ReviewOut = components["schemas"]["ReviewOut"];
+export type FindingOut = components["schemas"]["FindingOut"];
+export type DisagreementMemberOut = components["schemas"]["DisagreementMemberOut"];
+export type RewriteResponse = components["schemas"]["RewriteResponse"];
+export type SuppliedContextOut = components["schemas"]["SuppliedContextOut"];
+export type SessionSuppliedContextOut = components["schemas"]["SessionSuppliedContextOut"];
+export type AssembledEntryOut = components["schemas"]["AssembledEntryOut"];
+export type FallbackOut = components["schemas"]["FallbackOut"];
+export type ServedSinceOut = components["schemas"]["ServedSinceOut"];
 
 class ApiError extends Error {
   constructor(
@@ -166,6 +184,46 @@ export function updateMatchTerms(
     token,
     match_terms: matchTerms,
   });
+}
+
+// The manuscript (#43): the outline for the MANUSCRIPT tree, the Section
+// view, and the Review surface - three reads - plus the surface's one
+// write, the author applying a proposed rewrite to one paragraph. Nothing
+// here can run an audit: Review is a read over the verdicts a session
+// already recorded, and there is no request in this client that records
+// one. `token` on the rewrite is what `readReview` served, passed back
+// unread (ADR-0003), the same staleness check `updateMatchTerms` makes.
+export function readManuscript(): Promise<ManuscriptOutline> {
+  return get(`/api/manuscript`);
+}
+
+export function readSection(sectionId: string): Promise<SectionView> {
+  return get(`/api/sections/${encodeURIComponent(sectionId)}`);
+}
+
+export function readReview(sectionId: string): Promise<ReviewOut> {
+  return get(`/api/sections/${encodeURIComponent(sectionId)}/review`);
+}
+
+// The supplied-context surface (#61, ADR-0001): what Memoria supplied to
+// each session that assembled this section - the working context assembly
+// produced, and every read served since - in countable domain units. The
+// page re-reads this while it is open and never while it is closed; there
+// is no count on the opener and no figure in the response to put on one.
+export function readSuppliedContext(sectionId: string): Promise<SuppliedContextOut> {
+  return get(`/api/sections/${encodeURIComponent(sectionId)}/supplied-context`);
+}
+
+export function applyRewrite(
+  sectionId: string,
+  paragraphIndex: number,
+  token: string,
+  text: string,
+): Promise<RewriteResponse> {
+  return put(
+    `/api/sections/${encodeURIComponent(sectionId)}/paragraphs/${paragraphIndex}`,
+    { token, text },
+  );
 }
 
 export function search(query: string): Promise<SearchResponse> {

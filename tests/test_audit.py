@@ -21,6 +21,7 @@ can write a brief.
 
 import ast
 import sqlite3
+import time
 from pathlib import Path
 
 import pytest
@@ -417,6 +418,24 @@ def test_count_by_cause_and_paragraphs_not_current(tmp_path):
     assert staleness.count_by_cause() == {"never_audited": 4}  # 2 paragraphs x 2 kinds
 
 
+def test_the_staleness_map_stays_fast_over_a_full_books_worth_of_paragraphs(tmp_path):
+    """#155's acceptance criterion for #37's own "fast over a full book's
+    worth of paragraphs": 60,000 paragraphs, one entry each, is 120,000
+    judgements - review measured that order of magnitude at about 4.4s by
+    hand. Pinned at 10x that, generous enough to flag a real regression
+    without tripping on machine noise."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    draft = "\n\n".join(f"Bob did thing number {i}." for i in range(60_000))
+    repository = _basic_repo(tmp_path, entry=entry, brief_text="About Bob.", draft=draft)
+
+    start = time.perf_counter()
+    staleness = compute_staleness_map(repository)
+    elapsed = time.perf_counter() - start
+
+    assert staleness.paragraphs_not_current == 60_000
+    assert elapsed < 44.0, f"took {elapsed:.2f}s for 120,000 judgements"
+
+
 # --- AC: the map is derived and rebuilt by `memoria rebuild` -----------------
 
 
@@ -493,6 +512,54 @@ def test_a_memo_table_built_before_37_is_migrated_not_refused(tmp_path):
     finally:
         con.close()
     assert compute_staleness_map(repository).not_current == ()
+
+
+def test_a_memo_column_added_to_MEMO_COLUMNS_widens_an_index_built_before_it(
+    tmp_path, monkeypatch
+):
+    """#152: the copied column list in `_widen_memo_kinds` is read back from
+    `_MEMO_COLUMNS` itself, not hand-maintained - so adding a column there
+    must widen an index built before it, rather than silently keeping the
+    old, narrower table (`CREATE TABLE IF NOT EXISTS` is a no-op on it) or
+    crashing on a copy that names a column the old table lacks. Pre-existing
+    rows must keep every column they had and gain the new one's default."""
+    import memoria.index as index_module
+    from memoria.index import INDEX_RELATIVE_PATH, _MEMO_COLUMNS, connect
+
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    repository = _basic_repo(
+        tmp_path, entry=entry, brief_text="About Bob.", draft="Bob went to town."
+    )
+    build_index(repository, [])
+    paragraph = manuscript_paragraphs(repository)[0]
+    record_engagement(repository, paragraph, "SUB-people/bob", {"engages": True})
+
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    try:
+        before = con.execute(
+            "SELECT key, kind, anchor, value, written_at FROM memo"
+        ).fetchall()
+    finally:
+        con.close()
+    assert before  # the row `record_engagement` just wrote
+
+    monkeypatch.setattr(
+        index_module,
+        "_MEMO_COLUMNS",
+        _MEMO_COLUMNS + ", note TEXT NOT NULL DEFAULT 'unset'",
+    )
+    connect(repository).close()
+
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    try:
+        after = con.execute(
+            "SELECT key, kind, anchor, value, written_at FROM memo"
+        ).fetchall()
+        notes = {row[0] for row in con.execute("SELECT note FROM memo")}
+    finally:
+        con.close()
+    assert after == before
+    assert notes == {"unset"}
 
 
 # --- AC: on demand only, never scheduled or ingest-triggered (#40) -----------

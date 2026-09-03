@@ -228,10 +228,30 @@ def append_search_global(
     )
 
 
+def append_trace(
+    repository: Repository, session_id: str, ref: str, served: list[str]
+) -> None:
+    """Ledger one served ``trace(ref)`` call (#42).
+
+    ``served`` names what the trace put in front of the model: the
+    paragraph's own citation and every authorizing turn it composed the
+    text of - each a reference ``read(ref)`` accepts, so the ledger line
+    and the citation a reader follows are the same string. Commit facts and
+    manifest references are identifiers, not text served, and are not
+    listed.
+    """
+    _append(
+        repository,
+        session_id,
+        {"tool": "trace", "ref": ref, "served": served},
+    )
+
+
 def append_assembly(
     repository: Repository,
     session_id: str,
     *,
+    section_id: str,
     entries: list[dict],
     fallbacks: list[dict],
     unconfirmed: bool,
@@ -241,18 +261,24 @@ def append_assembly(
     resolution, in the countable domain units §33.1 asks for and no others -
     no token figure anywhere on this line (ADR-0001, part 14 §40).
 
-    ``entries`` names each resolved entry, what matched it, and its gathered
-    set's anchors - the sources behind it, carried as identifiers rather than
-    the paragraph text they name (that stays Tier 4, on demand, ledgered by
-    its own ``read`` call if one follows). ``fallbacks`` names every
-    unpromoted candidate the declared scope named instead - part 06 §8.4's
-    "assembly never dead-ends".
+    ``section_id`` names the brief whose declared scope this resolved - the
+    one brief assembly loaded. It is what lets the supplied-context surface
+    (#61) find, from a section, the sessions that assembled it: nothing is
+    written back onto the section (CONTEXT.md's "Declared scope"), so the
+    ledger line is the only place the link exists. ``entries`` names each
+    resolved entry, what matched it, and its gathered set's anchors - the
+    sources behind it, carried as identifiers rather than the paragraph
+    text they name (that stays Tier 4, on demand, ledgered by its own
+    ``read`` call if one follows). ``fallbacks`` names every unpromoted
+    candidate the declared scope named instead - part 06 §8.4's "assembly
+    never dead-ends".
     """
     _append(
         repository,
         session_id,
         {
             "tool": "assemble",
+            "section_id": section_id,
             "entries": entries,
             "fallbacks": fallbacks,
             "unconfirmed": unconfirmed,

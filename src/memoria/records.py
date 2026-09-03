@@ -34,9 +34,9 @@ from memoria import (
     changes,
     context_manifest,
     manuscript,
-    record_extractor,
     references,
     sessions,
+    settlements,
     subjects,
 )
 from memoria.repository import Repository, require_evidence_root
@@ -860,8 +860,8 @@ def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
     index still returns the paragraph, undecorated, rather than failing the
     read. It resolves no reference kind but ``SRC-``, ``SUB-``, ``CHP-``,
     ``SEC-``, ``CHG-``, ``SES-`` (whole or one ``#T`` turn, #28), ``DEC-``
-    and ``RES-`` (#30), and repository paths - the rest exist as a named
-    error, not as silence.
+    and ``RES-`` (#30), ``CLM-`` (#33), and repository paths - the rest
+    exist as a named error, not as silence.
     Ledgering the served read is the caller's job (``memoria.ledger``, #13):
     this function has no session to ledger against.
 
@@ -924,6 +924,21 @@ def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
         )
 
     if isinstance(reference, references.SectionReference):
+        if reference.paragraph is not None:
+            # One paragraph of the section's prose (#42), verbatim - the
+            # same positional split `trace()` and the audit read it by.
+            # Local import: `authorship` imports this module's neighbours
+            # (`manuscript`, `write`), and a top-level import here would
+            # make the read side depend on the write side at import time.
+            from memoria import authorship
+
+            try:
+                text = authorship.read_paragraph(
+                    repository, reference.section_id, reference.paragraph
+                )
+            except (authorship.AuthorshipError, manuscript.ManuscriptError) as exc:
+                raise ReadError(str(exc)) from exc
+            return Read(ref=ref, citation=citation, text=text)
         try:
             entry = manuscript.resolve_section(repository, reference.section_id)
         except manuscript.ManuscriptError as exc:
@@ -958,6 +973,12 @@ def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
         return Read(ref=ref, citation=citation, text=text, context_manifest=manifest)
 
     if isinstance(reference, references.DecisionReference):
+        # Local import: `memoria.record_extractor` reaches this module (via
+        # `human_touched` -> `index` -> `records`), so the reverse import
+        # must stay local to avoid a cycle - the same shape as the
+        # `memoria.index` import above.
+        from memoria import record_extractor
+
         try:
             text = record_extractor.read_decision(repository, reference.decision_id)
         except record_extractor.RecordExtractorError as exc:
@@ -965,9 +986,20 @@ def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
         return Read(ref=ref, citation=citation, text=text)
 
     if isinstance(reference, references.ResearchMemoReference):
+        from memoria import record_extractor
+
         try:
             text = record_extractor.read_research_memo(repository, reference.memo_id)
         except record_extractor.RecordExtractorError as exc:
+            raise ReadError(str(exc)) from exc
+        return Read(ref=ref, citation=citation, text=text)
+
+    if isinstance(reference, references.ClaimReference):
+        # The claim file, verbatim (#33) - the same whole-file contract a
+        # research memo has.
+        try:
+            text = settlements.read_claim(repository, reference.claim_id)
+        except settlements.SettlementError as exc:
             raise ReadError(str(exc)) from exc
         return Read(ref=ref, citation=citation, text=text)
 
