@@ -18,6 +18,7 @@ from memoria.index import (
     SNIPPET_MATCH_START,
     Appearance,
     GatheredSource,
+    IndexBuildError,
     SearchFilters,
     appeared_entry_ids,
     appearances_supported,
@@ -682,6 +683,47 @@ def test_build_index_populates_one_vector_per_real_paragraph(tmp_path):
     finally:
         con.close()
     assert anchors == {"src-000001-p1", "src-000001-p2"}
+
+
+def test_build_index_raises_when_embedder_returns_fewer_vectors_than_paragraphs(
+    tmp_path,
+):
+    """#154: an embedder that drops a paragraph must fail the build loudly,
+    naming both counts, rather than silently truncating the semantic index -
+    ``zip`` would otherwise stop at the shorter sequence and leave later
+    paragraphs unsearchable with no error at all. Checked against a rebuild
+    over an already-populated vector table, so "no partially populated
+    vector table is left behind" has a prior, known-good state to fail out
+    of rather than an empty file."""
+    records = [
+        _record(
+            "SRC-000001",
+            ["A blue heron flew over the pond.", "Nothing about birds here."],
+        )
+    ]
+    repository = Repository(root=tmp_path)
+    good_embed_fn = _fake_embed_fn(
+        {
+            "A blue heron flew over the pond.": _basis_vector(0),
+            "Nothing about birds here.": _basis_vector(1),
+        }
+    )
+    build_index(repository, records, embed_fn=good_embed_fn)
+
+    def _short_embed_fn(texts):
+        return [_basis_vector(0)]  # one vector for two paragraphs
+
+    with pytest.raises(IndexBuildError, match="1 vector.*2 paragraph"):
+        build_index(repository, records, embed_fn=_short_embed_fn)
+
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.enable_load_extension(True)
+    sqlite_vec.load(con)
+    con.enable_load_extension(False)
+    try:
+        assert con.execute("SELECT COUNT(*) FROM paragraph_vectors").fetchone()[0] == 0
+    finally:
+        con.close()
 
 
 def test_search_semantic_finds_the_nearest_paragraph_by_meaning(tmp_path):
