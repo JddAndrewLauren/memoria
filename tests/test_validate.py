@@ -739,3 +739,194 @@ def test_validate_fails_provenance_harvested_from_the_manuscript(tmp_path, refer
 
     assert len(errors) == 1
     assert "settlement" in errors[0]
+
+
+# --- AI manuscript writes carry an identifiable authorization (#42, §23) ---
+
+
+def _git(cwd, *args):
+    import subprocess
+
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def _manuscript_repo(tmp_path):
+    """An evidence root plus a git repository holding one section with
+    prose, committed as the author's checkpoint - the clean starting point
+    every scenario below writes into."""
+    from memoria import manuscript
+    from memoria.repository import Repository
+    from memoria.write import checkpoint
+
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    repo_root.mkdir(parents=True, exist_ok=True)
+    _git(repo_root, "init", "-q")
+    _git(repo_root, "config", "user.name", "Local Author")
+    _git(repo_root, "config", "user.email", "local-author@memoria.test")
+    repository = Repository(root=repo_root)
+    chapter = manuscript.create_chapter(repository, "Chapter one.")
+    section = manuscript.create_section(repository, chapter.number, "Section one.")
+    (section.dir / "draft.md").write_text("Bob went to town.\n\nBob came home.\n", encoding="utf-8")
+    _git(repo_root, "add", "-A")
+    checkpoint(repository)
+    return evidence_root, repository, section
+
+
+def _machine_write(repository, relative_path, content, trailers=()):
+    """A machine actor writing a manuscript file through the write path
+    directly - what an AI write that skipped `memoria.authorship` looks
+    like in git."""
+    from memoria import write
+
+    served = write.serve(repository, relative_path)
+    result = write.write(
+        repository, relative_path, served.token, content,
+        write.Actor(name="Rogue", email="rogue@memoria.local", human=False),
+        trailers=trailers,
+    )
+    assert isinstance(result, write.Written)
+
+
+def test_validate_passes_a_human_checkpoint_of_manuscript_files(tmp_path):
+    evidence_root, repository, _ = _manuscript_repo(tmp_path)
+
+    assert validate(evidence_root, repository.root) == []
+
+
+def test_validate_passes_an_ai_manuscript_write_made_under_authorization(tmp_path):
+    from memoria.authorship import Authorization, ParagraphTarget, apply_rewrite, propose_rewrite
+
+    evidence_root, repository, section = _manuscript_repo(tmp_path)
+    proposal = propose_rewrite(repository, section.brief.id, 2, "Bob came home at dusk.")
+    apply_rewrite(
+        repository, proposal,
+        Authorization("SES-20260912-1432", 8, frozenset({ParagraphTarget(section.brief.id, 2)})),
+    )
+
+    assert validate(evidence_root, repository.root) == []
+
+
+def test_validate_fails_an_ai_manuscript_write_without_an_authorization(tmp_path):
+    evidence_root, repository, _ = _manuscript_repo(tmp_path)
+    _machine_write(repository, "chapters/01/sections/01/draft.md", "Rewritten by a machine.\n")
+
+    errors = validate(evidence_root, repository.root)
+
+    assert len(errors) == 1
+    assert errors[0].startswith("unauthorized AI manuscript write")
+    assert "chapters/01/sections/01/draft.md" in errors[0]
+    assert "authorized-by" in errors[0]
+
+
+def test_validate_fails_an_unauthorized_write_to_a_brief_specifically(tmp_path):
+    evidence_root, repository, section = _manuscript_repo(tmp_path)
+    _machine_write(
+        repository, "chapters/01/sections/01/section.md",
+        "---\nid: SEC-0001\nunconfirmed: false\n---\n\nA brief a machine rewrote.\n",
+    )
+
+    errors = validate(evidence_root, repository.root)
+
+    assert len(errors) == 1
+    assert errors[0].startswith("unauthorized AI write to a brief")
+    assert "chapters/01/sections/01/section.md" in errors[0]
+
+
+def test_validate_fails_an_unauthorized_write_to_the_book_brief(tmp_path):
+    from memoria import manuscript
+    from memoria.write import checkpoint
+
+    evidence_root, repository, _ = _manuscript_repo(tmp_path)
+    manuscript.create_book(repository, "The book.")
+    _git(repository.root, "add", "-A")
+    checkpoint(repository)
+    _machine_write(repository, "book.md", "---\nid: BOOK\nunconfirmed: false\n---\n\nRewritten.\n")
+
+    errors = validate(evidence_root, repository.root)
+
+    assert len(errors) == 1
+    assert errors[0].startswith("unauthorized AI write to a brief")
+    assert "book.md" in errors[0]
+
+
+def test_validate_passes_an_authorized_brief_write(tmp_path):
+    from memoria.authorship import Authorization, BriefTarget, write_brief_from_conversation
+
+    evidence_root, repository, section = _manuscript_repo(tmp_path)
+    write_brief_from_conversation(
+        repository, section.brief.id, "What this section is for.",
+        Authorization("SES-20260912-1432", 12, frozenset({BriefTarget(section.brief.id)})),
+    )
+
+    assert validate(evidence_root, repository.root) == []
+
+
+def test_validate_fails_an_authorization_that_is_not_a_session_turn(tmp_path):
+    evidence_root, repository, _ = _manuscript_repo(tmp_path)
+    _machine_write(
+        repository, "chapters/01/sections/01/draft.md", "Rewritten.\n",
+        trailers=(("authorized-by", "the author said so"),),
+    )
+
+    errors = validate(evidence_root, repository.root)
+
+    assert len(errors) == 1
+    assert "not a SES-...#T citation" in errors[0]
+    assert "the author said so" in errors[0]
+
+
+def test_validate_fails_an_authorization_naming_a_turn_the_transcript_lacks(tmp_path):
+    evidence_root, repository, _ = _manuscript_repo(tmp_path)
+    _write_transcript(repository.root, "SES-20260912-1432", [(1, "Author", "Hello.")])
+    _machine_write(
+        repository, "chapters/01/sections/01/draft.md", "Rewritten.\n",
+        trailers=(("authorized-by", "SES-20260912-1432#T017"),),
+    )
+
+    errors = validate(evidence_root, repository.root)
+
+    assert len(errors) == 1
+    assert "SES-20260912-1432#T017" in errors[0]
+    assert "does not carry" in errors[0]
+
+
+def test_validate_accepts_an_authorization_whose_session_is_not_derived_yet(tmp_path):
+    """The session that made the write may still be running; its transcript
+    lands with derive-session afterwards. Until then the citation's form is
+    what is checkable, and the transcript check takes over once it exists
+    (the test above)."""
+    evidence_root, repository, _ = _manuscript_repo(tmp_path)
+    _machine_write(
+        repository, "chapters/01/sections/01/draft.md", "Rewritten.\n",
+        trailers=(("authorized-by", "SES-20260912-1432#T017"),),
+    )
+
+    assert validate(evidence_root, repository.root) == []
+
+
+def test_validate_passes_a_machine_write_outside_the_manuscript(tmp_path):
+    """The check is about manuscript-class files. A Curator write under
+    `subjects/` carries no authorization and needs none."""
+    from memoria import write
+
+    evidence_root, repository, _ = _manuscript_repo(tmp_path)
+    _write_subject_prompt(
+        repository.root, "SUB-people",
+        subject_to_markdown(_make_subject()),
+    )
+    _git(repository.root, "add", "-A")
+    _git(repository.root, "commit", "-q", "-m", "seed")
+    served = write.serve(repository, "subjects/people/_subject.md")
+    write.write(
+        repository, "subjects/people/_subject.md", served.token, served.text + "\n",
+        write.Actor(name="Memoria", email="curator@memoria.local", human=False),
+    )
+
+    assert validate(evidence_root, repository.root) == []
+
+
+def test_validate_passes_a_repository_with_no_git_history(tmp_path):
+    evidence_root, repo_root = _bare_evidence_and_repo(tmp_path)
+    repo_root.mkdir(parents=True, exist_ok=True)
+
+    assert validate(evidence_root, repo_root) == []

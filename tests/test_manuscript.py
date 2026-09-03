@@ -284,6 +284,11 @@ def test_resolving_an_unknown_id_is_a_named_error(tmp_path):
 # `unconfirmed=False` - a deliberate act that creates a chapter and section,
 # same as any other creator here, not a finding resolving itself onto one
 # that already exists.
+#
+# `authorship` (#42) is deliberately *not* here: the brief's AI write path
+# resolves the file through `ChapterEntry.path` / `SectionEntry.path` and
+# writes it through `memoria.write`, so it neither names a brief's filename
+# nor calls the functions below, and passes both guards unexempted.
 _BRIEF_WRITERS = ("manuscript.py", "legacy_import.py")
 _WRITING_FUNCTIONS = {
     "write_brief",

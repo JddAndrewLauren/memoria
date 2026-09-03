@@ -6,10 +6,15 @@ normalized source records for dangling SRC- ID references and stale
 
 import hashlib
 import re
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
+from memoria.audit import DRAFT_FILENAME
+from memoria.authorship import AUTHORIZED_BY_TRAILER
+from memoria.changes import CHANGE_ID_TRAILER
 from memoria.index import list_overlay
+from memoria.manuscript import BOOK_RELATIVE_PATH, BRIEF_FILENAMES, CHAPTERS_RELATIVE_PATH
 from memoria.manifest import (
     DEFAULT_MANIFEST_RELATIVE_PATH,
     check_ledger,
@@ -49,6 +54,20 @@ _SESSION_TURN_CITATION_RE = re.compile(
 # this exact form as an illustration, and flagging that as an unresolved
 # citation would be a false positive doing the opposite of this check's job.
 _SESSION_CITATION_LOCATIONS = ("decisions.md", "questions.md", "research", SUBJECTS_RELATIVE_PATH)
+
+# The two trailers §41 tells manuscript commits apart by (ADR-0008,
+# memoria.authorship): a human-authored commit carries `change-id:`, an AI
+# manuscript commit `authorized-by:` naming its authorizing turn.
+_CHANGE_ID_TRAILER_RE = re.compile(rf"^{CHANGE_ID_TRAILER}: \S+$", re.MULTILINE)
+_AUTHORIZED_BY_TRAILER_RE = re.compile(
+    rf"^{AUTHORIZED_BY_TRAILER}: (?P<citation>.*)$", re.MULTILINE
+)
+_SESSION_TURN_CITATION_EXACT_RE = re.compile(
+    rf"^{_SESSION_TURN_CITATION_RE.pattern}$", re.IGNORECASE
+)
+# The two ways `git log` fails that mean "no history here" rather than "a
+# broken repository" - the same pair `memoria.changes` accepts.
+_NO_HISTORY = ("not a git repository", "does not have any commits yet")
 
 # The `convert` extra's own array in pyproject.toml (#79, part 05 §5.4), and
 # an exact `name[extras]==version` pin within it. Read with a small regex
@@ -133,6 +152,7 @@ def validate(
     errors.extend(_validate_converter_pins(repo_root, manifest_path))
     errors.extend(_validate_gather_overlay(repo_root))
     errors.extend(_validate_session_turns(repo_root))
+    errors.extend(_validate_manuscript_authorization(repo_root))
 
     return errors
 
@@ -410,3 +430,139 @@ def _validate_entry_statements(repo_root: Path) -> list[str]:
                     if not isinstance(exc.__cause__, SessionError):
                         errors.append(f"{where}: {label!r} - {exc}")
     return errors
+
+
+def _validate_manuscript_authorization(repo_root: Path) -> list[str]:
+    """Every AI manuscript write carries an identifiable authorization (#42,
+    part 15 §23, Invariant 9) - **including a write to a brief**, which is
+    manuscript-class and has an AI write path of its own.
+
+    Git history is the record (§41): a commit touching a manuscript file -
+    a section's ``draft.md`` or one of the three briefs - is human-authored
+    if it carries a ``change-id:`` trailer (ADR-0008: every human-authored
+    commit does, checkpoints and surface writes alike) and is otherwise an
+    AI manuscript write, which must carry ``authorized-by:`` naming a
+    ``SES-...#T`` turn. A commit with neither is exactly the write this
+    check exists to fail, and the message names both readings, because git
+    cannot tell an AI write that skipped ``memoria.authorship`` from a hand
+    commit that skipped the checkpoint - and by ADR-0008 the second is not
+    a human-authored commit either.
+
+    The turn must resolve once the session is derived: a citation naming a
+    turn its transcript does not carry is not identifiable. Before
+    derivation - the session that wrote it may still be running - the
+    citation's form is what can be checked, and the transcript check takes
+    over when ``derive-session`` lands the record.
+    """
+    repository = Repository(root=repo_root)
+    try:
+        commits = _manuscript_commits(repo_root)
+    except _GitLogFailed as exc:
+        return [str(exc)]
+    errors = []
+    for sha, short_sha, body in commits:
+        if _CHANGE_ID_TRAILER_RE.search(body):
+            continue
+        for path in _files_for(repo_root, sha):
+            kind = _manuscript_file_kind(path)
+            if kind is None:
+                continue
+            what = "AI write to a brief" if kind == "brief" else "AI manuscript write"
+            trailer = _AUTHORIZED_BY_TRAILER_RE.search(body)
+            if trailer is None:
+                errors.append(
+                    f"unauthorized {what}: commit {short_sha} touches {path} with "
+                    f"no {AUTHORIZED_BY_TRAILER} trailer - an AI manuscript write "
+                    f"names the SES-...#T turn that authorized it, and a human "
+                    f"change carries a {CHANGE_ID_TRAILER}"
+                )
+                continue
+            citation = trailer.group("citation").strip()
+            if not _SESSION_TURN_CITATION_EXACT_RE.match(citation):
+                errors.append(
+                    f"unauthorized {what}: commit {short_sha} touches {path} with "
+                    f"an {AUTHORIZED_BY_TRAILER} trailer that is not a SES-...#T "
+                    f"citation: {citation!r}"
+                )
+                continue
+            session_id = citation.split("#", 1)[0]
+            if not _transcript_exists(repository, session_id):
+                continue
+            try:
+                read_ref(repository, citation)
+            except ReadError as exc:
+                errors.append(
+                    f"unauthorized {what}: commit {short_sha} touches {path}, "
+                    f"authorized by {citation}, a turn that session's transcript "
+                    f"does not carry ({exc})"
+                )
+    return errors
+
+
+def _manuscript_file_kind(path: str) -> str | None:
+    """``"brief"``, ``"prose"``, or ``None`` for a file that is not
+    manuscript-class. Only what a chapter or section directory holds under
+    the brief filenames or ``draft.md`` counts - ``manuscript`` owns those
+    names and this only asks it."""
+    if path == BOOK_RELATIVE_PATH:
+        return "brief"
+    if not path.startswith(f"{CHAPTERS_RELATIVE_PATH}/"):
+        return None
+    name = path.rsplit("/", 1)[-1]
+    if name in BRIEF_FILENAMES:
+        return "brief"
+    if name == DRAFT_FILENAME:
+        return "prose"
+    return None
+
+
+class _GitLogFailed(Exception):
+    """``git log`` failed for a reason other than "no history here"."""
+
+
+def _manuscript_commits(repo_root: Path) -> list[tuple[str, str, str]]:
+    """``(sha, short_sha, message)`` for every non-merge commit reachable
+    from ``HEAD`` that touches a manuscript path. Empty - not an error - for
+    a directory that is not a git repository or has no commits yet; any
+    other git failure is ``_GitLogFailed``, reported as one error rather
+    than passed off as a clean history."""
+    result = subprocess.run(
+        [
+            "git", "log", "--no-merges", "--format=%H%x1f%h%x1f%B%x1e",
+            "--", BOOK_RELATIVE_PATH, CHAPTERS_RELATIVE_PATH,
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        reason = " ".join(
+            part.strip() for part in (result.stdout, result.stderr) if part.strip()
+        )
+        if any(phrase in reason for phrase in _NO_HISTORY):
+            return []
+        raise _GitLogFailed(f"git log failed: {reason}")
+    commits = []
+    for block in result.stdout.split("\x1e"):
+        block = block.strip("\n")
+        if not block:
+            continue
+        sha, short_sha, body = block.split("\x1f", 2)
+        commits.append((sha, short_sha, body))
+    return commits
+
+
+def _files_for(repo_root: Path, sha: str) -> list[str]:
+    result = subprocess.run(
+        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", sha],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    return [line for line in result.stdout.splitlines() if line]
+
+
+def _transcript_exists(repository: Repository, session_id: str) -> bool:
+    from memoria.sessions import transcript_path
+
+    return transcript_path(repository, session_id).is_file()

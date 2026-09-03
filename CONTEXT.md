@@ -262,6 +262,19 @@ message inside an email export. Numbered once by the manifest ledger on first si
 never renumbered.
 _Avoid_: Source file, document, input, item
 
+**Authorization**:
+What an AI manuscript write must have before it applies: the session turn in
+which the author gave it, and exactly what it covers — one paragraph, a
+section's whole draft, or one brief. Memoria may propose a rewrite on its own
+and refuses to apply it without one; a write outside what it covers is refused,
+and the covered paragraph is spliced in with every other byte of the file left
+as it was. A brief's authorization covers that brief alone, one level below
+prose — never prose beside it, never two briefs, never a batch. Recorded on the
+commit as `authorized-by: SES-…#T008` and `authorized-scope:`, one commit per
+write; `memoria validate` fails a manuscript commit carrying neither that nor a
+[[change-id]], and `trace()` walks the trailer back to the turn.
+_Avoid_: Approval, permission, consent, sign-off, apply flag
+
 ### Writing to the repository
 
 **Write path**:

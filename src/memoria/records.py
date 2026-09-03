@@ -924,6 +924,21 @@ def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
         )
 
     if isinstance(reference, references.SectionReference):
+        if reference.paragraph is not None:
+            # One paragraph of the section's prose (#42), verbatim - the
+            # same positional split `trace()` and the audit read it by.
+            # Local import: `authorship` imports this module's neighbours
+            # (`manuscript`, `write`), and a top-level import here would
+            # make the read side depend on the write side at import time.
+            from memoria import authorship
+
+            try:
+                text = authorship.read_paragraph(
+                    repository, reference.section_id, reference.paragraph
+                )
+            except (authorship.AuthorshipError, manuscript.ManuscriptError) as exc:
+                raise ReadError(str(exc)) from exc
+            return Read(ref=ref, citation=citation, text=text)
         try:
             entry = manuscript.resolve_section(repository, reference.section_id)
         except manuscript.ManuscriptError as exc:
