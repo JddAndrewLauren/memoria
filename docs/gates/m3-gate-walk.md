@@ -112,9 +112,20 @@ exactly is asserted.
 4. **Click a citation** in the gathered set. The slide-over comes in from the
    right, over a scrim that starts at the sidebar's edge.
 5. **Land on the exact paragraph.** The panel shows the cited paragraph, its
-   record's badge row, and its backlinks.
+   record's badge row, and its backlinks. The force of this step is the
+   *text*: what the panel drew and what `GET /api/read` served for the anchor
+   are compared character for character. Its viewport-geometry assertion is
+   the weaker half and worth reading as such — the panel renders the one cited
+   paragraph at the top of its own scroll container, so on this corpus
+   "inside the viewport" is close to true by construction. The surface where
+   landing is a real question is the full source viewer's anchor scroll
+   (`/sources/:id#anchor`, #25), which this walk does not drive.
 6. **Confirm you have not lost your place.** Close the panel: the entry is
-   exactly where it was, at the same scroll position, with nothing reloaded.
+   exactly where it was, with nothing reloaded — at the scroll position it
+   had **before the citation was clicked**, which is the reading the step
+   compares against. Sampling it while the panel is open would miss a
+   scroll-lock that moved the page the moment the panel appeared
+   (`gate/README.md`, third trap).
 7. **Open the original.** `Open original ↗` in the panel opens the raw route in
    its own tab: the raw bytes of the unnormalized file, with `original_locator`
    above them. Compare a sentence against what the slide-over showed. That
@@ -129,7 +140,7 @@ than a clean report._
 
 Walked by `scripts/gate-m3.sh` in Chromium at 1280×720, over a scratch
 repository built from `gate/corpus/` (3 records normalized,
-seeded at `b8268dc`). Memoria at `95cc44d`.
+seeded at `2ccff1e`). Memoria at `138f978`.
 
 ### What each step did
 
@@ -138,7 +149,7 @@ seeded at `b8268dc`). Memoria at `95cc44d`.
 - **Step 3 — the staleness check** — an out-of-band edit made the held token stale; the save was refused, the file on disk is byte-for-byte what the other editor left, and the rejected term is still in the editor
 - **Step 4 — the citation opens the panel** — scrolled to y=432px, clicked `src-000006-p1`; the slide-over opened over a scrim starting at the sidebar's edge, and the URL did not change
 - **Step 5 — the exact paragraph** — the panel drew the same text `/api/read?ref=src-000006-p1` served, fully inside the viewport at y=131px, with the record's badge row and a `Cited by` backlink to people/skilling
-- **Step 6 — the reader's place** — panel closed; `window.scrollY` is still 432px, the URL is unchanged, and the pre-click sentinel on `window` survived, so the page underneath was never remounted
+- **Step 6 — the reader's place** — panel opened and closed without moving the page; `window.scrollY` is still the 432px step 4 clicked from, the URL is unchanged, and the pre-click sentinel on `window` survived, so the page underneath was never remounted
 - **Step 7 — the original** — “Open original ↗” opened `/sources/SRC-000006/raw` in its own tab with the entry still open behind it; the served paragraph (“The deck went up to Skilling unchanged, so whatever we send Friday has to…”) appears verbatim in the raw `.eml`, whose headers and quoted reply the record does not carry
 
 ### The durable write, in git
@@ -148,7 +159,9 @@ seeded at `b8268dc`). Memoria at `95cc44d`.
 
 ### Verdict
 
-**Passed**, 2026-09-03. All seven steps behaved as described above.
+**Passed**, 2026-09-03, on a second agent's walk of the gate — the run that
+found and fixed step 6's late baseline (`gate/README.md`, third trap). All
+seven steps behaved as described above.
 
 ## Cleanup
 

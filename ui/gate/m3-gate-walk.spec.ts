@@ -77,6 +77,20 @@ test.describe.configure({ mode: "serial" });
 test.describe("M3 gate walk", () => {
   let page: Page;
 
+  /**
+   * Where the reader was standing when they clicked the citation, recorded
+   * by step 4 and checked by step 6.
+   *
+   * It has to be read *before* the click, not after the panel opens. A
+   * scroll-lock on the page underneath - `position: fixed` on `body` is the
+   * usual one - moves the page to the top the moment the panel appears, and
+   * a baseline sampled after that is already the wrong number: the step then
+   * compares 0 to 0 and passes over a reader who lost their place
+   * completely. That is the vacuous assertion `gate/README.md` warns about,
+   * one level up from where step 4's `scrolledTo > 0` guard catches it.
+   */
+  let scrollAtCitation = -1;
+
   test.beforeAll(async ({ browser }) => {
     page = await browser.newPage();
   });
@@ -187,6 +201,7 @@ test.describe("M3 gate walk", () => {
     // The guard against a vacuous step 6: on a page that never scrolled,
     // "the scroll position is unchanged" is 0 === 0 and proves nothing.
     expect(scrolledTo, "the entry page must actually scroll for step 6 to mean anything").toBeGreaterThan(0);
+    scrollAtCitation = scrolledTo;
 
     await markPage(page);
     const urlBefore = page.url();
@@ -244,13 +259,22 @@ test.describe("M3 gate walk", () => {
   });
 
   test("6. closing the panel costs the reader nothing", async () => {
-    const scrollBefore = await page.evaluate(() => window.scrollY);
+    // Measured against step 4's *pre-click* offset, not against a reading
+    // taken now: opening the panel is itself a place the scroll position can
+    // be lost, and a baseline sampled after the loss cannot see it.
+    const scrollWhileOpen = await page.evaluate(() => window.scrollY);
+    expect(scrollWhileOpen, "the page underneath must not move when the panel opens").toBe(
+      scrollAtCitation,
+    );
     const urlBefore = page.url();
 
     await page.getByRole("dialog", { name: "Citation" }).getByRole("button", { name: "Close" }).click();
     await expect(page.getByRole("dialog", { name: "Citation" })).toBeHidden();
 
-    expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
+    expect(
+      await page.evaluate(() => window.scrollY),
+      "the reader must be left where they clicked from",
+    ).toBe(scrollAtCitation);
     expect(page.url()).toBe(urlBefore);
     // Nothing reloaded: a remount would have restored the same URL and the
     // same scroll position and lost this.
@@ -259,7 +283,8 @@ test.describe("M3 gate walk", () => {
 
     record(
       "Step 6 — the reader's place",
-      `panel closed; \`window.scrollY\` is still ${scrollBefore}px, the URL is ` +
+      `panel opened and closed without moving the page; \`window.scrollY\` is ` +
+        `still the ${scrollAtCitation}px step 4 clicked from, the URL is ` +
         "unchanged, and the pre-click sentinel on `window` survived, so the " +
         "page underneath was never remounted",
     );

@@ -51,8 +51,8 @@ asserts real `window.scrollY`, real viewport geometry, and a sentinel on
 `window` that a remount would have destroyed. Anything a jsdom test could
 have asserted belongs in the vitest suite instead, where it runs every time.
 
-Two traps a walk has to be built against, both of which produce a green tick
-over a broken app:
+Three traps a walk has to be built against, each of which produces a green
+tick over a broken app:
 
 - *The vacuous assertion.* "The scroll position did not change" is `0 === 0`
   on a page that never scrolled. The M3 spec asserts the page scrolled to a
@@ -61,6 +61,19 @@ over a broken app:
   nothing. The M3 spec was checked by injecting the regression it exists to
   catch — a citation chip that navigates instead of opening the slide-over —
   and confirming step 4 goes red before the fix was reverted.
+- *The baseline sampled too late.* The subtler cousin of the first, found by
+  a second agent walking the gate. Step 6 read the scroll offset it compared
+  against **after** the panel had already opened — which is after the only
+  moment the offset can be lost. Injecting a `position: fixed` scroll-lock on
+  `body` sent the reader from y=432 to the top of the page, and step 6 still
+  passed, comparing 0 to 0 and printing “still 0px” into the artifact. Step 6
+  now measures against the offset step 4 read *before the click*, and was
+  confirmed red against that injection.
+
+  The general form, for M4 and M5: **take the reading before the interaction
+  under test, not after it.** An “X is unchanged” step whose baseline is
+  sampled mid-interaction asserts only that the damage was stable, never that
+  it never happened.
 
 **4. An artifact, written as the walk goes.** Each step appends what it
 *observed* — the actual scroll offset, the actual sentence compared — to the
