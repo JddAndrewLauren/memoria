@@ -41,6 +41,7 @@ from memoria.manuscript import ManuscriptError
 from memoria.repository import NoEvidenceRoot, Repository
 from memoria.review import ReviewError, apply_rewrite, review_section
 from memoria.section import compose_section, outline as manuscript_outline
+from memoria.supplied_context import supplied_context as compose_supplied_context
 from memoria.subjects import (
     Entry,
     OverlayAct,
@@ -57,12 +58,14 @@ from memoria.web.dependencies import get_repository
 from memoria.web.schemas import (
     AppearanceOut,
     AppearancesResponse,
+    AssembledEntryOut,
     CitationOut,
     DecisionOut,
     DisagreementMemberOut,
     EntryDetail,
     EntryListResponse,
     EntrySummary,
+    FallbackOut,
     FindingOut,
     GatheredSetResponse,
     GatheredSourceOut,
@@ -87,12 +90,15 @@ from memoria.web.schemas import (
     SearchResultOut,
     SectionParagraphOut,
     SectionView,
+    ServedSinceOut,
+    SessionSuppliedContextOut,
     SourceDetail,
     SourceListResponse,
     SourceSummary,
     StatementOut,
     SubjectListResponse,
     SubjectSummary,
+    SuppliedContextOut,
 )
 from memoria.write import Rejected, WriteError, repository_actor
 
@@ -728,6 +734,54 @@ def read_review(
         verdicts_current=review.verdicts_current,
         verdicts_not_current=review.verdicts_not_current,
         token=review.token,
+    )
+
+
+@router.get("/sections/{section_id}/supplied-context")
+def read_supplied_context(
+    section_id: str, repository: Repository = Depends(get_repository)
+) -> SuppliedContextOut:
+    """The supplied-context surface (#61, ADR-0001): for each session that
+    assembled this section, what assembly resolved and every read served
+    since - composed from the session ledgers at this call, so a surface
+    that asks again while open sees what has been served so far. It claims
+    what Memoria supplied, in countable domain units, and nothing else."""
+    try:
+        account = compose_supplied_context(repository, section_id)
+    except ManuscriptError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return SuppliedContextOut(
+        section_id=account.section_id,
+        sessions=[
+            SessionSuppliedContextOut(
+                session_id=session.session_id,
+                assembled_at=session.assembled_at,
+                briefs=list(session.briefs),
+                entries=[
+                    AssembledEntryOut(
+                        entry_id=entry.entry_id,
+                        matched_by=list(entry.matched_by),
+                        sources=list(entry.sources),
+                    )
+                    for entry in session.entries
+                ],
+                fallbacks=[
+                    FallbackOut(
+                        subject_id=fallback.subject_id,
+                        candidate_id=fallback.candidate_id,
+                        label=fallback.label,
+                    )
+                    for fallback in session.fallbacks
+                ],
+                unconfirmed=session.unconfirmed,
+                empty=session.empty,
+                served_since=[
+                    ServedSinceOut(tool=item.tool, ref=item.ref, served=list(item.served))
+                    for item in session.served_since
+                ],
+            )
+            for session in account.sessions
+        ],
     )
 
 

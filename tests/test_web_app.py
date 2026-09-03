@@ -69,6 +69,9 @@ ALLOWED_IMPORTS = {
     "memoria.manuscript",
     "memoria.review",
     "memoria.section",
+    # #61: the supplied-context surface, a projection of the session
+    # ledgers composed in the core; the adapter shapes it and nothing else.
+    "memoria.supplied_context",
 }
 
 FILE_OPENING_CALLS = {"open", "read_text", "read_bytes", "write_text", "write_bytes"}
@@ -1392,6 +1395,66 @@ def test_read_review_serves_findings_as_disagreement_sets_with_resolutions(tmp_p
         }
     ]
     assert (body["verdicts_current"], body["verdicts_not_current"]) == (1, 1)
+
+
+# --- the supplied-context surface (#61) --------------------------------------
+
+
+def test_the_supplied_context_of_a_section_no_session_assembled_is_empty(tmp_path):
+    repository, _, section = _manuscript_repo(tmp_path)
+    client = _client(repository)
+
+    body = client.get(f"/api/sections/{section.brief.id}/supplied-context").json()
+
+    assert body == {"section_id": section.brief.id, "sessions": []}
+
+
+def test_the_supplied_context_serves_both_halves_apart_and_no_token_figure(tmp_path):
+    """A session assembles the section, then reads beyond its assembly.
+    The route serves the working context and the reads since as two
+    fields, and - although the ``read`` ledger line carries a token count
+    for the context manifest - no token, byte, percentage or capacity
+    figure anywhere in the response (ADR-0001's file boundary)."""
+    from memoria import ledger
+    from memoria.assembly import assemble
+    from memoria.records import Read
+
+    repository, _, section = _manuscript_repo(tmp_path)
+    session_id = "SES-20260902-1000-aaaaaaaaaaaa"
+    assemble(repository, session_id, section.brief)
+    ledger.append_read(
+        repository,
+        session_id,
+        Read(ref="src-000184-p1", citation="SRC-000184 ¶1", text="Bob called on July 17."),
+    )
+    client = _client(repository)
+
+    response = client.get(f"/api/sections/{section.brief.id}/supplied-context")
+
+    assert response.status_code == 200
+    body = response.json()
+    (session,) = body["sessions"]
+    assert session["session_id"] == session_id
+    assert session["briefs"] == [section.brief.id]
+    assert session["entries"] == [
+        {"entry_id": "SUB-people/bob", "matched_by": ["bob", "Bob"], "sources": []}
+    ]
+    assert session["fallbacks"] == []
+    assert session["served_since"] == [
+        {"tool": "read", "ref": "src-000184-p1", "served": ["SRC-000184 ¶1"]}
+    ]
+    lowered = response.text.lower()
+    assert not any(word in lowered for word in ("token", "byte", "percent", "%", "capacity"))
+
+
+def test_the_supplied_context_of_an_unknown_section_is_a_404(tmp_path):
+    repository, _, _ = _manuscript_repo(tmp_path)
+    client = _client(repository)
+
+    response = client.get("/api/sections/SEC-9999/supplied-context")
+
+    assert response.status_code == 404
+    assert "SEC-9999" in response.json()["detail"]
 
 
 def test_applying_a_rewrite_replaces_the_paragraph_and_commits_as_the_author(tmp_path):

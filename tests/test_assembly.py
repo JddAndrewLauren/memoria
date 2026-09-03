@@ -206,6 +206,19 @@ def test_the_ledgered_resolution_carries_no_token_figure(tmp_path):
     assert "token" not in json.dumps(event).lower()
 
 
+def test_the_ledgered_resolution_names_the_section_it_resolved(tmp_path):
+    """The one place the link from a section to the sessions that assembled
+    it exists (#61): nothing is written back onto the section."""
+    _write_entry(tmp_path, Entry(id="SUB-people/bob", body="Bob is tall."))
+    repository = _repo(tmp_path)
+
+    assemble(repository, "SES-test", _brief("About Bob."))
+
+    path = ledger.event_path(repository, "SES-test")
+    (line,) = path.read_text(encoding="utf-8").splitlines()
+    assert json.loads(line)["section_id"] == "SEC-0001"
+
+
 # --- recorded on the session's context manifest, never on the section -------
 
 

@@ -625,3 +625,62 @@ class RewriteResponse(BaseModel):
     paragraph_index: int
     text: str
     token: str
+
+
+class AssembledEntryOut(BaseModel):
+    """One entry the declared scope resolved to: which phrase named it, and
+    its gathered set's anchors - the sources behind it, as identifiers only
+    (assembly reports a gathered set, it does not load one; #38)."""
+
+    entry_id: str
+    matched_by: list[str]
+    sources: list[str]
+
+
+class FallbackOut(BaseModel):
+    """A phrase the scope named that resolved to no entry, and the
+    unpromoted candidate assembly fell back to - named, never silent
+    (part 06 §8.4)."""
+
+    subject_id: str
+    candidate_id: str
+    label: str
+
+
+class ServedSinceOut(BaseModel):
+    """One read the tool surface served after assembly: the tool, the
+    reference it was asked for (a ``read``), and the references it served."""
+
+    tool: str
+    ref: str | None = None
+    served: list[str]
+
+
+class SessionSuppliedContextOut(BaseModel):
+    """The supplied context for one session on one section (#61,
+    ADR-0001): the working context assembly produced - ``briefs``,
+    ``entries``, ``fallbacks`` - and, apart from it, ``served_since``.
+
+    An account of what Memoria *supplied*, in countable domain units:
+    briefs, entries, fallbacks and the references served. No field here
+    is, or will be, a size or capacity figure of any kind - the ledger's
+    measurement belongs to the context manifest (#29), a development
+    instrument, and no code path runs from it to this model (ADR-0001).
+    """
+
+    session_id: str
+    assembled_at: str
+    briefs: list[str]
+    entries: list[AssembledEntryOut]
+    fallbacks: list[FallbackOut]
+    unconfirmed: bool
+    empty: bool
+    served_since: list[ServedSinceOut]
+
+
+class SuppliedContextOut(BaseModel):
+    """The supplied-context surface for one section: one account per
+    session that assembled it, latest assembly first."""
+
+    section_id: str
+    sessions: list[SessionSuppliedContextOut]

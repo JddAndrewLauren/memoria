@@ -174,6 +174,7 @@ def assemble(repository: Repository, session_id: str, brief: Brief) -> WorkingCo
     ledger.append_assembly(
         repository,
         session_id,
+        section_id=brief.id,
         entries=[
             {
                 "entry_id": resolved.entry_id,
