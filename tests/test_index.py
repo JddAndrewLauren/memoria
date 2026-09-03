@@ -19,6 +19,7 @@ from memoria.index import (
     Appearance,
     GatheredSource,
     SearchFilters,
+    appeared_entry_ids,
     appearances_supported,
     build_index,
     compute_appearances,
@@ -1744,6 +1745,18 @@ def test_an_empty_appearances_list_means_two_different_things(tmp_path):
     assert list_appearances(repository, "SUB-themes/control") == []
     assert appearances_supported("SUB-people/bob") is True
     assert appearances_supported("SUB-themes/control") is False
+
+
+def test_appeared_entry_ids_over_a_missing_index_returns_no_entries(tmp_path):
+    """#155: the branch `list_appearances` and `appeared_entry_ids` share -
+    a fresh clone, no `.memoria/index.db` yet - is exercised by every
+    `list_appearances` caller in this file but never directly for
+    `appeared_entry_ids` itself, the read `drift.compute_drift` uses for
+    the covered side of a brief's drift."""
+    repository = Repository(root=tmp_path)
+
+    assert appeared_entry_ids(repository) == frozenset()
+    assert not (tmp_path / INDEX_RELATIVE_PATH).exists()
 
 
 def test_appearances_report_names_the_themes_and_arcs_gap(tmp_path):

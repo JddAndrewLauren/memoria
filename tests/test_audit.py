@@ -21,6 +21,7 @@ can write a brief.
 
 import ast
 import sqlite3
+import time
 from pathlib import Path
 
 import pytest
@@ -415,6 +416,24 @@ def test_count_by_cause_and_paragraphs_not_current(tmp_path):
 
     assert staleness.paragraphs_not_current == 2
     assert staleness.count_by_cause() == {"never_audited": 4}  # 2 paragraphs x 2 kinds
+
+
+def test_the_staleness_map_stays_fast_over_a_full_books_worth_of_paragraphs(tmp_path):
+    """#155's acceptance criterion for #37's own "fast over a full book's
+    worth of paragraphs": 60,000 paragraphs, one entry each, is 120,000
+    judgements - review measured that order of magnitude at about 4.4s by
+    hand. Pinned at 10x that, generous enough to flag a real regression
+    without tripping on machine noise."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    draft = "\n\n".join(f"Bob did thing number {i}." for i in range(60_000))
+    repository = _basic_repo(tmp_path, entry=entry, brief_text="About Bob.", draft=draft)
+
+    start = time.perf_counter()
+    staleness = compute_staleness_map(repository)
+    elapsed = time.perf_counter() - start
+
+    assert staleness.paragraphs_not_current == 60_000
+    assert elapsed < 44.0, f"took {elapsed:.2f}s for 120,000 judgements"
 
 
 # --- AC: the map is derived and rebuilt by `memoria rebuild` -----------------
