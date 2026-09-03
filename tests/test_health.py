@@ -17,6 +17,7 @@ against.
 
 import ast
 import dataclasses
+import json
 import subprocess
 from pathlib import Path
 
@@ -31,7 +32,9 @@ from memoria.health import (
     compute_health_report,
 )
 from memoria.manuscript import create_book, create_chapter, create_section
+from memoria.record_extractor import record_question
 from memoria.repository import Repository
+from memoria.sessions import derive_session
 from memoria.subjects import Entry, entry_to_markdown, write_builtin_subjects
 
 SRC_ROOT = Path(__file__).resolve().parent.parent / "src" / "memoria"
@@ -243,6 +246,40 @@ def test_open_questions_are_read_from_the_queue_and_aged(tmp_path):
     assert len(old) == 1
     assert old[0].text == "Was the acquisition contested?"
     assert old[0].date == "2020-01-01"
+
+
+def test_a_question_with_markup_characters_reaches_the_report_byte_equal(tmp_path):
+    """Pins the two-sided invariant #151 left behind: ``record_question``
+    writes its text unescaped, and ``_open_questions`` no longer unescapes.
+    Driven through the real writer so either side drifting fails it - an
+    escape re-introduced in the writer surfaces as ``&amp;``, an unescape
+    re-introduced in the reader decodes the literal ``&amp;`` in the text."""
+    repository = _git_repo(tmp_path)
+    _git(tmp_path, "config", "user.name", "Local Author")
+    _git(tmp_path, "config", "user.email", "local-author@memoria.test")
+    _git(tmp_path, "commit", "-q", "-m", "initial", "--allow-empty")
+    text = 'Does <a id="dec-0088"></a> "x & y" < z, and a literal &amp; too?'
+    jsonl_path = tmp_path / "session.jsonl"
+    jsonl_path.write_text(
+        json.dumps(
+            {
+                "uuid": "u1",
+                "parentUuid": None,
+                "type": "user",
+                "timestamp": "2026-09-12T14:31:00+00:00",
+                "sessionId": "claude-code-session-uuid",
+                "message": {"role": "user", "content": text},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    derive_session(repository, "SES-20260912-1431", jsonl_path)
+
+    record_question(repository, "SES-20260912-1431", 1, text)
+    report = compute_health_report(repository)
+
+    assert [q.text for q in report.open_questions] == [text]
 
 
 def test_a_final_question_block_ending_at_eof_is_still_read(tmp_path):
