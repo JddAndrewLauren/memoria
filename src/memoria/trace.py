@@ -217,10 +217,21 @@ def _compose_session(repository: Repository, step: TraceStep) -> TraceStep:
     except sessions.SessionError:
         manifest = None
     if manifest is not None:
-        for key in ("entries_resolved", "records_loaded"):
-            for item in manifest.get(key, []):
-                if item["ref"] not in assembled:
-                    assembled.append(item["ref"])
+        # Entries first, then records (docs/tool-surface.md): what the
+        # session read, and what assembly resolved for it - a draft written
+        # from the assembled context (#38) was written from the entries and
+        # the sources the `assemble` line names, whether or not the session
+        # went on to read any of them, so both halves of the manifest count.
+        # The M5 gate walk is where the assembled half was found missing.
+        entries = [item["ref"] for item in manifest.get("entries_resolved", [])]
+        sources = [item["ref"] for item in manifest.get("records_loaded", [])]
+        for resolution in manifest.get("scope_resolutions", []):
+            for entry in resolution.get("entries", []):
+                entries.append(entry.get("entry_id", ""))
+                sources.extend(_source_citation(anchor) for anchor in entry.get("sources", []))
+        for ref in entries + sources:
+            if ref and ref not in assembled:
+                assembled.append(ref)
 
     return TraceStep(
         sha=step.sha,
@@ -233,6 +244,16 @@ def _compose_session(repository: Repository, step: TraceStep) -> TraceStep:
         authorizing_turn=turn_text,
         assembled_from=tuple(assembled),
     )
+
+
+def _source_citation(anchor: str) -> str:
+    """An assembled entry's source is ledgered as a paragraph anchor
+    (``src-000184-p12``); the trace names it the way every other reference
+    here is named, as the citation ``read(ref)`` accepts."""
+    try:
+        return references.format_citation(references.parse(anchor))
+    except references.BadReference:
+        return anchor
 
 
 def _git(repository: Repository, args: list[str]) -> str:

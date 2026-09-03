@@ -47,7 +47,7 @@ from memoria.subjects import (
     serve_entry,
     write_builtin_subjects,
 )
-from memoria.write import Actor
+from memoria.write import Actor, Rejected
 
 AUTHOR = Actor(name="Local Author", email="local-author@memoria.test")
 MACHINE = Actor(name="Memoria", email="curator@memoria.local", human=False)
@@ -236,9 +236,9 @@ def test_settle_is_rejected_when_the_entry_moved_underneath(tmp_path):
     token = _token(repository)
     _commit_entry(repository, BOB, TESTIMONY + " Heavyset.")
 
-    with pytest.raises(SettlementError, match="stale"):
-        _settle(repository, token=token)
+    result = _settle(repository, token=token)
 
+    assert result == Rejected(outcome="stale", path=relative_path)
     assert "[settled]" not in (tmp_path / relative_path).read_text(encoding="utf-8")
 
 

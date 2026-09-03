@@ -458,6 +458,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sections/{section_id}/settlements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Settle Section Finding
+         * @description Settle one of this section's findings - the author's explicit act
+         *     from Review (part 06 §8.7: click-authorized), and the surface's second
+         *     write.
+         *
+         *     The settlement lands on the entry the finding names, inside its
+         *     audit-visible body, with a claim accreted beside it (#33); the section
+         *     is only where the conflict surfaced, and nothing written points at a
+         *     paragraph. The same three outcomes the rewrite has: **409** when the
+         *     entry changed since Review served its token (nothing written; re-read
+         *     the review for a fresh one), **400** for a settlement the set does not
+         *     admit - a side it does not carry, a brief among its members, an empty
+         *     reason - **404** for a section that does not exist. Commits as the
+         *     author (``repository_actor``, ADR-0002), because the click is the
+         *     authorization.
+         */
+        post: operations["settle_section_finding_api_sections__section_id__settlements_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sections/{section_id}/supplied-context": {
         parameters: {
             query?: never;
@@ -753,7 +786,10 @@ export interface components {
          *     raised it, and an optional proposed rewrite. ``resolutions`` is read off
          *     the set's shape by ``Finding.available_resolutions`` - never stored,
          *     never a category. ``paragraph_index``/``paragraph_text`` locate it for
-         *     this read only.
+         *     this read only. ``entry_token`` is the staleness token of the entry the
+         *     finding names, minted at this read for ``POST .../settlements`` to
+         *     present back (ADR-0003): a settlement lands on the entry, not the
+         *     draft.
          */
         FindingOut: {
             /** Paragraph Index */
@@ -774,6 +810,8 @@ export interface components {
             resolutions: string[];
             /** Patch */
             patch?: string | null;
+            /** Entry Token */
+            entry_token?: string | null;
         };
         /**
          * GatheredSetResponse
@@ -1042,7 +1080,9 @@ export interface components {
          *     no audit has been run over, which the surface tells apart from an audit
          *     that found nothing. ``token`` is the draft's staleness token for
          *     ``PUT .../paragraphs/{index}`` to present back; ``None`` when the
-         *     section has no draft.
+         *     section has no draft. ``sessions`` is every session whose ledger served
+         *     a read of this section - the provenance a settlement names (#33: the
+         *     session it happened in, a bare ``SES-`` id, never a turn).
          */
         ReviewOut: {
             /** Section Id */
@@ -1059,6 +1099,11 @@ export interface components {
             verdicts_not_current: number;
             /** Token */
             token?: string | null;
+            /**
+             * Sessions
+             * @default []
+             */
+            sessions: string[];
         };
         /**
          * RewriteResponse
@@ -1241,6 +1286,45 @@ export interface components {
             empty: boolean;
             /** Served Since */
             served_since: components["schemas"]["ServedSinceOut"][];
+        };
+        /**
+         * SettleRequest
+         * @description The author settling one finding from Review - the interface act part
+         *     06 §8.7 names as click-authorized (``Settle``). ``disagreement_set`` is
+         *     the finding's own, sent back as served; ``side`` is the member kind
+         *     chosen (``entry``, ``source`` or ``passage``); ``session_id`` is the
+         *     session the act happened in; ``entry_token`` is what ``FindingOut``
+         *     served for the entry, presented back unread (ADR-0003).
+         */
+        SettleRequest: {
+            /** Entry Id */
+            entry_id: string;
+            /** Disagreement Set */
+            disagreement_set: components["schemas"]["DisagreementMemberOut"][];
+            /** Side */
+            side: string;
+            /** Proposition */
+            proposition: string;
+            /** Reason */
+            reason: string;
+            /** Session Id */
+            session_id: string;
+            /** Entry Token */
+            entry_token: string;
+        };
+        /**
+         * SettlementOut
+         * @description What a settlement wrote: the entry it landed on, the ``[settled]``
+         *     line as rendered into the audit-visible body, and the claim it accreted
+         *     into.
+         */
+        SettlementOut: {
+            /** Entry Id */
+            entry_id: string;
+            /** Settled Line */
+            settled_line: string;
+            /** Claim Id */
+            claim_id: string;
         };
         /**
          * SourceDetail
@@ -1881,6 +1965,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    settle_section_finding_api_sections__section_id__settlements_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                section_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettlementOut"];
                 };
             };
             /** @description Validation Error */

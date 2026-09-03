@@ -39,7 +39,13 @@ from memoria.records import real_paragraphs
 from memoria.records import reveal_original_source as reveal_original_source_core
 from memoria.manuscript import ManuscriptError
 from memoria.repository import NoEvidenceRoot, Repository
-from memoria.review import ReviewError, apply_rewrite, review_section
+from memoria.review import (
+    ReviewError,
+    SettlementError,
+    apply_rewrite,
+    review_section,
+    settle_finding,
+)
 from memoria.section import compose_section, outline as manuscript_outline
 from memoria.supplied_context import supplied_context as compose_supplied_context
 from memoria.subjects import (
@@ -56,6 +62,8 @@ from memoria.subjects import (
 )
 from memoria.web.dependencies import get_repository
 from memoria.web.schemas import (
+    SettleRequest,
+    SettlementOut,
     AppearanceOut,
     AppearancesResponse,
     AssembledEntryOut,
@@ -731,12 +739,67 @@ def read_review(
                 ],
                 resolutions=list(item.finding.available_resolutions),
                 patch=item.finding.patch,
+                entry_token=review.entry_staleness.get(item.entry_id),
             )
             for item in review.findings
         ],
         verdicts_current=review.verdicts_current,
         verdicts_not_current=review.verdicts_not_current,
         token=review.token,
+        sessions=list(review.sessions),
+    )
+
+
+@router.post("/sections/{section_id}/settlements")
+def settle_section_finding(
+    section_id: str,
+    request: SettleRequest,
+    repository: Repository = Depends(get_repository),
+) -> SettlementOut:
+    """Settle one of this section's findings - the author's explicit act
+    from Review (part 06 §8.7: click-authorized), and the surface's second
+    write.
+
+    The settlement lands on the entry the finding names, inside its
+    audit-visible body, with a claim accreted beside it (#33); the section
+    is only where the conflict surfaced, and nothing written points at a
+    paragraph. The same three outcomes the rewrite has: **409** when the
+    entry changed since Review served its token (nothing written; re-read
+    the review for a fresh one), **400** for a settlement the set does not
+    admit - a side it does not carry, a brief among its members, an empty
+    reason - **404** for a section that does not exist. Commits as the
+    author (``repository_actor``, ADR-0002), because the click is the
+    authorization.
+    """
+    try:
+        result = settle_finding(
+            repository,
+            section_id,
+            entry_id=request.entry_id,
+            disagreement_set=[(member.kind, member.ref) for member in request.disagreement_set],
+            side=request.side,
+            proposition=request.proposition,
+            reason=request.reason,
+            session_id=request.session_id,
+            entry_token=request.entry_token,
+            actor=repository_actor(repository),
+        )
+    except ManuscriptError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (ReviewError, SettlementError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except WriteError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if isinstance(result, Rejected):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{result.path} changed since the review was read - nothing was "
+                "written. Re-read the review and settle again."
+            ),
+        )
+    return SettlementOut(
+        entry_id=result.entry_id, settled_line=result.settled_line, claim_id=result.claim_id
     )
 
 

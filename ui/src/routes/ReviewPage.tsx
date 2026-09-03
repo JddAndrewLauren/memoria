@@ -5,9 +5,11 @@ import {
   ApiError,
   applyRewrite,
   readReview,
+  settleFinding,
   type DisagreementMemberOut,
   type FindingOut,
   type ReviewOut,
+  type SettlementOut,
 } from "../api/client";
 import { Badge, type Tone } from "../components/Badge";
 import { useCitationPanel } from "../lib/citationPanel";
@@ -37,10 +39,17 @@ const CONFIDENCE_TONE: Record<string, Tone> = {
  * settle. Nothing on this surface edits a brief - the "passage + brief"
  * shape's resolution is a conversation about the brief, rendered as text.
  * Apply is the author's authorization (part 10 §19.3) and goes through the
- * write path with the draft's staleness token (ADR-0003).
+ * write path with the draft's staleness token (ADR-0003). Settle is the
+ * same kind of act (part 06 §8.7: click-authorized) and lands on the entry
+ * the finding names, with the entry's own token; its provenance is the
+ * session it happened in, chosen from the sessions that touched the section.
  */
 export default function ReviewPage() {
   const { sectionId } = useParams<{ sectionId: string }>();
+  // What this visit settled, kept here rather than on the finding's card:
+  // a settlement silences its finding, so the card is gone on the next
+  // read of the review, and the record of the act has to outlive it.
+  const [settled, setSettled] = useState<SettlementOut[]>([]);
 
   const review = useQuery({
     queryKey: ["review", sectionId],
@@ -76,6 +85,16 @@ export default function ReviewPage() {
 
       <SummaryBar data={data} audited={audited} />
 
+      {settled.length > 0 && (
+        <ul className="mt-3 space-y-1" aria-label="Settled this visit">
+          {settled.map((item) => (
+            <li key={item.claim_id} className="text-xs text-muted">
+              Settled on {item.entry_id} as {item.claim_id}: {item.settled_line}
+            </li>
+          ))}
+        </ul>
+      )}
+
       {!audited ? (
         <p className="mt-6 max-w-[640px] rounded border border-dashed border-border px-3 py-2 text-xs text-muted">
           No audit has been run on this section. Run one from a session — the audit is asked for,
@@ -93,6 +112,8 @@ export default function ReviewPage() {
               sectionId={data.section_id}
               finding={finding}
               token={data.token}
+              sessions={data.sessions}
+              onSettled={(item) => setSettled((items) => [...items, item])}
             />
           ))}
         </ul>
@@ -128,22 +149,196 @@ function SummaryBar({ data, audited }: { data: ReviewOut; audited: boolean }) {
   );
 }
 
+// The settlement form (part 06 §8.7): the side chosen, the proposition, the
+// reason, and the session the act happened in. It posts the finding's own
+// disagreement set back with the entry's token; a 409 is the entry moved
+// underneath, told apart from a failure by that number (ADR-0003).
+function SettleForm({
+  sectionId,
+  finding,
+  sides,
+  sessions,
+  onSettled,
+  onClose,
+}: {
+  sectionId: string;
+  finding: FindingOut;
+  sides: string[];
+  sessions: string[];
+  onSettled: (item: SettlementOut) => void;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [side, setSide] = useState(sides[0]);
+  const [proposition, setProposition] = useState("");
+  const [reason, setReason] = useState("");
+  const [sessionId, setSessionId] = useState(sessions[0] ?? "");
+  const [subjectId, entrySlug] = finding.entry_id.split("/");
+
+  const settle = useMutation({
+    mutationFn: () =>
+      settleFinding(sectionId, {
+        entry_id: finding.entry_id,
+        disagreement_set: finding.disagreement_set,
+        side,
+        proposition,
+        reason,
+        session_id: sessionId,
+        entry_token: finding.entry_token as string,
+      }),
+    onSuccess: (item) => {
+      // The settlement moved the entry, so every judgement against it is
+      // stale and the finding is silenced: the review and the section are
+      // re-read, and the entry page shows the settled line. The page keeps
+      // the record, since this card leaves with the re-read.
+      onSettled(item);
+      onClose();
+      queryClient.invalidateQueries({ queryKey: ["review", sectionId] });
+      queryClient.invalidateQueries({ queryKey: ["section", sectionId] });
+      queryClient.invalidateQueries({ queryKey: ["entry", subjectId, entrySlug] });
+    },
+  });
+  const isStale = settle.error instanceof ApiError && settle.error.status === 409;
+  const ready = Boolean(side && proposition.trim() && reason.trim() && sessionId.trim());
+
+  return (
+    <form
+      aria-label="Settle this finding"
+      className="mt-3 max-w-[640px] space-y-2 rounded border border-border bg-panel p-3 text-xs text-body"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (ready) settle.mutate();
+      }}
+    >
+      <fieldset className="flex flex-wrap gap-3">
+        <legend className="font-mono text-[11px] uppercase tracking-wide text-muted">
+          Settle toward
+        </legend>
+        {sides.map((candidate) => (
+          <label key={candidate} className="flex items-center gap-1">
+            <input
+              type="radio"
+              name={`side-${finding.paragraph_index}-${finding.entry_id}`}
+              value={candidate}
+              checked={side === candidate}
+              onChange={() => setSide(candidate)}
+            />
+            the {candidate}
+          </label>
+        ))}
+      </fieldset>
+      <label className="block">
+        <span className="font-mono text-[11px] uppercase tracking-wide text-muted">Proposition</span>
+        <input
+          type="text"
+          value={proposition}
+          onChange={(event) => setProposition(event.target.value)}
+          className="mt-1 w-full rounded border border-border bg-card px-2 py-1"
+        />
+      </label>
+      <label className="block">
+        <span className="font-mono text-[11px] uppercase tracking-wide text-muted">Reason</span>
+        <input
+          type="text"
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          className="mt-1 w-full rounded border border-border bg-card px-2 py-1"
+        />
+      </label>
+      <label className="block">
+        <span className="font-mono text-[11px] uppercase tracking-wide text-muted">Session</span>
+        {sessions.length > 0 ? (
+          <select
+            value={sessionId}
+            onChange={(event) => setSessionId(event.target.value)}
+            className="mt-1 w-full rounded border border-border bg-card px-2 py-1 font-mono"
+          >
+            {sessions.map((candidate) => (
+              <option key={candidate} value={candidate}>
+                {candidate}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            type="text"
+            value={sessionId}
+            placeholder="SES-…: the session this settlement happens in"
+            onChange={(event) => setSessionId(event.target.value)}
+            className="mt-1 w-full rounded border border-border bg-card px-2 py-1 font-mono"
+          />
+        )}
+      </label>
+      <div className="flex items-center gap-2">
+        <button
+          type="submit"
+          disabled={!ready || settle.isPending}
+          className="rounded bg-ink px-3 py-1 text-xs text-card hover:bg-body disabled:opacity-50"
+        >
+          {settle.isPending ? "Settling…" : "Record settlement"}
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded border border-border px-3 py-1 text-xs text-body hover:bg-panel"
+        >
+          Cancel
+        </button>
+      </div>
+      {isStale && (
+        <p className="rounded border border-amber bg-amber-tint-soft px-3 py-2 text-xs text-secondary">
+          The entry changed since this review was read — nothing was written.{" "}
+          <button
+            type="button"
+            onClick={() => queryClient.invalidateQueries({ queryKey: ["review", sectionId] })}
+            className="underline"
+          >
+            Reload the review
+          </button>{" "}
+          for a fresh token.
+        </p>
+      )}
+      {settle.isError && !isStale && (
+        <p className="text-xs text-muted">
+          {settle.error instanceof ApiError ? settle.error.message : "The settlement was not recorded."}
+        </p>
+      )}
+    </form>
+  );
+}
+
 function memberLabel(member: DisagreementMemberOut): string {
   return member.kind === "passage" ? `¶${member.ref.split("#").pop()}` : member.ref;
+}
+
+// The sides a finding can be settled toward, read off the resolutions the
+// set admits (part 06 §8.10's table) - never off the members directly, so
+// a set whose resolutions are a rewrite or an exclusion offers no side.
+const SETTLE_RESOLUTION = /^settle toward the (entry|source|passage)$/;
+
+function settleSides(finding: FindingOut): string[] {
+  return finding.resolutions
+    .map((resolution) => SETTLE_RESOLUTION.exec(resolution)?.[1])
+    .filter((side): side is string => Boolean(side));
 }
 
 function FindingCard({
   sectionId,
   finding,
   token,
+  sessions,
+  onSettled,
 }: {
   sectionId: string;
   finding: FindingOut;
   token: string | null | undefined;
+  sessions: string[];
+  onSettled: (item: SettlementOut) => void;
 }) {
   const { open: openCitation } = useCitationPanel();
   const queryClient = useQueryClient();
   const [showDiff, setShowDiff] = useState(false);
+  const [settling, setSettling] = useState(false);
   const [draftToken, setDraftToken] = useState(token ?? "");
   useEffect(() => setDraftToken(token ?? ""), [token]);
 
@@ -162,6 +357,8 @@ function FindingCard({
     },
   });
   const isStale = apply.error instanceof ApiError && apply.error.status === 409;
+  const sides = settleSides(finding);
+  const canSettle = sides.length > 0 && Boolean(finding.entry_token);
 
   return (
     <li className="rounded-card border border-border border-l-4 border-l-manuscript bg-card p-4">
@@ -231,19 +428,31 @@ function FindingCard({
         >
           {apply.isPending ? "Applying…" : "Apply"}
         </button>
-        {/* Settle is offered and honest about its state: a settlement is
-            recorded on the entry, inside the audit-visible body, and that
-            write arrives with #33. Present rather than hidden, the way
-            the entry view's settlements region is. */}
         <button
           type="button"
-          disabled
-          title="Not built yet. Settlements — recorded on the entry, inside the audit-visible body — arrive with #33."
-          className="rounded border border-dashed border-border px-3 py-1 text-xs text-muted disabled:opacity-70"
+          onClick={() => setSettling((value) => !value)}
+          disabled={!canSettle}
+          title={
+            canSettle
+              ? undefined
+              : "This set admits no settlement: its resolutions are a rewrite, an exclusion or a conversation."
+          }
+          className="rounded border border-border px-3 py-1 text-xs text-body hover:bg-panel disabled:opacity-50"
         >
           Settle
         </button>
       </div>
+
+      {settling && (
+        <SettleForm
+          sectionId={sectionId}
+          finding={finding}
+          sides={sides}
+          sessions={sessions}
+          onSettled={onSettled}
+          onClose={() => setSettling(false)}
+        />
+      )}
 
       {apply.isSuccess && <p className="mt-2 text-xs text-muted">Applied.</p>}
       {isStale && (

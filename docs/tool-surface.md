@@ -900,7 +900,10 @@ session is derived (`derive-session`, which resolves Claude Code's own JSONL
 from `CLAUDE_CODE_SESSION_ID` when run with no path, #198), and reported as
 not yet derived before;
 `assembled from` is the session's context manifest (#29) — entries resolved,
-then records loaded — built live from `events.jsonl`. Lines with no commit yet
+then records loaded, each taking in what the session read *and* what assembly
+(#38) resolved for it, since a draft authorized from the working context was
+written from the entries and sources the `assemble` line names whether or not
+the session went on to read them — built live from `events.jsonl`. Lines with no commit yet
 are counted as uncommitted, not traced. A commit with neither trailer is named
 as such: `memoria validate` fails it.
 

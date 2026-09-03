@@ -18,8 +18,8 @@
 #
 # The corpus is `gate/corpus/`, three invented Enron-shaped messages, and it
 # is small deliberately: the four-custodian slice takes ~50 minutes to
-# normalize and over an hour to rebuild (issue for that in the tracker), which
-# makes a check nobody can run twice. See gate/README.md.
+# normalize and over an hour to rebuild (#172 times the phases; the fix waits
+# on its numbers), which makes a check nobody can run twice. See gate/README.md.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 REPO="$PWD"
