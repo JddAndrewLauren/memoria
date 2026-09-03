@@ -273,11 +273,18 @@ def test_resolving_an_unknown_id_is_a_named_error(tmp_path):
 
 # --- a brief is writable only by a deliberate act on it (#35) ---------------
 
-# Modules allowed to call the functions that write a brief. Empty today: the
-# author's surface that will call them (#66's write path, an MCP tool, the
-# React client's adapter) gets named here when it lands, and a
-# finding-resolution module (#40-#42) never does.
-_BRIEF_WRITERS = ("manuscript.py",)
+# Modules allowed to call the functions that write a brief. The author's
+# surface that will call them (#66's write path, an MCP tool, the React
+# client's adapter) gets named here when it lands, and a finding-resolution
+# module (#40-#42) never does.
+#
+# `legacy_import` is the first: #39's `import_chapter` is the
+# "summarize-from-existing-prose draft path" this module's own docstring
+# names as `create_chapter`/`create_section`'s one exception to
+# `unconfirmed=False` - a deliberate act that creates a chapter and section,
+# same as any other creator here, not a finding resolving itself onto one
+# that already exists.
+_BRIEF_WRITERS = ("manuscript.py", "legacy_import.py")
 _WRITING_FUNCTIONS = {
     "write_brief",
     "confirm_brief",
