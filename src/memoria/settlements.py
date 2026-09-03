@@ -301,15 +301,17 @@ def settle(
     token: str,
     actor: Actor,
     today: str | None = None,
-) -> SettlementRecord:
+) -> SettlementRecord | Rejected:
     """Settle a surfaced conflict toward ``side`` - see the module docstring.
 
     ``disagreement_set`` is the finding's own (``memoria.audit.Finding``);
     the one ``entry`` member is where the settlement lands, the ``passage``
     member is dropped, and every other member is what was chosen or chosen
     against. ``token`` is the one ``subjects.serve_entry`` minted for the
-    read the author acted on (ADR-0003). The settlement is written first and
-    the claim accreted second.
+    read the author acted on (ADR-0003); an entry changed since is
+    ``memoria.write``'s ``Rejected``, returned rather than raised, because a
+    stale read is the normal outcome the caller tells apart from a refusal.
+    The settlement is written first and the claim accreted second.
     """
     if not actor.human:
         raise SettlementError(
@@ -396,10 +398,7 @@ def settle(
     content = subjects.entry_to_markdown(dataclass_replace(entry, body=body))
     result = write.write(repository, relative_path, token, content, actor)
     if isinstance(result, Rejected):
-        raise SettlementError(
-            f"could not write {relative_path}: {result.outcome} - re-read the "
-            "entry and settle again"
-        )
+        return result
 
     claim = claim_from_settlement(entry_id, settlement)
     try:

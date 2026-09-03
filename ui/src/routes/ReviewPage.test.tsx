@@ -21,6 +21,7 @@ const FINDING_WITH_SOURCE = {
   ],
   resolutions: ["settle toward the entry", "settle toward the source", "settle toward the passage"],
   patch: "The draft states Bob knew by July 18.",
+  entry_token: "entry-token-one",
 };
 
 const FINDING_WITH_BRIEF = {
@@ -36,6 +37,7 @@ const FINDING_WITH_BRIEF = {
   ],
   resolutions: ["rewrite the passage", "open a conversation about the brief"],
   patch: null,
+  entry_token: "entry-token-two",
 };
 
 const REVIEW = {
@@ -46,6 +48,7 @@ const REVIEW = {
   verdicts_current: 14,
   verdicts_not_current: 2,
   token: "token-one",
+  sessions: ["SES-20260912-1432", "SES-20260913-0900"],
 };
 
 const CITATION = {
@@ -69,7 +72,10 @@ const CITATION = {
 
 type Overrides = {
   review?: Record<string, unknown>;
+  // What each successive read of the review serves; the last one repeats.
+  reviews?: Record<string, unknown>[];
   onPut?: (url: string, body: unknown) => Response;
+  onPost?: (url: string, body: unknown) => Response;
 };
 
 function stubApi(overrides: Overrides = {}) {
@@ -87,8 +93,25 @@ function stubApi(overrides: Overrides = {}) {
             ));
         return handler(url, JSON.parse(String(init.body)));
       }
+      if (init?.method === "POST") {
+        const handler =
+          overrides.onPost ??
+          (() =>
+            new Response(
+              JSON.stringify({
+                entry_id: "SUB-people/bob",
+                settled_line: "[settled] knew by July 18 — SUB-people/bob, chosen over SRC-000184 ¶17, 2026-09-03",
+                claim_id: "CLM-0001",
+              }),
+              { status: 200 },
+            ));
+        return handler(url, JSON.parse(String(init.body)));
+      }
       if (url.includes("/review")) {
-        return new Response(JSON.stringify(overrides.review ?? REVIEW), { status: 200 });
+        const queued = overrides.reviews;
+        const served =
+          queued && queued.length > 0 ? (queued.length > 1 ? queued.shift() : queued[0]) : overrides.review;
+        return new Response(JSON.stringify(served ?? REVIEW), { status: 200 });
       }
       if (url.includes("/api/read?ref=")) {
         return new Response(JSON.stringify(CITATION), { status: 200 });
@@ -195,10 +218,155 @@ describe("the Review surface", () => {
       expect(control.textContent ?? "").not.toMatch(/brief/i);
     }
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    // Settle is present and honest about not being built yet (#33).
-    const settle = within(card).getByRole("button", { name: "Settle" });
-    expect(settle).toBeDisabled();
-    expect(settle).toHaveAttribute("title", expect.stringMatching(/#33/));
+    // Settle is live on the three-way set (#33), and absent as an act on a
+    // set whose resolutions are a rewrite or a conversation.
+    expect(within(card).getByRole("button", { name: "Settle" })).toBeEnabled();
+    expect(within(briefCard).getByRole("button", { name: "Settle" })).toBeDisabled();
+  });
+
+  it("settles a finding through the write path with the entry's token and the session it happened in", async () => {
+    let received: unknown = null;
+    let receivedUrl = "";
+    stubApi({
+      // The settlement silences its finding: the second read drops it.
+      reviews: [REVIEW, { ...REVIEW, findings: [FINDING_WITH_BRIEF] }],
+      onPost: (url, body) => {
+        receivedUrl = url;
+        received = body;
+        return new Response(
+          JSON.stringify({
+            entry_id: "SUB-people/bob",
+            settled_line: "[settled] knew by July 18 — SUB-people/bob, chosen over SRC-000184 ¶17, 2026-09-03",
+            claim_id: "CLM-0001",
+          }),
+          { status: 200 },
+        );
+      },
+    });
+    renderReview();
+    await screen.findByText(/Contemporaneous evidence places/);
+    const card = screen.getByText(/Contemporaneous evidence places/).closest("li") as HTMLElement;
+
+    fireEvent.click(within(card).getByRole("button", { name: "Settle" }));
+    const form = within(card).getByRole("form", { name: "Settle this finding" });
+    // The sides offered are the set's own resolutions, and the sessions
+    // offered are the ones that touched the section.
+    expect(within(form).getAllByRole("radio").map((radio) => (radio as HTMLInputElement).value)).toEqual([
+      "entry",
+      "source",
+      "passage",
+    ]);
+    expect(within(form).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "SES-20260912-1432",
+      "SES-20260913-0900",
+    ]);
+    expect(within(form).getByRole("button", { name: "Record settlement" })).toBeDisabled();
+
+    fireEvent.click(within(form).getByRole("radio", { name: "the entry" }));
+    fireEvent.change(within(form).getByLabelText("Proposition"), { target: { value: "knew by July 18" } });
+    fireEvent.change(within(form).getByLabelText("Reason"), {
+      target: { value: "the journal entry is contemporaneous" },
+    });
+    fireEvent.change(within(form).getByLabelText("Session"), { target: { value: "SES-20260913-0900" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Record settlement" }));
+
+    await waitFor(() => expect(received).not.toBeNull());
+    expect(receivedUrl).toBe("/api/sections/SEC-0001/settlements");
+    expect(received).toEqual({
+      entry_id: "SUB-people/bob",
+      disagreement_set: FINDING_WITH_SOURCE.disagreement_set,
+      side: "entry",
+      proposition: "knew by July 18",
+      reason: "the journal entry is contemporaneous",
+      session_id: "SES-20260913-0900",
+      entry_token: "entry-token-one",
+    });
+    expect(await screen.findByText(/Settled on SUB-people\/bob as CLM-0001/)).toBeInTheDocument();
+    // The settlement moved the entry, so the review is re-read - and the
+    // finding it silenced leaves, while the record of the act stays.
+    await waitFor(() =>
+      expect(fetchCalls().filter((url) => url.endsWith("/review")).length).toBeGreaterThan(1),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText(/Contemporaneous evidence places/)).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText(/Settled on SUB-people\/bob as CLM-0001/)).toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "Settle this finding" })).not.toBeInTheDocument();
+  });
+
+  it("shows the server's reason when a settlement is refused", async () => {
+    stubApi({
+      onPost: () =>
+        new Response(JSON.stringify({ detail: "a settlement's reason is one non-empty line" }), {
+          status: 400,
+        }),
+    });
+    renderReview();
+    await screen.findByText(/Contemporaneous evidence places/);
+    const card = screen.getByText(/Contemporaneous evidence places/).closest("li") as HTMLElement;
+
+    fireEvent.click(within(card).getByRole("button", { name: "Settle" }));
+    const form = within(card).getByRole("form", { name: "Settle this finding" });
+    fireEvent.change(within(form).getByLabelText("Proposition"), { target: { value: "knew by July 18" } });
+    fireEvent.change(within(form).getByLabelText("Reason"), { target: { value: "x" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Record settlement" }));
+
+    expect(await within(form).findByText("a settlement's reason is one non-empty line")).toBeInTheDocument();
+    expect(screen.queryByText(/The entry changed since/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Settled on/)).not.toBeInTheDocument();
+  });
+
+  it("asks for the session in a text field when no session touched the section", async () => {
+    stubApi({ review: { ...REVIEW, sessions: [] } });
+    renderReview();
+    await screen.findByText(/Contemporaneous evidence places/);
+    const card = screen.getByText(/Contemporaneous evidence places/).closest("li") as HTMLElement;
+
+    fireEvent.click(within(card).getByRole("button", { name: "Settle" }));
+    const form = within(card).getByRole("form", { name: "Settle this finding" });
+    const session = within(form).getByLabelText("Session");
+    expect(session.tagName).toBe("INPUT");
+    expect(within(form).queryByRole("combobox")).not.toBeInTheDocument();
+    fireEvent.change(within(form).getByLabelText("Proposition"), { target: { value: "knew by July 18" } });
+    fireEvent.change(within(form).getByLabelText("Reason"), { target: { value: "contemporaneous" } });
+    expect(within(form).getByRole("button", { name: "Record settlement" })).toBeDisabled();
+
+    fireEvent.change(session, { target: { value: "SES-20260913-0900" } });
+    expect(within(form).getByRole("button", { name: "Record settlement" })).toBeEnabled();
+  });
+
+  it("closes the settlement form on Cancel without settling", async () => {
+    renderReview();
+    await screen.findByText(/Contemporaneous evidence places/);
+    const card = screen.getByText(/Contemporaneous evidence places/).closest("li") as HTMLElement;
+
+    fireEvent.click(within(card).getByRole("button", { name: "Settle" }));
+    const form = within(card).getByRole("form", { name: "Settle this finding" });
+    fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
+
+    expect(within(card).queryByRole("form", { name: "Settle this finding" })).not.toBeInTheDocument();
+    expect(fetchCalls().some((url) => url.endsWith("/settlements"))).toBe(false);
+  });
+
+  it("tells an entry that moved apart from a failure and settles nothing", async () => {
+    stubApi({
+      onPost: () =>
+        new Response(JSON.stringify({ detail: "subjects/people/bob.md changed since the review was read" }), {
+          status: 409,
+        }),
+    });
+    renderReview();
+    await screen.findByText(/Contemporaneous evidence places/);
+    const card = screen.getByText(/Contemporaneous evidence places/).closest("li") as HTMLElement;
+
+    fireEvent.click(within(card).getByRole("button", { name: "Settle" }));
+    const form = within(card).getByRole("form", { name: "Settle this finding" });
+    fireEvent.change(within(form).getByLabelText("Proposition"), { target: { value: "knew by July 18" } });
+    fireEvent.change(within(form).getByLabelText("Reason"), { target: { value: "contemporaneous" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Record settlement" }));
+
+    expect(await screen.findByText(/The entry changed since this review was read/)).toBeInTheDocument();
+    expect(screen.queryByText(/Settled on/)).not.toBeInTheDocument();
   });
 
   it("opens the evidence in the slide-over and previews the diff", async () => {

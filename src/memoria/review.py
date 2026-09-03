@@ -31,11 +31,19 @@ author (``memoria.write.repository_actor`` at the adapter), the same class
 of thing as an edit made in Obsidian. The durable authorization record and
 ``trace()`` are #42's; this is the seam they attach to.
 
-**No path here edits a brief.** The only file this module can write is a
-section's ``draft.md``; it names no brief filename and imports no brief
-writer, which ``tests/test_manuscript.py``'s guards hold structurally. The
-"passage + brief" shape's resolutions still say "open a conversation about
-the brief", and that is all the surface offers for it.
+**Settling a finding lands on the entry, not the section.** ``settle_finding``
+is the surface's other explicit act (part 06 §8.7: click-authorized) and
+is ``memoria.settlements.settle`` with the same staleness discipline the
+rewrite has - the token ``review_section`` minted for the finding's entry,
+presented back, and an entry changed underneath rejected whole. The
+section is only where the conflict surfaced; nothing written points at a
+paragraph (#33).
+
+**No path here edits a brief.** The only manuscript file this module can
+write is a section's ``draft.md``; it names no brief filename and imports
+no brief writer, which ``tests/test_manuscript.py``'s guards hold
+structurally. The "passage + brief" shape's resolutions still say "open a
+conversation about the brief", and that is all the surface offers for it.
 """
 
 from __future__ import annotations
@@ -46,6 +54,7 @@ from dataclasses import dataclass
 from memoria import write
 from memoria.audit import (
     DRAFT_FILENAME,
+    DisagreementMember,
     LocatedFinding,
     located_findings_in_scope,
     manuscript_paragraphs,
@@ -54,7 +63,22 @@ from memoria.audit import (
 from memoria.manuscript import list_chapters, resolve_section
 from memoria.repository import Repository
 from memoria.scope import resolve_scope
+from memoria.section import sessions_that_touched
+from memoria.settlements import SettlementError, render_settlement, settle
+from memoria.subjects import SubjectError, entry_relative_path, serve_entry
 from memoria.write import Actor, Rejected, WriteResult
+
+__all__ = [
+    "CONFIDENCE_ORDER",
+    "Review",
+    "ReviewError",
+    "Settled",
+    "SettlementError",
+    "apply_rewrite",
+    "paragraph_spans",
+    "review_section",
+    "settle_finding",
+]
 
 # Part 10 §21's tiers, highest first - the one ordering a finding list has
 # (part 06 §8.10: "confidence ... Not severity, and not kind of problem").
@@ -84,6 +108,14 @@ class Review:
     ``token`` is ``memoria.write.serve``'s staleness token for the draft as
     read this call, for ``apply_rewrite`` to present back; ``None`` when the
     section has no draft to rewrite.
+
+    ``entry_staleness`` is the same kind of token, one per entry a finding
+    names, minted by ``subjects.serve_entry`` at this read for a settlement
+    (#33) to present back: a settlement lands on the entry, so the entry is
+    the file whose staleness the click must be checked against, not the
+    draft's. ``sessions`` is every session whose ledger served a read of
+    this section - a settlement's provenance is the session it happened in
+    (a bare ``SES-`` id), and the surface offers those rather than a blank.
     """
 
     section_id: str
@@ -93,6 +125,19 @@ class Review:
     verdicts_current: int
     verdicts_not_current: int
     token: str | None
+    entry_staleness: dict[str, str]
+    sessions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Settled:
+    """What ``settle_finding`` wrote: the entry the settlement landed on,
+    its first line as rendered into the audit-visible body, and the claim
+    it accreted into."""
+
+    entry_id: str
+    settled_line: str
+    claim_id: str
 
 
 def _chapter_number_of(repository: Repository, section_dir) -> int:
@@ -142,6 +187,18 @@ def review_section(repository: Repository, section_id: str) -> Review:
     token = None
     if draft_path.is_file():
         token = write.serve(repository, _draft_relative_path(repository, section_id)).token
+    entry_staleness: dict[str, str] = {}
+    for item in findings:
+        if item.entry_id in entry_staleness:
+            continue
+        try:
+            entry_staleness[item.entry_id] = serve_entry(repository, *item.entry_id.split("/", 1))[1]
+        except SubjectError:
+            # The finding stands (its entry is still in the index by id)
+            # but the file is not where its id says - moved to another
+            # subject's directory, say. No token, so no settlement on it;
+            # the review is still served.
+            continue
 
     return Review(
         section_id=section.brief.id,
@@ -151,6 +208,8 @@ def review_section(repository: Repository, section_id: str) -> Review:
         verdicts_current=paragraph_count * entry_count - not_current,
         verdicts_not_current=not_current,
         token=token,
+        entry_staleness=entry_staleness,
+        sessions=sessions_that_touched(repository, section),
     )
 
 
@@ -212,3 +271,66 @@ def apply_rewrite(
     start, end = spans[paragraph_index - 1]
     content = served.text[:start] + replacement + served.text[end:]
     return write.write(repository, relative, token, content, actor)
+
+
+def settle_finding(
+    repository: Repository,
+    section_id: str,
+    *,
+    entry_id: str,
+    disagreement_set: list[tuple[str, str]],
+    side: str,
+    proposition: str,
+    reason: str,
+    session_id: str,
+    entry_token: str,
+    actor: Actor,
+) -> Settled | Rejected:
+    """Settle one of ``section_id``'s findings toward ``side`` - the author's
+    explicit act from Review.
+
+    ``disagreement_set`` is the finding's own members as ``(kind, ref)``
+    pairs, sent back as served. ``entry_token`` is what ``review_section``
+    minted for ``entry_id``; an entry changed since is ``Rejected`` whole,
+    before ``memoria.settlements.settle`` is reached (ADR-0003). A settlement
+    the set does not admit raises ``SettlementError``; an unknown section
+    raises ``ManuscriptError``; an unknown entry, or one that is not the
+    set's own entry member, raises ``ReviewError`` - the token was checked
+    against ``entry_id``, so that is the only entry the write may land on.
+    """
+    resolve_section(repository, section_id)
+    set_entries = [ref for kind, ref in disagreement_set if kind == "entry"]
+    if len(set_entries) == 1 and set_entries[0] != entry_id:
+        raise ReviewError(
+            f"the settlement names {entry_id} but its disagreement set's entry "
+            f"is {set_entries[0]}"
+        )
+    try:
+        subject_id, entry_slug = entry_id.split("/", 1)
+        relative_path, current_token = (
+            entry_relative_path(repository, subject_id, entry_slug),
+            serve_entry(repository, subject_id, entry_slug)[1],
+        )
+    except (ValueError, SubjectError) as exc:
+        raise ReviewError(f"no entry {entry_id} to settle on") from exc
+    if current_token != entry_token:
+        return Rejected(outcome="stale", path=relative_path)
+    record = settle(
+        repository,
+        [DisagreementMember(kind, ref) for kind, ref in disagreement_set],
+        side=side,
+        proposition=proposition,
+        reason=reason,
+        session_id=session_id,
+        token=entry_token,
+        actor=actor,
+    )
+    if isinstance(record, Rejected):
+        # The entry moved between the check above and the write: the same
+        # outcome, surfaced by the write path itself.
+        return record
+    return Settled(
+        entry_id=record.entry_id,
+        settled_line=render_settlement(record.settlement).splitlines()[0],
+        claim_id=record.claim_id,
+    )

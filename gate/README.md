@@ -18,6 +18,7 @@ scripts/gate-m3.sh                 # writes gate/last-run.md
 scripts/gate-m3.sh --keep          # and leaves the scratch repository behind
 scripts/gate-m3.sh --artifact /tmp/walk.md
 scripts/gate-m4.sh                 # the same flags; ~30s, most of it the ui build
+scripts/gate-m5.sh                 # the same flags; ~1 min, three core phases, three browser phases
 ```
 
 The M3 walk is about four seconds, of which the walk itself is two. It needs `.venv` and
@@ -101,6 +102,12 @@ not a record.
 | `scripts/gate-m4.sh` | prepare, acts, serve, walk, more acts, validate, record, tear down |
 | `ui/gate/m4-gate-walk.spec.ts` | the five browser steps, in two phases |
 | `docs/gates/m4-gate-walk.md` | what the M4 walk means, the recorded Result, and what is left to the author |
+| `gate/m5/legacy.md` | the M5 walk's "existing chapter", eight paragraphs the author imports as legacy manuscript |
+| `gate/m5/session.jsonl` | the M5 walk's staged writing session, two turns; T001's middle sentence authorizes the draft |
+| `gate/m5/records.py` | the M5 walk's core acts in three phases: import, brief and assembly, draft and trace; the audit; the re-audit and validate |
+| `scripts/gate-m5.sh` | prepare, acts 1-4, serve, browser, act 5, browser (the Settle click), act 6-7, browser, record, tear down |
+| `ui/gate/m5-gate-walk.spec.ts` | the seven browser steps, in three phases |
+| `docs/gates/m5-gate-walk.md` | what the M5 walk means, what building it found, the recorded Result, and what is left to the author |
 
 ## Writing the next walk
 
@@ -116,6 +123,17 @@ about the scratch repository rather than the app: never `git add -A` after the i
 refuse every later write, correctly), and a manuscript file the author lays
 down by hand is checkpointed, not committed, or `validate` reads it as an
 unauthorized AI write.
+
+M5 copied M4 and needed three core phases rather than two, because the
+browser's own act - the Settle click - sits between the audit and the
+re-audit; the shell script's `browser`/`core` functions are the whole of
+that generalisation. Two things it found worth passing on: a walk whose
+gate names a *button* should check the button exists before scripting the
+click (M5's Settle was a disabled placeholder with a stale tooltip, and the
+walk's first job was to build it), and a "before and after" reading of a
+count - the tinted paragraphs around the settlement - is the same third
+trap as M3's scroll offset, and was taken before the click for the same
+reason.
 
 The corpus is the part to reuse. If a walk needs paragraphs a model has
 extracted from, add the memo rows the extraction would have written rather

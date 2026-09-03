@@ -111,6 +111,46 @@ def test_an_ai_written_paragraph_traces_to_its_commit_turn_and_manifest(tmp_path
     assert step.assembled_from == ("SUB-people/bob", "SRC-000184")
 
 
+def test_a_paragraph_written_from_assembled_context_traces_to_what_assembly_resolved(tmp_path):
+    """Found by the M5 gate walk (#45): a draft authorized from the working
+    context assembly produced (#38) - a session that assembled the section
+    and read nothing else - traced to an empty `assembled from`, because
+    only `read` lines were projected. The `assemble` line names the
+    entries and the sources the draft was written from, and the trace
+    names them: entries first, then records, as its contract says."""
+    repository, section = _repo(tmp_path)
+    _write_session(
+        repository, SESSION,
+        [(8, "Author", TURN_TEXT)],
+        [
+            {
+                "session_id": SESSION,
+                "timestamp": "2026-09-12T14:32:30+00:00",
+                "tool": "assemble",
+                "section_id": section.brief.id,
+                "entries": [
+                    {
+                        "entry_id": "SUB-people/bob",
+                        "matched_by": ["bob"],
+                        "sources": ["src-000184-p12", "src-000190-p1"],
+                    }
+                ],
+                "fallbacks": [],
+                "unconfirmed": False,
+                "empty": False,
+            },
+            _read_event("SRC-000200", "SRC-000200"),
+        ],
+    )
+    _ai_rewrite(repository, section, 2, "Bob came home at dusk, by the corrected timeline.")
+
+    (step,) = trace(repository, f"{section.brief.id} ¶2").steps
+
+    assert step.assembled_from == (
+        "SUB-people/bob", "SRC-000200", "SRC-000184 ¶12", "SRC-000190 ¶1"
+    )
+
+
 def test_a_human_written_paragraph_traces_to_its_change_id_and_stops(tmp_path):
     repository, section = _repo(tmp_path)
 

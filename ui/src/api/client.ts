@@ -42,6 +42,8 @@ export type ReviewOut = components["schemas"]["ReviewOut"];
 export type FindingOut = components["schemas"]["FindingOut"];
 export type DisagreementMemberOut = components["schemas"]["DisagreementMemberOut"];
 export type RewriteResponse = components["schemas"]["RewriteResponse"];
+export type SettleRequest = components["schemas"]["SettleRequest"];
+export type SettlementOut = components["schemas"]["SettlementOut"];
 export type SuppliedContextOut = components["schemas"]["SuppliedContextOut"];
 export type SessionSuppliedContextOut = components["schemas"]["SessionSuppliedContextOut"];
 export type AssembledEntryOut = components["schemas"]["AssembledEntryOut"];
@@ -66,8 +68,13 @@ async function get<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-async function post<T>(path: string): Promise<T> {
-  const response = await fetch(path, { method: "POST" });
+async function post<T>(path: string, body?: unknown): Promise<T> {
+  const response = await fetch(
+    path,
+    body === undefined
+      ? { method: "POST" }
+      : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+  );
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new ApiError(response.status, body?.detail ?? response.statusText);
@@ -224,6 +231,14 @@ export function applyRewrite(
     `/api/sections/${encodeURIComponent(sectionId)}/paragraphs/${paragraphIndex}`,
     { token, text },
   );
+}
+
+// Settling a finding from Review (#33, walked by #45): the author's other
+// explicit act on that surface. It lands on the entry the finding names,
+// so the token presented back is the entry's - `FindingOut.entry_token`,
+// served with the review - and a 409 means the entry moved underneath.
+export function settleFinding(sectionId: string, request: SettleRequest): Promise<SettlementOut> {
+  return post(`/api/sections/${encodeURIComponent(sectionId)}/settlements`, request);
 }
 
 export function search(query: string): Promise<SearchResponse> {

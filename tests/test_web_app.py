@@ -30,6 +30,7 @@ from memoria.records import (
 )
 from memoria.repository import Repository
 from memoria.subjects import (
+    serve_entry,
     BUILTIN_SUBJECTS,
     Entry,
     OverlayAct,
@@ -1298,6 +1299,9 @@ def test_nothing_but_the_match_terms_route_writes(tmp_path):
         # #43: the author applying a proposed rewrite from Review - the
         # Section/Review surfaces' one write, through the same write path.
         "/sections/{section_id}/paragraphs/{paragraph_index}",
+        # #33 / #45: the author settling a finding from Review - lands on
+        # the entry, through the same write path, with the entry's token.
+        "/sections/{section_id}/settlements",
         "/sources/{record_id}/reveal",
         "/subjects/{subject_id}/entries/{entry_slug}/match-terms",
     ]
@@ -1435,9 +1439,278 @@ def test_read_review_serves_findings_as_disagreement_sets_with_resolutions(tmp_p
             ],
             "resolutions": ["rewrite the passage", "exclude the source"],
             "patch": "He came back the next day.",
+            "entry_token": serve_entry(repository, "SUB-people", "bob")[1],
         }
     ]
     assert (body["verdicts_current"], body["verdicts_not_current"]) == (1, 1)
+    assert body["sessions"] == []
+
+
+# --- settling a finding from Review (#33, walked by #45) ----------------------
+
+
+def _three_way_finding(repository, chapter, section):
+    """An audit's three-way finding on paragraph 2 - the one shape whose
+    resolutions are settlements (part 06 §8.10)."""
+    from memoria.audit import (
+        DisagreementMember,
+        Finding,
+        ManuscriptParagraph,
+        finding_verdict,
+        record_audit_verdict,
+    )
+
+    paragraph = ManuscriptParagraph(chapter.number, section.number, 2, "He came back.")
+    finding = Finding(
+        disagreement_set=(
+            DisagreementMember("passage", paragraph.slot),
+            DisagreementMember("entry", "SUB-people/bob"),
+            DisagreementMember("source", "src-000184-p1"),
+        ),
+        statement="The source has him back a day later.",
+        confidence="high",
+        subject_id="SUB-people",
+    )
+    record_audit_verdict(repository, paragraph, "SUB-people/bob", finding_verdict(finding))
+    return finding
+
+
+def _settle_payload(finding_out, **overrides):
+    payload = {
+        "entry_id": finding_out["entry_id"],
+        "disagreement_set": finding_out["disagreement_set"],
+        "side": "entry",
+        "proposition": "he came back the same day",
+        "reason": "the author's own recollection outranks the letter",
+        "session_id": "SES-20260912-1432",
+        "entry_token": finding_out["entry_token"],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_settling_a_finding_lands_on_the_entry_and_commits_as_the_author(tmp_path):
+    repository, chapter, section = _manuscript_repo(tmp_path)
+    _three_way_finding(repository, chapter, section)
+    client = _client(repository)
+    (finding,) = client.get(f"/api/sections/{section.brief.id}/review").json()["findings"]
+    assert finding["resolutions"] == [
+        "settle toward the entry", "settle toward the source", "settle toward the passage"
+    ]
+
+    response = client.post(
+        f"/api/sections/{section.brief.id}/settlements", json=_settle_payload(finding)
+    )
+
+    assert response.status_code == 200, response.json()
+    body = response.json()
+    assert body["entry_id"] == "SUB-people/bob"
+    assert body["claim_id"] == "CLM-0001"
+    assert body["settled_line"].startswith(
+        "[settled] he came back the same day — SUB-people/bob, chosen over SRC-000184 ¶1,"
+    )
+    entry_text = (tmp_path / "subjects" / "people" / "bob.md").read_text(encoding="utf-8")
+    assert body["settled_line"] in entry_text
+    assert "— SES-20260912-1432" in entry_text
+    assert (tmp_path / "claims" / "CLM-0001.md").is_file()
+    author = subprocess.run(
+        ["git", "log", "-1", "--format=%an"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout.strip()
+    assert author == "Local Author"
+    # The settlement moved the entry: the finding is silenced and every
+    # judgement against the entry is stale until the audit runs again.
+    after = client.get(f"/api/sections/{section.brief.id}/review").json()
+    assert after["findings"] == []
+    assert (after["verdicts_current"], after["verdicts_not_current"]) == (0, 2)
+
+
+def test_settling_with_a_stale_entry_token_is_a_409_and_writes_nothing(tmp_path):
+    repository, chapter, section = _manuscript_repo(tmp_path)
+    _three_way_finding(repository, chapter, section)
+    client = _client(repository)
+    (finding,) = client.get(f"/api/sections/{section.brief.id}/review").json()["findings"]
+    entry_path = tmp_path / "subjects" / "people" / "bob.md"
+    entry_path.write_text(
+        entry_path.read_text(encoding="utf-8") + "\nEdited in Obsidian.\n", encoding="utf-8"
+    )
+    before = entry_path.read_text(encoding="utf-8")
+
+    response = client.post(
+        f"/api/sections/{section.brief.id}/settlements", json=_settle_payload(finding)
+    )
+
+    assert response.status_code == 409
+    assert "bob.md" in response.json()["detail"]
+    assert entry_path.read_text(encoding="utf-8") == before
+    assert not (tmp_path / "claims").exists()
+
+
+def test_settling_toward_a_side_the_set_does_not_carry_is_a_400(tmp_path):
+    repository, chapter, section = _manuscript_repo(tmp_path)
+    _three_way_finding(repository, chapter, section)
+    client = _client(repository)
+    (finding,) = client.get(f"/api/sections/{section.brief.id}/review").json()["findings"]
+
+    response = client.post(
+        f"/api/sections/{section.brief.id}/settlements",
+        json=_settle_payload(finding, side="decision"),
+    )
+
+    assert response.status_code == 400
+    assert "cannot settle toward 'decision'" in response.json()["detail"]
+    assert not (tmp_path / "claims").exists()
+
+
+def test_settling_on_an_unknown_section_is_a_404(tmp_path):
+    repository, _, _ = _manuscript_repo(tmp_path)
+    client = _client(repository)
+
+    response = client.post(
+        "/api/sections/SEC-9999/settlements",
+        json=_settle_payload(
+            {"entry_id": "SUB-people/bob", "disagreement_set": [], "entry_token": "x"}
+        ),
+    )
+
+    assert response.status_code == 404
+
+
+def test_a_finding_whose_entry_cannot_be_served_still_renders_with_no_token(
+    tmp_path, monkeypatch
+):
+    """A finding stands on the index's judgement, but the token for a
+    settlement is minted off the entry's file: an entry that cannot be
+    served (``SubjectError``) leaves the review served whole, the finding
+    carrying no token, so Settle is not offered on it rather than the page
+    failing. (A file moved between subject directories with its id kept
+    is refused earlier, by the audit's own scoping through ``index.gather``
+    - the same lookup - so the condition is injected at the seam here.)"""
+    from memoria import review as review_module
+    from memoria.subjects import SubjectError
+
+    repository, chapter, section = _manuscript_repo(tmp_path)
+    _three_way_finding(repository, chapter, section)
+    client = _client(repository)
+
+    def cannot_serve(repository, subject_id, entry_slug):
+        raise SubjectError(f"no such entry: {subject_id}/{entry_slug}")
+
+    monkeypatch.setattr(review_module, "serve_entry", cannot_serve)
+    response = client.get(f"/api/sections/{section.brief.id}/review")
+
+    assert response.status_code == 200, response.json()
+    (finding,) = response.json()["findings"]
+    assert finding["entry_id"] == "SUB-people/bob"
+    assert finding["entry_token"] is None
+
+
+def _settle_rejected(tmp_path, section, client, finding, **overrides):
+    """Post a settlement expected to be refused, and hold that nothing was
+    written: no claim, and the entry as it was."""
+    entry_path = tmp_path / "subjects" / "people" / "bob.md"
+    before = entry_path.read_text(encoding="utf-8")
+    response = client.post(
+        f"/api/sections/{section.brief.id}/settlements",
+        json=_settle_payload(finding, **overrides),
+    )
+    assert entry_path.read_text(encoding="utf-8") == before
+    assert not (tmp_path / "claims").exists()
+    return response
+
+
+def test_settling_on_an_entry_that_is_not_the_sets_own_is_a_400(tmp_path):
+    """The token was checked against ``entry_id``, so a set whose entry
+    member names another entry would land the write somewhere unchecked."""
+    repository, chapter, section = _manuscript_repo(tmp_path)
+    _write_entry(tmp_path, "people", "alice", match_terms=["Alice"])
+    _three_way_finding(repository, chapter, section)
+    client = _client(repository)
+    (finding,) = client.get(f"/api/sections/{section.brief.id}/review").json()["findings"]
+    disagreement_set = [
+        {"kind": "entry", "ref": "SUB-people/alice"} if member["kind"] == "entry" else member
+        for member in finding["disagreement_set"]
+    ]
+
+    response = _settle_rejected(
+        tmp_path, section, client, finding, disagreement_set=disagreement_set
+    )
+
+    assert response.status_code == 400
+    assert "SUB-people/alice" in response.json()["detail"]
+    alice = (tmp_path / "subjects" / "people" / "alice.md").read_text(encoding="utf-8")
+    assert "[settled]" not in alice
+
+
+def test_an_entry_that_moves_between_the_check_and_the_write_is_a_409(tmp_path, monkeypatch):
+    """ADR-0003: the write path's own staleness check is the last word. An
+    edit that lands after the route's pre-check and before the write is the
+    same outcome as one that landed before it - 409, nothing written."""
+    from memoria import review as review_module
+
+    repository, chapter, section = _manuscript_repo(tmp_path)
+    _three_way_finding(repository, chapter, section)
+    client = _client(repository)
+    (finding,) = client.get(f"/api/sections/{section.brief.id}/review").json()["findings"]
+    entry_path = tmp_path / "subjects" / "people" / "bob.md"
+    real_settle = review_module.settle
+
+    def settle_after_an_edit(*args, **kwargs):
+        entry_path.write_text(
+            entry_path.read_text(encoding="utf-8") + "\nEdited in Obsidian.\n", encoding="utf-8"
+        )
+        return real_settle(*args, **kwargs)
+
+    monkeypatch.setattr(review_module, "settle", settle_after_an_edit)
+
+    response = client.post(
+        f"/api/sections/{section.brief.id}/settlements", json=_settle_payload(finding)
+    )
+
+    assert response.status_code == 409
+    assert "bob.md" in response.json()["detail"]
+    assert "[settled]" not in entry_path.read_text(encoding="utf-8")
+    assert not (tmp_path / "claims").exists()
+
+
+@pytest.mark.parametrize(
+    ("overrides", "detail"),
+    [
+        ({"entry_id": "bob"}, "names bob"),
+        ({"reason": ""}, "reason"),
+        ({"session_id": "SES-20260912-1432#T003"}, "not a turn"),
+    ],
+)
+def test_a_settlement_the_set_does_not_admit_is_a_400_and_writes_nothing(
+    tmp_path, overrides, detail
+):
+    repository, chapter, section = _manuscript_repo(tmp_path)
+    _three_way_finding(repository, chapter, section)
+    client = _client(repository)
+    (finding,) = client.get(f"/api/sections/{section.brief.id}/review").json()["findings"]
+
+    response = _settle_rejected(tmp_path, section, client, finding, **overrides)
+
+    assert response.status_code == 400
+    assert detail in response.json()["detail"]
+
+
+def test_a_set_carrying_a_brief_is_never_settled(tmp_path):
+    """Part 06 §8.10: a brief is not a resolution target; the set offers a
+    conversation about the brief, and the route refuses the settlement."""
+    repository, chapter, section = _manuscript_repo(tmp_path)
+    _three_way_finding(repository, chapter, section)
+    client = _client(repository)
+    (finding,) = client.get(f"/api/sections/{section.brief.id}/review").json()["findings"]
+    disagreement_set = finding["disagreement_set"] + [
+        {"kind": "brief", "ref": section.brief.id}
+    ]
+
+    response = _settle_rejected(
+        tmp_path, section, client, finding, disagreement_set=disagreement_set
+    )
+
+    assert response.status_code == 400
+    assert "brief" in response.json()["detail"]
 
 
 # --- the supplied-context surface (#61) --------------------------------------
