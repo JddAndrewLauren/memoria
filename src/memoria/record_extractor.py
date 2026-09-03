@@ -546,7 +546,19 @@ def _statement_block(
     """Validate one badged statement per the write matrix and render its
     paragraph: ``(text, citations, block)``. Shared by ``record_statement``
     and ``revise_statement`` so a revision can never write what an append
-    would refuse."""
+    would refuse.
+
+    Written unescaped, deliberately (#151, #188): ``memoria.entity_escape``
+    exists to stop free text forging a document's own structural
+    ``<a id="...">`` anchor, and an entry body has none - no anchors, no
+    ids. Its only boundaries are the ``[badge] `` prefix at a paragraph's
+    start and the blank line between paragraphs, neither of which escaping
+    ``&`` and ``<`` defends - the same reasoning ``record_question`` already
+    records for ``questions.md``. Escaping here would also need an
+    unescape in every reader of an entry body (``subjects.parse_statements``,
+    validate, settlements, audit, this module's own ``_locate``, the
+    human-touched check, the web entry view), for no boundary it protects.
+    """
     if badge not in BADGES:
         raise RecordExtractorError(
             f"badge {badge!r} is not one of {', '.join(BADGES)} - the Curator "
@@ -609,7 +621,8 @@ def record_statement(
     actor: Actor | None = None,
 ) -> StatementRecord:
     """Append one badged statement to an entry's body, per the write matrix
-    (part 06 §8.2) - see the module docstring for the rules in full.
+    (part 06 §8.2) - see the module docstring for the rules in full, and
+    ``_statement_block``'s for why the text is written unescaped.
 
     ``token`` is the one ``subjects.serve_entry`` minted for the read this
     statement was composed against; the write is refused as stale if the
@@ -681,8 +694,10 @@ def revise_statement(
     caller read (the read ``token`` came from); it is matched exactly, so a
     paragraph that moved underneath is "no such statement" rather than a
     guess at which one was meant. The replacement is validated exactly as
-    ``record_statement`` validates an append. The flag is refreshed first
-    (``human_touched.flag``), and the decision is then:
+    ``record_statement`` validates an append - through the same
+    ``_statement_block``, whose docstring is why this, too, is written
+    unescaped. The flag is refreshed first (``human_touched.flag``), and
+    the decision is then:
 
     - unbadged testimony: author-supreme, never the Curator's - a note;
     - flagged human-touched (part 08 §14.2): a note, whatever its badge;
