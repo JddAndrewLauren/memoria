@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { listSubjects, listEntries, readEntry, type EntrySummary } from "../api/client";
+import { NavLink } from "react-router-dom";
+import { listSubjects, listEntries, type EntrySummary } from "../api/client";
 import { TreeSection } from "./TreeSection";
 
 export function SubjectsTree() {
@@ -66,54 +67,32 @@ function SubjectRow({ id, entryCount }: { id: string; entryCount: number }) {
           {!isError && data?.items.length === 0 && (
             <li className="py-1 text-xs text-muted">No entries yet.</li>
           )}
-          {!isError &&
-            data?.items.map((entry) => (
-              <EntryRow key={entry.id} subjectId={id} entry={entry} />
-            ))}
+          {!isError && data?.items.map((entry) => <EntryRow key={entry.id} entry={entry} />)}
         </ul>
       )}
     </div>
   );
 }
 
-function EntryRow({ subjectId, entry }: { subjectId: string; entry: EntrySummary }) {
-  const [expanded, setExpanded] = useState(false);
-  const label = entry.id.split("/")[1] ?? entry.id;
-  const { data, isError } = useQuery({
-    queryKey: ["entry", subjectId, label],
-    queryFn: () => readEntry(subjectId, label),
-    enabled: expanded,
-  });
+// A link into the entry view (#26), the way `SourcesTree` links into the
+// source viewer. It was an expander showing match terms inline until the
+// entry view existed to show them properly; leaving both would give the
+// author two places to read the same field and only one place to edit it.
+function EntryRow({ entry }: { entry: EntrySummary }) {
+  const [subjectId, slug] = entry.id.split("/");
 
   return (
     <li>
-      <button
-        type="button"
-        onClick={() => setExpanded((value) => !value)}
-        aria-expanded={expanded}
-        className="block w-full truncate rounded px-1 py-1 text-left text-xs text-secondary hover:bg-hover hover:text-ink"
+      <NavLink
+        to={`/subjects/${subjectId}/entries/${slug}`}
+        className={({ isActive }) =>
+          `block w-full truncate rounded px-1 py-1 text-left text-xs ${
+            isActive ? "bg-hover text-ink" : "text-secondary hover:bg-hover hover:text-ink"
+          }`
+        }
       >
-        {label}
-      </button>
-      {expanded && (
-        <div className="px-1 pb-1 text-[11px] text-muted">
-          <p>
-            {entry.match_terms.length > 0
-              ? `Match terms: ${entry.match_terms.join(", ")}`
-              : "No match terms yet."}
-          </p>
-          {isError && <p>The entry could not be read.</p>}
-          {data?.statements.length === 0 && <p>No statements yet.</p>}
-          {data?.statements.map((statement, index) => (
-            <p key={index}>
-              {statement.badge && (
-                <span className="font-mono uppercase">[{statement.badge}] </span>
-              )}
-              {statement.text}
-            </p>
-          ))}
-        </div>
-      )}
+        {slug ?? entry.id}
+      </NavLink>
     </li>
   );
 }

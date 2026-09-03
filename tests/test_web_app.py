@@ -7,6 +7,7 @@ opening a file directly fails a test rather than drifting in unnoticed.
 
 import ast
 import dataclasses
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,9 @@ from memoria.index import (
     SNIPPET_MATCH_START,
     SearchResult,
     build_index,
+    compute_appearances,
+    exclude,
+    pin,
 )
 from memoria.records import (
     NORMALIZED_RELATIVE_PATH,
@@ -34,6 +38,7 @@ from memoria.subjects import (
 )
 from memoria.web.app import create_app
 from memoria.web.schemas import SearchResultOut
+from memoria.write import Actor
 
 WEB_PACKAGE = Path(__file__).resolve().parent.parent / "src" / "memoria" / "web"
 
@@ -52,6 +57,12 @@ ALLOWED_IMPORTS = {
     "memoria.repository",
     "memoria.index",
     "memoria.subjects",
+    # #26: the web is an adapter over the write path as well as the read
+    # side. It shapes `memoria.write`'s outcomes - a stale token becomes a
+    # 409, an unattributed actor a 500 - and never writes anything itself;
+    # the two tests below still hold, so a route that opened a file or
+    # built a path of its own would fail one of them.
+    "memoria.write",
 }
 
 FILE_OPENING_CALLS = {"open", "read_text", "read_bytes", "write_text", "write_bytes"}
@@ -686,14 +697,23 @@ def test_read_one_entry_serves_its_id_match_terms_statements_and_overlay(tmp_pat
     assert body["match_terms"] == ["Bob", "Robert"]
     assert body["statements"] == [{"badge": None, "text": "Bob kept the ledger."}]
     assert body["overlay"] == [
-        {"anchor": "src-000184-p17", "action": "pin", "at": "2026-09-02T00:00:00Z"}
+        {
+            "anchor": "src-000184-p17",
+            "action": "pin",
+            "actor_name": "A Person",
+            "at": "2026-09-02T00:00:00Z",
+        }
     ]
+    # Opaque, but it has to be *there*: it is what a match-term write
+    # presents back, and an entry served without one cannot be edited.
+    assert body["token"]
 
 
-def test_read_one_entry_serves_no_actor_identity(tmp_path):
-    """The act stays attributable on disk (part 04 §42); the author's name
-    and address do not cross the API - nothing renders them, and ADR-0002
-    forbids assuming the browser and the repository share a machine."""
+def test_read_one_entry_serves_the_actors_name_but_never_their_address(tmp_path):
+    """Part 06 §8.3 requires the overlay to be attributable where it is
+    rendered, and #26's entry view renders it - so the name crosses. The
+    address does not: ADR-0002 forbids assuming the browser and the
+    repository share a machine, and no rendering needs it."""
     repository = Repository(root=tmp_path)
     write_builtin_subjects(repository)
     _write_entry(
@@ -714,7 +734,7 @@ def test_read_one_entry_serves_no_actor_identity(tmp_path):
 
     body = client.get("/api/subjects/SUB-people/entries/bob").json()
 
-    assert "actor_name" not in body["overlay"][0]
+    assert body["overlay"][0]["actor_name"] == "A Person"
     assert "actor_email" not in body["overlay"][0]
     assert "person@example.com" not in client.get(
         "/api/subjects/SUB-people/entries/bob"
@@ -934,3 +954,295 @@ def test_the_repository_is_resolved_once_at_lifespan(tmp_path):
         assert app.state.repository is repository
         client.get("/api/sources")
         assert app.state.repository is repository
+
+
+# --- the entry view's index reads, and its one write (#26) -------------------
+
+
+AUTHOR = Actor(name="Author", email="author@memoria.test")
+
+
+def _entry_repo(tmp_path, records=(), entries=()):
+    """A real git repository with subjects seeded, entries on disk and an
+    index built - what the entry view reads over.
+
+    Real git, because #26's write commits (ADR-0003 decision 2) and a fake
+    repository would exercise everything except that.
+    """
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, capture_output=True)
+    for key, value in (("user.name", "Local Author"), ("user.email", "local@memoria.test")):
+        subprocess.run(
+            ["git", "config", key, value], cwd=tmp_path, check=True, capture_output=True
+        )
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    for subject_slug, entry_slug, overrides in entries:
+        _write_entry(tmp_path, subject_slug, entry_slug, **overrides)
+    if records:
+        write_normalized_records(list(records), tmp_path / NORMALIZED_RELATIVE_PATH)
+        build_index(repository, list(records))
+        compute_appearances(repository)
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "initial"], cwd=tmp_path, check=True, capture_output=True
+    )
+    return repository
+
+
+def _bob_repo(tmp_path, **overrides):
+    record = _record(
+        id="SRC-000184",
+        paragraphs=["Bob called on July 17.", "Nothing about anyone here."],
+    )
+    return record, _entry_repo(
+        tmp_path,
+        records=[record],
+        entries=[("people", "bob", {"match_terms": ["Bob"], **overrides})],
+    )
+
+
+def test_the_gathered_set_serves_the_anchors_the_pass_matched(tmp_path):
+    _, repository = _bob_repo(tmp_path)
+    client = _client(repository)
+
+    body = client.get("/api/subjects/SUB-people/entries/bob/gathered").json()
+
+    assert [item["anchor"] for item in body["items"]] == ["src-000184-p1"]
+    assert body["items"][0]["src_id"] == "SRC-000184"
+    assert body["is_built"] is True
+
+
+def test_a_pinned_anchor_is_marked_and_attributed(tmp_path):
+    """Part 06 §8.3's overlay is attributable, and #26 renders it - a row
+    marked "pinned" with no account of who pinned it is half an act."""
+    _, repository = _bob_repo(tmp_path)
+    pin(repository, "SUB-people/bob", "src-000184-p2", AUTHOR)
+    client = _client(repository)
+
+    body = client.get("/api/subjects/SUB-people/entries/bob/gathered").json()
+
+    pinned = [item for item in body["items"] if item["anchor"] == "src-000184-p2"]
+    assert pinned and pinned[0]["pinned"] is True
+    assert pinned[0]["overlay_action"] == "pin"
+    assert pinned[0]["actor_name"] == "Author"
+    assert pinned[0]["at"]
+
+
+def test_an_excluded_anchor_is_absent_from_the_set_but_still_accounted_for(tmp_path):
+    """`gather` drops it, which is correct; serving only the list would show
+    a shorter set with no reason for it, so the act is served alongside."""
+    _, repository = _bob_repo(tmp_path)
+    exclude(repository, "SUB-people/bob", "src-000184-p1", AUTHOR)
+    client = _client(repository)
+
+    body = client.get("/api/subjects/SUB-people/entries/bob/gathered").json()
+
+    assert [item["anchor"] for item in body["items"]] == []
+    assert body["excluded"] == [
+        {
+            "anchor": "src-000184-p1",
+            "action": "exclude",
+            "actor_name": "Author",
+            "at": body["excluded"][0]["at"],
+        }
+    ]
+
+
+def test_an_unbuilt_index_says_so_rather_than_serving_a_bare_empty_set(tmp_path):
+    """An entry with an empty gathered set is a valid state (part 06 §8.2);
+    a corpus that was never indexed is a different fact, and they are the
+    same empty list without the flag (#157)."""
+    repository = _entry_repo(tmp_path, entries=[("people", "bob", {"match_terms": ["Bob"]})])
+    client = _client(repository)
+
+    body = client.get("/api/subjects/SUB-people/entries/bob/gathered").json()
+
+    assert body["items"] == []
+    assert body["is_built"] is False
+
+
+def test_appearances_are_served_from_their_own_route_never_the_gathered_set(tmp_path):
+    """Part 06 §8.11's separation, at the API boundary: a gathered set is
+    evidence to write from, appearances are prose already written."""
+    book = _record(
+        id="SRC-000900", source_type="book", paragraphs=["Bob is barely in this chapter."]
+    )
+    evidence = _record(id="SRC-000184", paragraphs=["Bob called on July 17."])
+    repository = _entry_repo(
+        tmp_path,
+        records=[book, evidence],
+        entries=[("people", "bob", {"match_terms": ["Bob"]})],
+    )
+    client = _client(repository)
+
+    appearances = client.get("/api/subjects/SUB-people/entries/bob/appearances").json()
+    gathered = client.get("/api/subjects/SUB-people/entries/bob/gathered").json()
+
+    assert [item["anchor"] for item in appearances["items"]] == ["src-000900-p1"]
+    assert appearances["items"][0]["note"]
+    assert appearances["engine_supported"] is True
+    assert [item["anchor"] for item in gathered["items"]] == ["src-000184-p1"]
+    assert "src-000900-p1" not in {item["anchor"] for item in gathered["items"]}
+
+
+def test_a_theme_reports_that_its_appearances_engine_does_not_exist_yet(tmp_path):
+    """Not an empty list. Themes and Arcs cannot be matched against
+    manuscript prose at all until the audit at M5 (part 06 §8.11), and a
+    surface told only "no appearances" would say the archive is silent when
+    nothing has looked."""
+    repository = _entry_repo(
+        tmp_path, entries=[("themes", "control", {"match_terms": ["SUB-people/bob"]})]
+    )
+    client = _client(repository)
+
+    body = client.get("/api/subjects/SUB-themes/entries/control/appearances").json()
+
+    assert body["items"] == []
+    assert body["engine_supported"] is False
+
+
+@pytest.mark.parametrize("suffix", ["", "/gathered", "/appearances"])
+def test_an_unknown_entry_is_a_404_on_every_entry_read(tmp_path, suffix):
+    repository = _entry_repo(tmp_path, entries=[("people", "bob", {})])
+    client = _client(repository)
+
+    assert client.get(f"/api/subjects/SUB-people/entries/nobody{suffix}").status_code == 404
+
+
+def test_editing_match_terms_writes_them_and_serves_a_fresh_token(tmp_path):
+    """The author's first durable write. The new token is served because the
+    write has just invalidated the one the client presented, and the editor
+    is still open over the file."""
+    _, repository = _bob_repo(tmp_path)
+    client = _client(repository)
+    served = client.get("/api/subjects/SUB-people/entries/bob").json()
+
+    response = client.put(
+        "/api/subjects/SUB-people/entries/bob/match-terms",
+        json={"token": served["token"], "match_terms": ["Bob", "Robert"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["match_terms"] == ["Bob", "Robert"]
+    assert response.json()["token"] != served["token"]
+    assert client.get("/api/subjects/SUB-people/entries/bob").json()["match_terms"] == [
+        "Bob",
+        "Robert",
+    ]
+
+
+def test_a_match_term_write_against_a_file_changed_underneath_is_a_409(tmp_path):
+    """#26's fifth acceptance criterion, over HTTP: entry files are editable
+    in Obsidian too, so the write is checked against the file the client
+    read - and a rejection is total, never partial."""
+    _, repository = _bob_repo(tmp_path)
+    client = _client(repository)
+    served = client.get("/api/subjects/SUB-people/entries/bob").json()
+
+    path = tmp_path / "subjects" / "people" / "bob.md"
+    obsidian = path.read_text(encoding="utf-8").replace("- Bob", "- Bobby")
+    path.write_text(obsidian, encoding="utf-8")
+
+    response = client.put(
+        "/api/subjects/SUB-people/entries/bob/match-terms",
+        json={"token": served["token"], "match_terms": ["Robert"]},
+    )
+
+    assert response.status_code == 409
+    assert "subjects/people/bob.md" in response.json()["detail"]
+    assert path.read_text(encoding="utf-8") == obsidian
+
+
+def test_a_409_carries_neither_the_current_content_nor_a_fresh_token(tmp_path):
+    """ADR-0003 decision 5: the rejection names the file and nothing else.
+    Returning the content would put a second copy of the read inside the
+    write endpoint, and #64 already builds that read."""
+    _, repository = _bob_repo(tmp_path)
+    client = _client(repository)
+    served = client.get("/api/subjects/SUB-people/entries/bob").json()
+    path = tmp_path / "subjects" / "people" / "bob.md"
+    path.write_text(path.read_text(encoding="utf-8") + "\nEdited elsewhere.\n", encoding="utf-8")
+
+    body = client.put(
+        "/api/subjects/SUB-people/entries/bob/match-terms",
+        json={"token": served["token"], "match_terms": ["Robert"]},
+    ).json()
+
+    assert set(body) == {"detail"}
+    assert "token" not in body["detail"].lower()
+
+
+def test_a_malformed_match_term_is_a_400_and_writes_nothing(tmp_path):
+    _, repository = _bob_repo(tmp_path)
+    client = _client(repository)
+    served = client.get("/api/subjects/SUB-people/entries/bob").json()
+    path = tmp_path / "subjects" / "people" / "bob.md"
+    before = path.read_text(encoding="utf-8")
+
+    response = client.put(
+        "/api/subjects/SUB-people/entries/bob/match-terms",
+        json={"token": served["token"], "match_terms": ["SUB-people/"]},
+    )
+
+    assert response.status_code == 400
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_a_match_term_write_to_an_unknown_entry_is_a_404(tmp_path):
+    _, repository = _bob_repo(tmp_path)
+    client = _client(repository)
+
+    response = client.put(
+        "/api/subjects/SUB-people/entries/nobody/match-terms",
+        json={"token": "whatever", "match_terms": ["Bob"]},
+    )
+
+    assert response.status_code == 404
+
+
+def test_an_accepted_write_commits_so_the_tree_is_left_clean(tmp_path):
+    """ADR-0003 decision 2. Without the commit, every file the author
+    touches in the app carries uncommitted modifications and #32's
+    dirty-tree rule closes it to the Curator until someone commits by
+    hand."""
+    _, repository = _bob_repo(tmp_path)
+    client = _client(repository)
+    served = client.get("/api/subjects/SUB-people/entries/bob").json()
+
+    client.put(
+        "/api/subjects/SUB-people/entries/bob/match-terms",
+        json={"token": served["token"], "match_terms": ["Robert"]},
+    )
+
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert status.strip() == ""
+    author = subprocess.run(
+        ["git", "log", "-1", "--format=%an"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout.strip()
+    assert author == "Local Author"
+
+
+def test_nothing_but_the_match_terms_route_writes(tmp_path):
+    """Pins and exclusions are author acts with their own attribution and
+    belong to #18 - #26 renders them, it does not author them. A route that
+    grew a second write would show up here."""
+    import memoria.web.routes as routes_module
+
+    write_methods = [
+        method
+        for route in routes_module.router.routes
+        for method in route.methods
+        if method not in {"GET", "HEAD", "OPTIONS"}
+    ]
+    paths = sorted(
+        route.path
+        for route in routes_module.router.routes
+        if route.methods & {"POST", "PUT", "PATCH", "DELETE"}
+    )
+    assert write_methods
+    assert paths == [
+        "/sources/{record_id}/reveal",
+        "/subjects/{subject_id}/entries/{entry_slug}/match-terms",
+    ]

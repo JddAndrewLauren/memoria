@@ -1,66 +1,75 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SubjectsTree } from "./SubjectsTree";
 
+/**
+ * The `SUBJECTS` tree's entry rows, after #26 gave entries a view of their
+ * own.
+ *
+ * #148 made this row an expander that read the entry and drew its statements
+ * and match terms inline, because there was nowhere else to see them. There
+ * is now: the entry view (#26) shows the same fields and is the only place
+ * that can *edit* the match terms. Two places to read one field, one place to
+ * write it, is how an author comes to trust a stale copy - so the row is a
+ * link, and the read it used to make is gone with it.
+ */
 function renderTree() {
   const queryClient = new QueryClient();
   return render(
     <QueryClientProvider client={queryClient}>
-      <SubjectsTree />
+      <MemoryRouter>
+        <SubjectsTree />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
 
-describe("the SUBJECTS tree's own entry read (#148)", () => {
+describe("the SUBJECTS tree's entry rows (#148, #26)", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
   beforeEach(() => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.includes("/entries/bob")) {
-          return new Response(
-            JSON.stringify({
-              id: "SUB-people/bob",
-              match_terms: ["Bob", "Robert"],
-              statements: [
-                { badge: null, text: "Bob kept a journal." },
-                { badge: "inferred", text: "Bob likely wrote most nights." },
-              ],
-            }),
-            { status: 200 },
-          );
-        }
-        if (url.includes("/api/subjects/SUB-people/entries")) {
-          return new Response(
-            JSON.stringify({ items: [{ id: "SUB-people/bob", match_terms: ["Bob", "Robert"] }] }),
-            { status: 200 },
-          );
-        }
-        if (url.includes("/api/subjects")) {
-          return new Response(
-            JSON.stringify({ items: [{ id: "SUB-people", entry_count: 1 }] }),
-            { status: 200 },
-          );
-        }
-        return new Response(JSON.stringify({}), { status: 200 });
-      }),
-    );
+    fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/subjects/SUB-people/entries")) {
+        return new Response(
+          JSON.stringify({ items: [{ id: "SUB-people/bob", match_terms: ["Bob", "Robert"] }] }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/api/subjects")) {
+        return new Response(JSON.stringify({ items: [{ id: "SUB-people", entry_count: 1 }] }), {
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("reads the entry's statements when expanded - not just its match terms", async () => {
+  it("links the entry to its own view rather than expanding it in the tree", async () => {
     renderTree();
 
     fireEvent.click(await screen.findByText("people"));
-    fireEvent.click(await screen.findByText("bob"));
 
-    expect(await screen.findByText("Bob kept a journal.")).toBeInTheDocument();
-    expect(screen.getByText(/Bob likely wrote most nights\./)).toBeInTheDocument();
-    expect(screen.getByText(/inferred/i)).toBeInTheDocument();
-    expect(screen.getByText(/Match terms: Bob, Robert/)).toBeInTheDocument();
+    const link = await screen.findByRole("link", { name: "bob" });
+    expect(link).toHaveAttribute("href", "/subjects/SUB-people/entries/bob");
+  });
+
+  it("does not read the entry itself - the entry view owns that read", async () => {
+    renderTree();
+
+    fireEvent.click(await screen.findByText("people"));
+    fireEvent.click(await screen.findByRole("link", { name: "bob" }));
+
+    const read = fetchMock.mock.calls.some(([input]) =>
+      String(input).includes("/entries/bob"),
+    );
+    expect(read).toBe(false);
   });
 });

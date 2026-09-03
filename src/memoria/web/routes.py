@@ -1,12 +1,19 @@
-"""The HTTP surface #64, #24, #25, #65, #148 and #157 build: list sources, read one
-source, raw source, resolve a reference to a citation, search, list subjects,
-list one subject's entries, read one entry - plus one connection fact
+"""The HTTP surface #64, #24, #25, #65, #148, #157 and #26 build: list sources,
+read one source, raw source, resolve a reference to a citation, search, list
+subjects, list one subject's entries, read one entry with its gathered set and
+its appearances, edit an entry's match terms - plus one connection fact
 (locality) and one action (reveal).
 
 Each route calls ``memoria.*`` and shapes the result into a typed response
 model - it holds no rule the CLI or the MCP server does not, opens no
 SQLite database and reads no evidence file itself
 (``test_web_app.py``'s isolation test).
+
+#26 makes this an adapter over the *write* path as well as the read side,
+which is why ``memoria.write`` is here: a match-term write is the author's
+first durable write (ADR-0003). The rule stays the same - the route resolves
+no path, hashes no file and never touches one; ``memoria.subjects`` owns all
+three and this shapes its answer.
 """
 
 from __future__ import annotations
@@ -17,7 +24,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 import memoria.references as references
 from memoria.index import SearchFilters
+from memoria.index import appearances_supported
+from memoria.index import gather as gather_set
 from memoria.index import is_built as index_is_built
+from memoria.index import list_appearances
 from memoria.index import search as search_index
 from memoria.records import LaunchError, NormalizedRecord, Read, ReadError
 from memoria.records import is_normalized
@@ -29,20 +39,30 @@ from memoria.records import real_paragraphs
 from memoria.records import reveal_original_source as reveal_original_source_core
 from memoria.repository import NoEvidenceRoot, Repository
 from memoria.subjects import (
+    Entry,
+    OverlayAct,
     SubjectError,
     is_seeded,
     load_all_entries,
     load_all_subjects,
     load_entry,
     parse_statements,
+    serve_entry,
+    set_match_terms,
 )
 from memoria.web.dependencies import get_repository
 from memoria.web.schemas import (
+    AppearanceOut,
+    AppearancesResponse,
     CitationOut,
     EntryDetail,
     EntryListResponse,
     EntrySummary,
+    GatheredSetResponse,
+    GatheredSourceOut,
     LocalityOut,
+    MatchTermsResponse,
+    MatchTermsUpdate,
     OverlayActOut,
     Paragraph,
     RawSourceResponse,
@@ -57,6 +77,7 @@ from memoria.web.schemas import (
     SubjectListResponse,
     SubjectSummary,
 )
+from memoria.write import Rejected, WriteError, repository_actor
 
 router = APIRouter()
 
@@ -311,38 +332,73 @@ def list_entries(
     return EntryListResponse(items=items)
 
 
+def _to_overlay_act(act: OverlayAct) -> OverlayActOut:
+    """One pin or exclusion, without the actor's email (``OverlayActOut``)."""
+    return OverlayActOut(
+        anchor=act.anchor, action=act.action, actor_name=act.actor_name, at=act.at
+    )
+
+
+def _served_entry(repository: Repository, subject_id: str, entry_slug: str) -> tuple[Entry, str]:
+    """``serve_entry``, with its 404s shaped - for the read that leads to an
+    edit, and so needs a staleness token."""
+    try:
+        return serve_entry(repository, subject_id, entry_slug)
+    except SubjectError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def _loaded_entry(repository: Repository, subject_id: str, entry_slug: str) -> Entry:
+    """``load_entry``, with its 404s shaped - for a read that leads to no
+    edit, so no token is minted for nobody to hold.
+
+    One ``except`` covers every 404 either read has, because the core raises
+    for all three: an unknown subject, an unknown entry, and a
+    ``subject_id`` that is not a subject ID at all.
+    """
+    try:
+        return load_entry(repository, subject_id, entry_slug)
+    except SubjectError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/subjects/{subject_id}/entries/{entry_slug}")
 def read_entry(
     subject_id: str,
     entry_slug: str,
     repository: Repository = Depends(get_repository),
 ) -> EntryDetail:
-    """Read one entry: #64's third subject read, built here for #148 and
-    #157.
+    """One entry read whole - #64's third subject read, built in #157.
 
-    `GET /api/read?ref=SUB-x/y` (#25) already serves this same entry, but as
-    the raw file verbatim, frontmatter included - the MCP tool surface's "the
-    entry, verbatim" contract (`docs/tool-surface.md`), reached through a
-    reference for the slide-over citation panel's backlink navigation. That
-    is a different read from this one: the `SUBJECTS` tree needs an entry
+    `GET /api/read?ref=SUB-x/y` (#25) serves this same entry, but as the raw
+    file verbatim, frontmatter included - the MCP tool surface's "the entry,
+    verbatim" contract (`docs/tool-surface.md`), reached through a reference
+    for the slide-over citation panel's backlink navigation. That is a
+    different read from this one (#148): the `SUBJECTS` tree needs an entry
     shaped like its `list subjects`/`list a subject's entries` siblings -
-    parsed fields, not a raw blob - the same way `read_source` parses a
-    record into paragraphs rather than pointing callers at `raw_source`.
+    parsed fields, not a raw blob - the same way `read_source` parses a record
+    into paragraphs rather than pointing callers at `raw_source`.
 
-    `load_entry` survives a renamed entry file the same way `find_entry_path`
-    does (issue #16). One ``except`` covers every 404 the read has, because
-    the core raises `SubjectError` for all three: an unknown subject, an
-    unknown entry, and a `subject_id` that is not a subject ID at all - the
-    honest-empty-state `list_entries` gives a *known* subject with no
-    entries is unaffected.
+    Served through ``serve_entry`` rather than ``load_entry`` (#26): the
+    author edits match terms from this surface, and ADR-0003's staleness
+    check compares against *the file as it was read*, so the token has to be
+    minted by the read that produced what is on screen rather than by the
+    write that follows it.
+
+    Resolves an entry whose file has been renamed: ``serve_entry`` goes
+    through ``find_entry_path``, which falls back to matching the
+    frontmatter ``id``, so #16's stable ``SUB-x/y`` IDs survive a rename on
+    disk and this route inherits that without repeating it.
 
     ``extra`` is not served - it exists so a rewrite does not drop an
     unmodelled frontmatter key, not to be published (``EntryDetail``).
+
+    The gathered set and appearances are not here either, and that is the
+    §8.11 separation rather than an economy: this is a read of the entry
+    *file*, and those two are index reads with their own build signal and
+    their own failure. They have their own routes below.
     """
-    try:
-        entry = load_entry(repository, subject_id, entry_slug)
-    except SubjectError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    entry, token = _served_entry(repository, subject_id, entry_slug)
     return EntryDetail(
         id=entry.id,
         match_terms=entry.match_terms,
@@ -350,11 +406,138 @@ def read_entry(
             StatementOut(badge=statement.badge, text=statement.text)
             for statement in parse_statements(entry.body)
         ],
-        overlay=[
-            OverlayActOut(anchor=act.anchor, action=act.action, at=act.at)
-            for act in entry.overlay
-        ],
+        overlay=[_to_overlay_act(act) for act in entry.overlay],
+        token=token,
     )
+
+
+@router.get("/subjects/{subject_id}/entries/{entry_slug}/gathered")
+def read_gathered_set(
+    subject_id: str,
+    entry_slug: str,
+    repository: Repository = Depends(get_repository),
+) -> GatheredSetResponse:
+    """An entry's gathered set, with the author's overlay legible on it.
+
+    ``gather`` has already applied the overlay - it drops an excluded anchor
+    and adds a pinned one - so membership needs nothing here. What it does
+    not carry is the *act*: which anchors the author pinned, who did it and
+    when. That is on the entry file (part 04 §42 keeps it there, so it
+    survives the index being deleted), and joining the two is this route's
+    whole job.
+
+    The exclusions are served separately because they are absent from
+    ``items`` by construction. A surface that got only the list would show a
+    shorter set with no account of why, which is an author act rendered as
+    nothing.
+    """
+    entry = _loaded_entry(repository, subject_id, entry_slug)
+    acts = {act.anchor: act for act in entry.overlay}
+    items = []
+    for source in gather_set(repository, entry.id):
+        act = acts.get(source.anchor)
+        items.append(
+            GatheredSourceOut(
+                src_id=source.src_id,
+                anchor=source.anchor,
+                pinned=source.pinned,
+                overlay_action=act.action if act is not None else None,
+                actor_name=act.actor_name if act is not None else None,
+                at=act.at if act is not None else None,
+            )
+        )
+    return GatheredSetResponse(
+        items=items,
+        excluded=[
+            _to_overlay_act(act) for act in entry.overlay if act.action == "exclude"
+        ],
+        is_built=index_is_built(repository),
+    )
+
+
+@router.get("/subjects/{subject_id}/entries/{entry_slug}/appearances")
+def read_appearances(
+    subject_id: str,
+    entry_slug: str,
+    repository: Repository = Depends(get_repository),
+) -> AppearancesResponse:
+    """An entry's appearances - the already-written prose it touches.
+
+    ``engine_supported`` is what stops an empty list from meaning two
+    things. For a Person it means the lexical pass found nothing; for a
+    Theme or an Arc it means the pass never ran, and will not until the
+    audit at M5 (part 06 §8.11). ``memoria.index.appearances_supported``
+    decides, the same predicate ``compute_appearances`` skips on.
+
+    The entry is served first so an unknown entry is a 404 here too, rather
+    than an empty list for something that does not exist.
+    """
+    entry = _loaded_entry(repository, subject_id, entry_slug)
+    return AppearancesResponse(
+        items=[
+            AppearanceOut(src_id=item.src_id, anchor=item.anchor, note=item.note)
+            for item in list_appearances(repository, entry.id)
+        ],
+        is_built=index_is_built(repository),
+        engine_supported=appearances_supported(entry.id),
+    )
+
+
+@router.put("/subjects/{subject_id}/entries/{entry_slug}/match-terms")
+def update_match_terms(
+    subject_id: str,
+    entry_slug: str,
+    update: MatchTermsUpdate,
+    repository: Repository = Depends(get_repository),
+) -> MatchTermsResponse:
+    """Replace an entry's match terms - the first durable write over HTTP.
+
+    Match terms are author-owned (part 06 §8.2), so this commits as the
+    author: ``repository_actor`` supplies the identity from the repository's
+    own git config, never from the request, because ADR-0002 forbids
+    assuming the browser and the repository share a machine and a name in a
+    payload is an unverified claim about who acted.
+
+    The three outcomes, each a different status:
+
+    - **409** for a stale token. The file changed since the client read it -
+      in Obsidian, or in another tab - and nothing was written, merged or
+      partially applied (ADR-0003 decision 1). The client re-reads for the
+      current content and a fresh token; this response deliberately carries
+      neither (decision 5), because #64 already builds that read.
+    - **400** for a malformed match term, refused by ``set_match_terms``
+      before the file is touched.
+    - **500** for a write that cannot be attempted - no configured git
+      identity, or a failing commit.
+
+    On success the *new* token is returned, because the write has just
+    invalidated the one the client presented and the editor is still open
+    over the file.
+    """
+    try:
+        actor = repository_actor(repository)
+        result = set_match_terms(
+            repository, subject_id, entry_slug, update.match_terms, update.token, actor
+        )
+    except SubjectError as exc:
+        # An unknown subject or entry is a 404; a malformed match term is a
+        # 400. Both arrive as `SubjectError`, and the distinction is which
+        # of the two the caller can fix by sending something else.
+        status = 404 if str(exc).startswith("no such ") else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    except WriteError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    if isinstance(result, Rejected):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{result.path} changed since it was read - nothing was "
+                "written. Re-read the entry and try again."
+            ),
+        )
+    entry, token = _served_entry(repository, subject_id, entry_slug)
+    return MatchTermsResponse(match_terms=entry.match_terms, token=token)
 
 
 @router.get("/search")

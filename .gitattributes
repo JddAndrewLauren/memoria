@@ -8,3 +8,9 @@
 # (#78) has to strip it. Normalizing them to LF would erase the property they
 # exist to hold. `-text` turns every conversion off for these files.
 tests/fixtures/enron/*.eml -text
+
+# The gate corpus is the same thing for the same reason: invented messages in
+# the export's wire format, CRLF included, walked through the real converter by
+# scripts/gate-m3.sh. Normalizing them to LF would make the gate walk exercise
+# a format the corpus it stands in for does not have.
+gate/corpus/*.eml -text

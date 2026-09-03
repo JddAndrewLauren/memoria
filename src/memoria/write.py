@@ -339,6 +339,53 @@ def checkpoint(repository: Repository) -> CheckpointResult:
     return Checkpointed(change_id=change_id, files=tuple(dirty))
 
 
+def repository_actor(repository: Repository) -> Actor:
+    """The human actor a surface's write commits as: this repository's own
+    git ``user.name`` and ``user.email``.
+
+    §41 says an author's edit through a surface is a direct human change and
+    commits as theirs, and ADR-0003 decision 2 makes the commit part of the
+    write. Something has to supply that identity, and it cannot be the
+    client: ADR-0002 forbids any surface assuming the browser and the
+    repository share a machine, so a name arriving over HTTP would be an
+    unverified claim about who is acting. The repository's own git identity
+    is the one already on the server side of that boundary, and it is what
+    `checkpoint` - which takes no `Actor` at all - already commits under, so
+    an app write and a checkpoint of the same author's Obsidian edits agree.
+
+    An unset identity raises rather than defaulting to anything. Git's own
+    fallback is a guessed `user@hostname`, and attributing an author act to
+    a guess is worse than refusing it: the guess is indistinguishable
+    afterwards from a real identity, and #32's human-touched flag is defined
+    over exactly these commits.
+    """
+    name = _git_config(repository, "user.name")
+    email = _git_config(repository, "user.email")
+    if not name or not email:
+        raise WriteError(
+            "no author identity: this repository has no git user.name and/or "
+            "user.email configured, and an author act must be attributed - "
+            "set them with `git config user.name` and `git config user.email`"
+        )
+    return Actor(name=name, email=email)
+
+
+def _git_config(repository: Repository, key: str) -> str:
+    """One git config value, or `""` when it is unset.
+
+    Exit code 1 is git's "not set", which is an answer here rather than a
+    failure - `repository_actor` turns the pair of them into one message
+    naming both settings, which is more use than two separate errors.
+    """
+    result = subprocess.run(
+        ["git", "config", "--get", key],
+        cwd=repository.root,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
 def dirty_tracked_paths(
     repository: Repository, paths: tuple[str, ...] = ()
 ) -> list[str]:

@@ -400,14 +400,38 @@ GENERATED_UI_TYPES = REPO_ROOT / "ui" / "src" / "api" / "schema.d.ts"
 
 def test_no_author_facing_surface_exposes_a_token_figure():
     """Part 14 §40 (as amended by ADR-0001) bans token figures from every
-    author-facing view, without exception. The FastAPI app (`memoria.web`)
-    is the backend those views are served from, and its generated
-    TypeScript client (`ui/src/api/schema.d.ts`) is what a view could
-    render straight through - so this scans both for the word rather than
-    trusting that a future route remembers the rule. `memoria.mcp` (the
-    model-facing tool surface, #29) and `memoria.context_manifest` itself
-    are deliberately not scanned: they are not "the interface" §40 means.
+    author-facing view, without exception - §40's own words are "token
+    budgets". The FastAPI app (`memoria.web`) is the backend those views are
+    served from, and its generated TypeScript client
+    (`ui/src/api/schema.d.ts`) is what a view could render straight through,
+    so this scans both rather than trusting that a future route remembers
+    the rule. `memoria.mcp` (the model-facing tool surface, #29) and
+    `memoria.context_manifest` itself are deliberately not scanned: they are
+    not "the interface" §40 means.
+
+    **This scanned for the bare word `token` until #26**, when the word
+    acquired a second meaning on this surface that §40 does not reach: the
+    staleness token an entry is served with is a SHA-256 of the file's bytes
+    (ADR-0003 decision 1), not a figure, not a count, and never rendered.
+    Narrowing to the *figure* vocabulary keeps the guard and drops the false
+    positive; the giveaway for a figure is that it is counted or budgeted,
+    where a staleness token is always one opaque singular value.
+
+    A denylist, and like `test_ui_dependency_boundary.py`'s it is the
+    mechanism rather than the list: a new spelling is one line to add the
+    day one shows up.
     """
+    figures = (
+        "tokens",
+        "token count",
+        "token_count",
+        "tokencount",
+        "token figure",
+        "token budget",
+        "token_budget",
+        "token usage",
+        "token_usage",
+    )
     surface_files = sorted(WEB_PACKAGE.rglob("*.py"))
     assert surface_files, "no memoria.web sources found - has the package moved?"
     if GENERATED_UI_TYPES.is_file():
@@ -415,4 +439,7 @@ def test_no_author_facing_surface_exposes_a_token_figure():
 
     for path in surface_files:
         text = path.read_text(encoding="utf-8").lower()
-        assert "token" not in text, f"{path} names a token figure - part 14 §40 bans it"
+        for figure in figures:
+            assert figure not in text, (
+                f"{path} names a token figure ({figure!r}) - part 14 §40 bans it"
+            )
