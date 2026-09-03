@@ -284,7 +284,14 @@ def test_resolving_an_unknown_id_is_a_named_error(tmp_path):
 # `unconfirmed=False` - a deliberate act that creates a chapter and section,
 # same as any other creator here, not a finding resolving itself onto one
 # that already exists.
-_BRIEF_WRITERS = ("manuscript.py", "legacy_import.py")
+#
+# `authorship` is the second (#42): part 04 §2.1's *other* AI write path, "an
+# AI writes it from a conversation the author answered" - a deliberate act
+# on that one brief, gated by an authorization that must cover it and
+# nothing else, and committed through `memoria.write` with the authorizing
+# turn on the commit. It is not a finding-resolution module: a finding card
+# or a batch action cannot produce an authorization it accepts.
+_BRIEF_WRITERS = ("manuscript.py", "legacy_import.py", "authorship.py")
 _WRITING_FUNCTIONS = {
     "write_brief",
     "confirm_brief",

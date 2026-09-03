@@ -319,3 +319,16 @@ def test_a_search_result_anchor_is_a_reference_with_no_reconstruction(tmp_path):
     (hit,) = search(repository, "heron")
 
     assert references.parse(hit.anchor) == SourceReference("SRC-000184", 2)
+
+
+# --- one paragraph of a section's prose (#42) ---------------------------------
+
+
+def test_parse_resolves_a_section_paragraph_in_either_spelling():
+    assert references.parse("SEC-0001 ¶7") == SectionReference("SEC-0001", 7)
+    assert references.parse("SEC-0001 P7") == SectionReference("SEC-0001", 7)
+    assert references.parse("sec-0001 p7") == SectionReference("SEC-0001", 7)
+
+
+def test_format_citation_for_a_section_paragraph_uses_the_pilcrow():
+    assert references.format_citation(SectionReference("SEC-0001", 7)) == "SEC-0001 ¶7"

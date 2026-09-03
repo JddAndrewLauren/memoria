@@ -14,11 +14,12 @@ stable IDs in frontmatter keep every ``CHP-``/``SEC-`` reference intact
 across the move.
 
 **Only a deliberate act on the brief may write one** (part 04 §2.1 /
-part 10 §19): the author writing or editing it, or - not built here - an AI
-writing it from a conversation the author answered. No finding card and no
-batch action may write a brief. This module is the only one that knows the
-brief filenames (``book.md``, ``chapter.md``, ``section.md``) and the only
-one that calls the functions that write them; ``tests/test_manuscript.py``
+part 10 §19): the author writing or editing it, or an AI writing it from a
+conversation the author answered - the latter in ``memoria.authorship``
+(#42), under an authorization covering that one brief. No finding card and
+no batch action may write a brief. This module is the only one that knows
+the brief filenames (``book.md``, ``chapter.md``, ``section.md``) and, with
+``authorship``, the only one that writes them; ``tests/test_manuscript.py``
 asserts both over the package's sources, so a finding-resolution module
 that reached for ``Path.write_text`` on a brief, or for ``write_brief``
 itself, would fail the suite rather than pass unnoticed.

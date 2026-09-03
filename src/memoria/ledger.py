@@ -228,6 +228,25 @@ def append_search_global(
     )
 
 
+def append_trace(
+    repository: Repository, session_id: str, ref: str, served: list[str]
+) -> None:
+    """Ledger one served ``trace(ref)`` call (#42).
+
+    ``served`` names what the trace put in front of the model: the
+    paragraph's own citation and every authorizing turn it composed the
+    text of - each a reference ``read(ref)`` accepts, so the ledger line
+    and the citation a reader follows are the same string. Commit facts and
+    manifest references are identifiers, not text served, and are not
+    listed.
+    """
+    _append(
+        repository,
+        session_id,
+        {"tool": "trace", "ref": ref, "served": served},
+    )
+
+
 def append_assembly(
     repository: Repository,
     session_id: str,

@@ -747,3 +747,53 @@ def test_a_write_by_the_repository_actor_commits_as_that_identity(tmp_path):
         check=True,
     ).stdout.strip()
     assert author == "Local Author <local-author@memoria.test>"
+
+
+# --- trailers ride on the commit (#42, §41) --------------------------------------
+
+
+def test_a_write_carries_the_trailers_it_is_given_after_the_change_id(tmp_path):
+    repository = _repo(tmp_path, {"chapters/01/sections/01/draft.md": "Bob.\n"})
+    served = write.serve(repository, "chapters/01/sections/01/draft.md")
+
+    write.write(
+        repository, "chapters/01/sections/01/draft.md", served.token, "Bob rode.\n",
+        CURATOR, trailers=(("authorized-by", "SES-20260912-1432#T008"), ("scope", "x")),
+    )
+
+    body = _git_output(tmp_path, "log", "-1", "--format=%B").rstrip("\n")
+    assert body == (
+        "write: chapters/01/sections/01/draft.md\n\n"
+        "authorized-by: SES-20260912-1432#T008\nscope: x"
+    )
+
+
+def test_a_human_writes_trailers_follow_its_change_id(tmp_path):
+    repository = _repo(tmp_path, {"subjects/people/bob.md": "Bob\n"})
+    served = write.serve(repository, "subjects/people/bob.md")
+
+    write.write(
+        repository, "subjects/people/bob.md", served.token, "Bob!\n", AUTHOR,
+        trailers=(("note", "x"),),
+    )
+
+    lines = _git_output(tmp_path, "log", "-1", "--format=%B").splitlines()
+    assert lines[2].startswith("change-id: CHG-")
+    assert lines[3] == "note: x"
+
+
+def test_create_carries_trailers_too(tmp_path):
+    repository = _repo(tmp_path, {"subjects/people/bob.md": "Bob\n"})
+
+    create(
+        repository, "chapters/01/sections/01/draft.md", "New.\n", CURATOR,
+        trailers=(("authorized-by", "SES-20260912-1432#T008"),),
+    )
+
+    assert "authorized-by: SES-20260912-1432#T008" in _git_output(tmp_path, "log", "-1", "--format=%B")
+
+
+def _git_output(cwd, *args) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout

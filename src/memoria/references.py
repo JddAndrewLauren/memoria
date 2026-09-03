@@ -38,6 +38,14 @@ _CHAPTER_ID = r"CHP-\d{4}"
 _SECTION_ID = r"SEC-\d{4}"
 _BARE_CHAPTER_ID = re.compile(rf"^(?P<id>{_CHAPTER_ID})$", re.IGNORECASE)
 _BARE_SECTION_ID = re.compile(rf"^(?P<id>{_SECTION_ID})$", re.IGNORECASE)
+# One paragraph of a section's prose (#42), in the same `¶`/`P` form a
+# source paragraph takes below. Positional and deliberately *not* durable:
+# part 04 §4.1 says nothing canonical points at a paragraph of manuscript
+# prose, so this is a form for a live question - `trace(SEC-0001 ¶7)`, a
+# read of what ¶7 says right now - never one to store in a record.
+_SECTION_PARAGRAPH = re.compile(
+    rf"^(?P<id>{_SECTION_ID})\s*(?:¶|P)\s*(?P<n>\d+)$", re.IGNORECASE
+)
 
 # A human-authored commit (ADR-0008): a per-day sequence, not the `HHMM` form
 # part 04 §4 originally showed - minute resolution collides once writes
@@ -155,9 +163,12 @@ class ChapterReference:
 @dataclass(frozen=True)
 class SectionReference:
     """A section, addressed by its stable ``SEC-`` ID rather than its
-    (renumberable) directory (#35)."""
+    (renumberable) directory (#35), and optionally one paragraph of its
+    prose (#42) - positional, 1-based, and never a durable pointer (see
+    ``_SECTION_PARAGRAPH``)."""
 
     section_id: str
+    paragraph: int | None = None
 
 
 @dataclass(frozen=True)
@@ -296,6 +307,10 @@ def parse(ref: str) -> Reference:
     match = _BARE_SECTION_ID.match(ref)
     if match:
         return SectionReference(match.group("id").upper())
+
+    match = _SECTION_PARAGRAPH.match(ref)
+    if match:
+        return SectionReference(match.group("id").upper(), int(match.group("n")))
 
     match = _BARE_CHANGE_ID.match(ref)
     if match:
@@ -454,7 +469,9 @@ def format_citation(reference: Reference) -> str:
     if isinstance(reference, ChapterReference):
         return reference.chapter_id
     if isinstance(reference, SectionReference):
-        return reference.section_id
+        if reference.paragraph is None:
+            return reference.section_id
+        return f"{reference.section_id} ¶{reference.paragraph}"
     if isinstance(reference, ChangeReference):
         return reference.change_id
     if isinstance(reference, DecisionReference):
