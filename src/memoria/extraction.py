@@ -1153,14 +1153,14 @@ class _Derived:
 def _licensing_terms(entry: Entry) -> dict[str, str]:
     """An entry's word-kind match terms plus its implicit name, normalized,
     each mapped back to the term that licensed it."""
-    terms = {normalize_form(implicit_name_term(entry.id)): ""}
-    for term in entry.match_terms:
-        try:
-            kind = classify_match_term(term)
-        except SubjectError:
-            continue
-        if kind != "word":
-            continue
+    # Local, not at module scope, for the same reason `rebuild` keeps its
+    # `implicit_name_term` import local: `memoria.scope` imports this
+    # module, so the reverse import must stay local to avoid a cycle.
+    from memoria.scope import match_terms_for
+
+    match_terms = match_terms_for(entry.id, entry)
+    terms = {normalize_form(match_terms[0]): ""}
+    for term in match_terms[1:]:
         normalized = normalize_form(term)
         if normalized:
             # Overwrites rather than `setdefault`: when a declared term and
