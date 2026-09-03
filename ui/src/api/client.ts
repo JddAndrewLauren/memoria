@@ -17,6 +17,9 @@ export type EntrySummary = components["schemas"]["EntrySummary"];
 export type EntryDetail = components["schemas"]["EntryDetail"];
 export type StatementOut = components["schemas"]["StatementOut"];
 export type SearchResultOut = components["schemas"]["SearchResultOut"];
+export type SubjectListResponse = components["schemas"]["SubjectListResponse"];
+export type EntryListResponse = components["schemas"]["EntryListResponse"];
+export type SearchResponse = components["schemas"]["SearchResponse"];
 export type EditorialRecordOut = components["schemas"]["EditorialRecordOut"];
 export type ReadOverlayOut = components["schemas"]["ReadOverlayOut"];
 export type CitationOut = components["schemas"]["CitationOut"];
@@ -89,11 +92,11 @@ export function readRef(ref: string): Promise<CitationOut> {
   return get(`/api/read?ref=${encodeURIComponent(ref)}`);
 }
 
-export function listSubjects(): Promise<{ items: SubjectSummary[] }> {
+export function listSubjects(): Promise<SubjectListResponse> {
   return get(`/api/subjects`);
 }
 
-export function listEntries(subjectId: string): Promise<{ items: EntrySummary[] }> {
+export function listEntries(subjectId: string): Promise<EntryListResponse> {
   return get(`/api/subjects/${encodeURIComponent(subjectId)}/entries`);
 }
 
@@ -105,7 +108,7 @@ export function readEntry(subjectId: string, entrySlug: string): Promise<EntryDe
   );
 }
 
-export function search(query: string): Promise<{ results: SearchResultOut[] }> {
+export function search(query: string): Promise<SearchResponse> {
   return get(`/api/search?q=${encodeURIComponent(query)}`);
 }
 

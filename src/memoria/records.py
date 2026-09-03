@@ -583,6 +583,29 @@ def read_all(repository: Repository) -> list[NormalizedRecord]:
     ]
 
 
+def is_normalized(repository: Repository) -> bool:
+    """Whether ``memoria normalize`` has produced anything here (#157).
+
+    The same condition ``read_all`` returns ``[]`` on and ``load`` raises its
+    first ``ReadError`` on - the normalized directory's existence, asked as a
+    question rather than answered as an absence.
+
+    ADR-0004 makes the empty corpus a value; this is the part of the value
+    that says *which* empty it is. ``read_all`` returning ``[]`` is one
+    answer to two different questions - a checkout where nothing has been
+    normalized, and a corpus that genuinely holds no records - and a caller
+    that cannot tell them apart has to guess which to tell the author. With
+    this it does not: ``[]`` and ``False`` means name the command to run,
+    ``[]`` and ``True`` means the corpus is empty.
+
+    Additive on purpose: ``read_all`` still returns ``[]`` and still raises
+    nothing. Public core API for the same reason hydration is (§40.1) - the
+    CLI, the MCP server and the web adapter each need this fact, and the
+    alternative is three of them stat-ing a path they should not know.
+    """
+    return (repository.root / NORMALIZED_RELATIVE_PATH).is_dir()
+
+
 def list_sources(
     repository: Repository,
     *,

@@ -1,4 +1,4 @@
-"""The HTTP surface #64, #24, #25, #65 and #148 build: list sources, read one
+"""The HTTP surface #64, #24, #25, #65, #148 and #157 build: list sources, read one
 source, raw source, resolve a reference to a citation, search, list subjects,
 list one subject's entries, read one entry - plus one connection fact
 (locality) and one action (reveal).
@@ -17,8 +17,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 import memoria.references as references
 from memoria.index import SearchFilters
+from memoria.index import is_built as index_is_built
 from memoria.index import search as search_index
 from memoria.records import LaunchError, NormalizedRecord, Read, ReadError
+from memoria.records import is_normalized
 from memoria.records import list_sources as list_sources_core
 from memoria.records import load as load_source
 from memoria.records import read as read_ref
@@ -28,6 +30,7 @@ from memoria.records import reveal_original_source as reveal_original_source_cor
 from memoria.repository import NoEvidenceRoot, Repository
 from memoria.subjects import (
     SubjectError,
+    is_seeded,
     load_all_entries,
     load_all_subjects,
     load_entry,
@@ -40,6 +43,7 @@ from memoria.web.schemas import (
     EntryListResponse,
     EntrySummary,
     LocalityOut,
+    OverlayActOut,
     Paragraph,
     RawSourceResponse,
     ReadOverlayOut,
@@ -121,6 +125,7 @@ def list_sources(
         total=len(records),
         limit=limit,
         offset=offset,
+        is_built=is_normalized(repository),
     )
 
 
@@ -272,7 +277,8 @@ def list_subjects(repository: Repository = Depends(get_repository)) -> SubjectLi
     entry count computed from the entries actually there (#24) - an
     un-seeded repository (`memoria seed-subjects` never run) is an empty
     list, not an error, the same honesty ``list_sources`` keeps for an
-    un-normalized one.
+    un-normalized one - and since #157 an empty list that says which of the
+    two it is, in ``is_built``.
     """
     subjects = load_all_subjects(repository)
     counts: dict[str, int] = {}
@@ -283,7 +289,8 @@ def list_subjects(repository: Repository = Depends(get_repository)) -> SubjectLi
         items=[
             SubjectSummary(id=subject.id, entry_count=counts.get(subject.id, 0))
             for subject in subjects
-        ]
+        ],
+        is_built=is_seeded(repository),
     )
 
 
@@ -306,9 +313,12 @@ def list_entries(
 
 @router.get("/subjects/{subject_id}/entries/{entry_slug}")
 def read_entry(
-    subject_id: str, entry_slug: str, repository: Repository = Depends(get_repository)
+    subject_id: str,
+    entry_slug: str,
+    repository: Repository = Depends(get_repository),
 ) -> EntryDetail:
-    """Read one entry: #64's third subject read, built here for #148.
+    """Read one entry: #64's third subject read, built here for #148 and
+    #157.
 
     `GET /api/read?ref=SUB-x/y` (#25) already serves this same entry, but as
     the raw file verbatim, frontmatter included - the MCP tool surface's "the
@@ -318,10 +328,16 @@ def read_entry(
     shaped like its `list subjects`/`list a subject's entries` siblings -
     parsed fields, not a raw blob - the same way `read_source` parses a
     record into paragraphs rather than pointing callers at `raw_source`.
+
     `load_entry` survives a renamed entry file the same way `find_entry_path`
-    does (issue #16); a missing subject or entry is `SubjectError`, mapped to
-    404 rather than the honest-empty-state `list_entries` gives a *known*
-    subject with no entries.
+    does (issue #16). One ``except`` covers every 404 the read has, because
+    the core raises `SubjectError` for all three: an unknown subject, an
+    unknown entry, and a `subject_id` that is not a subject ID at all - the
+    honest-empty-state `list_entries` gives a *known* subject with no
+    entries is unaffected.
+
+    ``extra`` is not served - it exists so a rewrite does not drop an
+    unmodelled frontmatter key, not to be published (``EntryDetail``).
     """
     try:
         entry = load_entry(repository, subject_id, entry_slug)
@@ -333,6 +349,10 @@ def read_entry(
         statements=[
             StatementOut(badge=statement.badge, text=statement.text)
             for statement in parse_statements(entry.body)
+        ],
+        overlay=[
+            OverlayActOut(anchor=act.anchor, action=act.action, at=act.at)
+            for act in entry.overlay
         ],
     )
 
@@ -357,6 +377,10 @@ def search(
     does not: the search dialog draws a fragment per hit (part 19 §19.8) and
     the core computes it, so the adapter still opens no database and reads no
     evidence. It is a locator, not evidence - #95.
+
+    ``is_built`` reports whether the index exists at all (#157), so a client
+    can tell "never indexed" from "nothing matched" - the same empty list
+    otherwise.
     """
     filters = SearchFilters(
         event_date=event_date,
@@ -374,5 +398,6 @@ def search(
                 snippet=result.snippet,
             )
             for result in results
-        ]
+        ],
+        is_built=index_is_built(repository),
     )

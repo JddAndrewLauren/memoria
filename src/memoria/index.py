@@ -713,6 +713,30 @@ def filter_predicate(filters: SearchFilters | None) -> tuple[str, list]:
     return " AND ".join(clauses), params
 
 
+def is_built(repository: Repository) -> bool:
+    """Whether ``memoria rebuild`` has produced an index here (#157).
+
+    The same condition ``search`` returns ``[]`` on - the index file's
+    existence. It is what lets a caller tell "the corpus was never indexed"
+    from "nothing matched", which are the same empty result and different
+    facts (ADR-0004's "the empty corpus becomes a value").
+
+    **The file's existence is the signal, not its contents.** An index built
+    over zero records reads as built, which is correct - the author ran the
+    command and there was nothing to index. Less correct, and recorded here
+    rather than left for a later reader to file as a bug: ``connect`` creates
+    the file too, and ``memoria.extraction`` calls it, so an extraction run
+    against a repository where ``rebuild`` has never run flips this to
+    ``True``. Tightening it would mean opening the database to look, which is
+    a query rather than a path test, and would cost the web adapter the one
+    property that lets it ask at all (#64: it imports no driver).
+
+    Additive: ``search`` still returns ``[]`` and still raises nothing, and
+    this - like ``search`` - creates no file on the way out.
+    """
+    return (repository.root / INDEX_RELATIVE_PATH).exists()
+
+
 def search(
     repository: Repository,
     query: str,

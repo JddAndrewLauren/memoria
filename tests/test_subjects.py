@@ -16,7 +16,10 @@ from memoria.subjects import (
     SubjectError,
     classify_match_term,
     entry_to_markdown,
+    SUBJECTS_RELATIVE_PATH,
     find_entry_path,
+    is_seeded,
+    load_all_subjects,
     load_entry,
     load_subject,
     parse_entry,
@@ -414,3 +417,42 @@ def test_load_entry_skips_an_unrelated_malformed_sibling(tmp_path):
     entry = load_entry(repository, "SUB-people", "carol")
 
     assert entry.id == "SUB-people/carol"
+
+
+# --- is_seeded (#157) -------------------------------------------------------
+
+
+def test_load_all_subjects_over_a_missing_directory_is_empty_not_an_error(tmp_path):
+    """An unseeded repository is an empty subject list, not a failure - the
+    same posture `records.read_all` keeps for an un-normalized one."""
+    assert load_all_subjects(Repository(root=tmp_path)) == []
+
+
+def test_a_repository_with_no_subjects_directory_is_not_seeded(tmp_path):
+    """The unbuilt half of the pair the empty list cannot express."""
+    repository = Repository(root=tmp_path)
+
+    assert is_seeded(repository) is False
+    assert load_all_subjects(repository) == []
+
+
+def test_a_subjects_directory_that_holds_no_prompts_is_still_seeded(tmp_path):
+    """Pinned so a later reader cannot quietly tighten the predicate.
+
+    The directory is the signal, not its contents: the stricter test is
+    definitionally `bool(load_all_subjects(...))` and would carry nothing
+    the caller's own list did not already carry - see `is_seeded`.
+    """
+    (tmp_path / SUBJECTS_RELATIVE_PATH).mkdir()
+    repository = Repository(root=tmp_path)
+
+    assert is_seeded(repository) is True
+    assert load_all_subjects(repository) == []
+
+
+def test_a_seeded_repository_is_seeded(tmp_path):
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+
+    assert is_seeded(repository) is True
+    assert len(load_all_subjects(repository)) == len(BUILTIN_SUBJECTS)

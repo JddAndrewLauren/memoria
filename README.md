@@ -146,8 +146,10 @@ The reads are: list sources (`GET /api/sources`, filterable by `source_type`,
 (`GET /api/sources/{id}/raw`), resolve one reference to a citation
 (`GET /api/read?ref=…`, #25), search (`GET /api/search`, wrapping
 `memoria.index.search`), list subjects with their entry counts
-(`GET /api/subjects`, #24), and one subject's entries
-(`GET /api/subjects/{id}/entries`, #24). See `docs/tool-surface.md` for what
+(`GET /api/subjects`, #24), one subject's entries
+(`GET /api/subjects/{id}/entries`, #24), and one entry read whole with its
+match terms, badged statements and curated overlay
+(`GET /api/subjects/{id}/entries/{slug}`, #157). See `docs/tool-surface.md` for what
 each filter means and `src/memoria/web/schemas.py` for the response shapes.
 
 `GET /api/read` wraps the same composed core as the MCP server's `read(ref)`,

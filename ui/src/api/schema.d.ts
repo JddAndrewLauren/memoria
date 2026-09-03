@@ -171,7 +171,8 @@ export interface paths {
          *     entry count computed from the entries actually there (#24) - an
          *     un-seeded repository (`memoria seed-subjects` never run) is an empty
          *     list, not an error, the same honesty ``list_sources`` keeps for an
-         *     un-normalized one.
+         *     un-normalized one - and since #157 an empty list that says which of the
+         *     two it is, in ``is_built``.
          */
         get: operations["list_subjects_api_subjects_get"];
         put?: never;
@@ -211,7 +212,8 @@ export interface paths {
         };
         /**
          * Read Entry
-         * @description Read one entry: #64's third subject read, built here for #148.
+         * @description Read one entry: #64's third subject read, built here for #148 and
+         *     #157.
          *
          *     `GET /api/read?ref=SUB-x/y` (#25) already serves this same entry, but as
          *     the raw file verbatim, frontmatter included - the MCP tool surface's "the
@@ -221,10 +223,16 @@ export interface paths {
          *     shaped like its `list subjects`/`list a subject's entries` siblings -
          *     parsed fields, not a raw blob - the same way `read_source` parses a
          *     record into paragraphs rather than pointing callers at `raw_source`.
+         *
          *     `load_entry` survives a renamed entry file the same way `find_entry_path`
-         *     does (issue #16); a missing subject or entry is `SubjectError`, mapped to
-         *     404 rather than the honest-empty-state `list_entries` gives a *known*
-         *     subject with no entries.
+         *     does (issue #16). One ``except`` covers every 404 the read has, because
+         *     the core raises `SubjectError` for all three: an unknown subject, an
+         *     unknown entry, and a `subject_id` that is not a subject ID at all - the
+         *     honest-empty-state `list_entries` gives a *known* subject with no
+         *     entries is unaffected.
+         *
+         *     ``extra`` is not served - it exists so a rewrite does not drop an
+         *     unmodelled frontmatter key, not to be published (``EntryDetail``).
          */
         get: operations["read_entry_api_subjects__subject_id__entries__entry_slug__get"];
         put?: never;
@@ -255,6 +263,10 @@ export interface paths {
          *     does not: the search dialog draws a fragment per hit (part 19 §19.8) and
          *     the core computes it, so the adapter still opens no database and reads no
          *     evidence. It is a locator, not evidence - #95.
+         *
+         *     ``is_built`` reports whether the index exists at all (#157), so a client
+         *     can tell "never indexed" from "nothing matched" - the same empty list
+         *     otherwise.
          */
         get: operations["search_api_search_get"];
         put?: never;
@@ -290,6 +302,13 @@ export interface components {
          *     the same "no reconstruction by the caller" discipline
          *     ``docs/tool-surface.md`` already holds for a search hit's anchor.
          *     ``None`` whenever ``paragraph`` is, the same pairing.
+         *
+         *     ``EntryDetail`` is **not** a second copy of this for entries, and the two
+         *     are not collapsible (#157). Reading ``SUB-x/y`` here serves the entry's
+         *     raw text for the panel and nothing else - no ``match_terms``, no badges,
+         *     no curated overlay. The entry read serves the entry's own shape. Both
+         *     exist because they answer different questions, and #25's one generic
+         *     reference read stays exactly as it is.
          */
         CitationOut: {
             /** Ref */
@@ -332,9 +351,8 @@ export interface components {
         };
         /**
          * EntryDetail
-         * @description One entry read in full - #64's third subject read (#148): frontmatter
-         *     plus its body, parsed into ``statements`` the same way ``SourceDetail``
-         *     parses a record into ``paragraphs`` rather than serving one raw blob.
+         * @description One entry read whole - #64's third subject read, built here (#148,
+         *     #157).
          *
          *     Distinct from ``GET /api/read?ref=SUB-x/y`` (#25's ``CitationOut``),
          *     which serves the entry's raw file verbatim, frontmatter included - the
@@ -343,6 +361,17 @@ export interface components {
          *     slide-over citation panel's backlink navigation. This is the `SUBJECTS`
          *     tree's own read, shaped like its ``SubjectSummary``/``EntrySummary``
          *     siblings rather than conflated with that one.
+         *
+         *     ``statements`` is the body split by ``memoria.subjects.parse_statements``:
+         *     Memoria's badged statements and the author's unbadged testimony are
+         *     shared territory in the same body (part 06 §8.2), and splitting them is
+         *     what keeps them distinguishable rather than merely visually different.
+         *
+         *     Neither ``extra`` nor the raw ``body`` is here. ``extra`` exists so a
+         *     rewrite does not drop an unmodelled frontmatter key (``Entry.extra``),
+         *     not to be published; the parsed statements are the served form of the
+         *     body, and a client that wants the markdown is asking for the file rather
+         *     than for the entry.
          */
         EntryDetail: {
             /** Id */
@@ -351,8 +380,20 @@ export interface components {
             match_terms: string[];
             /** Statements */
             statements: components["schemas"]["StatementOut"][];
+            /**
+             * Overlay
+             * @default []
+             */
+            overlay: components["schemas"]["OverlayActOut"][];
         };
-        /** EntryListResponse */
+        /**
+         * EntryListResponse
+         * @description One subject's entries, for the `SUBJECTS` tree's second level.
+         *
+         *     Carries no ``is_built``, and the omission is a decision rather than an
+         *     oversight (#157): a subject that exists with no entries is genuinely
+         *     empty. There is no third state to report, so there is no flag.
+         */
         EntryListResponse: {
             /** Items */
             items: components["schemas"]["EntrySummary"][];
@@ -386,6 +427,33 @@ export interface components {
         LocalityOut: {
             /** Is Local */
             is_local: boolean;
+        };
+        /**
+         * OverlayActOut
+         * @description One pin or exclusion recorded on an entry (#157's entry read).
+         *
+         *     **Not ``ReadOverlayOut``**, which sits a few models above under a
+         *     confusingly similar name and is a different concept: that one mirrors
+         *     ``memoria.index.ReadOverlay`` and carries the
+         *     ``entry_links``/``exclusions``/``citing_settlements`` a *paragraph* read
+         *     is decorated with (#20). This one is an attributable author act stored
+         *     on the entry file itself - part 04 §42's "never regenerated", which
+         *     survives the index being deleted outright.
+         *
+         *     ``memoria.subjects.OverlayAct`` also carries ``actor_name`` and
+         *     ``actor_email``, and they are deliberately not served. The act stays
+         *     fully attributable on disk, which is what §42 requires; nothing in the
+         *     client attributes a pin to a person, and ADR-0002 forbids assuming the
+         *     browser and the repository share a machine, so an address crossing this
+         *     boundary would be a liability with no consumer.
+         */
+        OverlayActOut: {
+            /** Anchor */
+            anchor: string;
+            /** Action */
+            action: string;
+            /** At */
+            at: string;
         };
         /**
          * Paragraph
@@ -440,10 +508,22 @@ export interface components {
             /** Opened */
             opened: boolean;
         };
-        /** SearchResponse */
+        /**
+         * SearchResponse
+         * @description A page of hits.
+         *
+         *     ``is_built`` is whether ``memoria rebuild`` has produced an index
+         *     (``memoria.index.is_built``) - the same field as on
+         *     ``SourceListResponse`` and ``SubjectListResponse``, reporting the third
+         *     build step (#157). No results with ``is_built`` false means the corpus
+         *     was never indexed, which is a different fact from nothing matching, and
+         *     the two are the same empty list without it.
+         */
         SearchResponse: {
             /** Results */
             results: components["schemas"]["SearchResultOut"][];
+            /** Is Built */
+            is_built: boolean;
         };
         /**
          * SearchResultOut
@@ -516,6 +596,15 @@ export interface components {
         /**
          * SourceListResponse
          * @description A page of ``list sources`` - paginated, per the acceptance criterion.
+         *
+         *     ``is_built`` is whether ``memoria normalize`` has produced anything here
+         *     (``memoria.records.is_normalized``). It is what makes an empty ``items``
+         *     readable: empty and ``false`` is an un-normalized checkout and the client
+         *     should name the command to run; empty and ``true`` is a corpus that
+         *     genuinely holds no sources. ADR-0004's "the empty corpus becomes a
+         *     value" - this is the part of the value that says which state it is in
+         *     (#157). The same field name appears on ``SubjectListResponse`` and
+         *     ``SearchResponse``, each reporting its own build step.
          */
         SourceListResponse: {
             /** Items */
@@ -526,6 +615,8 @@ export interface components {
             limit: number;
             /** Offset */
             offset: number;
+            /** Is Built */
+            is_built: boolean;
         };
         /**
          * SourceSummary
@@ -555,23 +646,39 @@ export interface components {
         };
         /**
          * StatementOut
-         * @description One paragraph of an entry's body, with its badge if it has one.
+         * @description One paragraph of an entry body, with its badge if it has one -
+         *     mirrors ``memoria.subjects.Statement`` field for field.
          *
-         *     Mirrors ``memoria.subjects.Statement`` field for field. ``badge`` is
-         *     ``None`` for author testimony - the absence of a badge *is* the
-         *     attribution (part 06 §9.5) - never re-derived by a consumer as "no
-         *     badge shown".
+         *     ``badge`` is ``None`` for author testimony, and that is not a missing
+         *     value: **the absence of a badge is the attribution** (part 06 §9.5),
+         *     which is why it is a nullable field on the shape rather than an omitted
+         *     key. A response that dropped it would not be serving the entry.
+         *     Non-null values are ``author``, ``source``, ``inferred`` and ``open``; a
+         *     client renders whatever value is present rather than assuming that list
+         *     is closed, the same posture ``SourceSummary.source_type`` takes.
          */
         StatementOut: {
             /** Badge */
-            badge: string | null;
+            badge?: string | null;
             /** Text */
             text: string;
         };
-        /** SubjectListResponse */
+        /**
+         * SubjectListResponse
+         * @description The `SUBJECTS` tree's top level.
+         *
+         *     ``is_built`` is whether ``memoria seed-subjects`` has run
+         *     (``memoria.subjects.is_seeded``) - the same field, and the same
+         *     distinction, as ``SourceListResponse.is_built``, reporting a different
+         *     build step (#157). It reports the ``subjects/`` directory's existence
+         *     rather than its contents, so a directory holding no subject prompts
+         *     reads as built-and-empty; ``is_seeded`` records why.
+         */
         SubjectListResponse: {
             /** Items */
             items: components["schemas"]["SubjectSummary"][];
+            /** Is Built */
+            is_built: boolean;
         };
         /**
          * SubjectSummary
