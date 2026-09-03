@@ -279,6 +279,43 @@ EMAIL_CONVERTER_VERSION = "email 4"
 _EMAIL_CONTAINER_SUFFIXES = (".mbox", ".eml", ".msg")
 
 
+def is_email_message(entry: ManifestEntry) -> bool:
+    """Whether a ledger entry is one message inside an email export - the
+    unit ``_process_email_containers`` numbers by ``email_message_index``
+    - rather than a file of its own."""
+    return "email_message_index" in entry.extra
+
+
+def is_email_container(entry: ManifestEntry) -> bool:
+    """Whether a ledger entry is an email export's own reserved number: the
+    ``.mbox``/``.eml``/``.msg`` file itself, which never becomes a record
+    (its messages do, each under its own entry)."""
+    return not is_email_message(entry) and Path(entry.path).suffix in _EMAIL_CONTAINER_SUFFIXES
+
+
+def expected_converter_pin(entry: ManifestEntry) -> str | None:
+    """The converter pin a record for ``entry`` carries when it is current.
+
+    The same rule the per-unit loop in ``normalize`` applies: an email
+    message is pinned by ``EMAIL_CONVERTER_VERSION``, any other unit by the
+    converter registered for its suffix. ``None`` when no converter is
+    registered (the unit is unconvertible, or an email container's own
+    number) - and also when the registered pin cannot be resolved because
+    its extra is not installed, since a status reader must not fail on a
+    checkout that never converts that format itself; a caller compares the
+    record's pin only when this returns one.
+    """
+    if is_email_message(entry):
+        return EMAIL_CONVERTER_VERSION
+    registration = CONVERTERS.get(Path(entry.path).suffix)
+    if registration is None:
+        return None
+    try:
+        return registration[1]()
+    except Exception:  # noqa: BLE001 - an uninstalled extra, not a broken unit
+        return None
+
+
 def _paragraph_hash(paragraph: str) -> str:
     """The extraction's memo key for one paragraph (part 06 §8.12): a sha256
     of its exact text. Converter output that shifts by a space changes this,

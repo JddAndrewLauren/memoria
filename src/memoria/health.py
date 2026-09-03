@@ -56,10 +56,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from memoria.audit import NotCurrentJudgement, StalenessMap, compute_staleness_map
-from memoria.manifest import DEFAULT_MANIFEST_RELATIVE_PATH, load_manifest
+from memoria.ingestion import unprocessed_units
 from memoria.manuscript import book_path, list_chapters, list_sections, parse_brief
 from memoria.record_extractor import QUESTIONS_FILENAME, RESEARCH_MEMOS_RELATIVE_PATH
-from memoria.records import NORMALIZED_RELATIVE_PATH
 from memoria.repository import Repository
 from memoria.validate import validate as run_validate
 
@@ -268,15 +267,14 @@ def _broken_provenance(repository: Repository) -> tuple[str, ...] | None:
 
 
 def _unprocessed_source_additions(repository: Repository) -> tuple[str, ...] | None:
-    if repository.evidence_root is None:
-        return None
-    manifest_path = repository.evidence_root / DEFAULT_MANIFEST_RELATIVE_PATH
-    entries = load_manifest(manifest_path)
-    normalized_dir = repository.root / NORMALIZED_RELATIVE_PATH
-    normalized_ids = (
-        {path.stem for path in normalized_dir.glob("*.md")} if normalized_dir.is_dir() else set()
-    )
-    return tuple(sorted(entry.id for entry in entries if not entry.deleted and entry.id not in normalized_ids))
+    # Owned by the ingestion status (`memoria.ingestion`), so this bullet
+    # and the ingestion surface name the same units for the same reason:
+    # ledgered, and no record accounts for it - not yet converted, failed,
+    # or unconvertible. A deleted unit's reserved number and an email
+    # export's own number are not additions awaiting processing (ADR-0006
+    # tolerates both gaps), and an out-of-date record is a reconversion,
+    # not an addition.
+    return unprocessed_units(repository)
 
 
 # --- the report ----------------------------------------------------------------

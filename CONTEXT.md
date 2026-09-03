@@ -276,6 +276,18 @@ message inside an email export. Numbered once by the manifest ledger on first si
 never renumbered.
 _Avoid_: Source file, document, input, item
 
+**Ingestion status**:
+What the ledger, the normalized records and the index say about each [[raw unit]],
+read together: whether it was converted (current, out of date, not yet converted, failed
+with the converter's reason, no converter for its format, an email export's own reserved
+number, a stub with no paragraphs, or deleted with its number kept), whether the index
+holds its paragraphs, and how many of them the [[extraction]] has read under the current
+subject prompts. Derived on every read and never recorded — the record is the state —
+and computed without a model, so it is safe at any time. Served by `memoria sources`,
+`GET /api/ingestion` and the `/ingestion` page, which is the one place a raw unit that
+never became a record is visible at all.
+_Avoid_: Pipeline state, sync status, ingest log, processing queue, stale, pending
+
 **Authorization**:
 What an AI manuscript write must have before it applies: the session turn in
 which the author gave it, and exactly what it covers — one paragraph, a

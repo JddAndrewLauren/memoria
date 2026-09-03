@@ -1,8 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { NavLink } from "react-router-dom";
-import { listAllSources, type SourceSummary } from "../api/client";
+import { listAllSources, readIngestionStatus, type SourceSummary } from "../api/client";
+import { drawState, indexByUnitId } from "../lib/ingestion";
 import { groupSourcesByType } from "../lib/sourceGroups";
 import { TreeSection } from "./TreeSection";
+
+// The glyph's colour by state tone - the same tokens `Badge` uses, without
+// the chip around them, since a tree row has no room for one.
+const GLYPH_TONE: Record<string, string> = {
+  green: "text-sources",
+  amber: "text-amber",
+  red: "text-manuscript",
+  blue: "text-subjects",
+  neutral: "text-muted",
+};
 
 export function SourcesTree() {
   const { data, isLoading, isError } = useQuery({
@@ -10,6 +21,15 @@ export function SourcesTree() {
     queryFn: listAllSources,
   });
   const groups = data ? groupSourcesByType(data.items) : [];
+  // The ingestion status, joined by id: each row carries the glyph for its
+  // raw unit's conversion state. Only units with a record are rows here -
+  // a failed or unconvertible unit has none - which is what the link at
+  // the foot is for.
+  const { data: ingestion } = useQuery({
+    queryKey: ["ingestion"],
+    queryFn: readIngestionStatus,
+  });
+  const states = indexByUnitId(ingestion);
 
   return (
     <TreeSection label="Sources">
@@ -44,30 +64,72 @@ export function SourcesTree() {
         </p>
       )}
       {groups.map((group) => (
-        <SourceGroup key={group.sourceType} sourceType={group.sourceType} sources={group.sources} />
+        <SourceGroup
+          key={group.sourceType}
+          sourceType={group.sourceType}
+          sources={group.sources}
+          states={states}
+        />
       ))}
+      <NavLink
+        to="/ingestion"
+        className={({ isActive }) =>
+          `mt-1 block rounded px-2 py-1 text-xs ${
+            isActive ? "bg-hover text-ink" : "text-secondary hover:bg-hover hover:text-ink"
+          }`
+        }
+      >
+        Ingestion status
+        {ingestion?.units && ingestion.counts.failed > 0 && (
+          <span className="ml-1 font-mono text-[11px] text-manuscript">
+            · {ingestion.counts.failed} failed
+          </span>
+        )}
+      </NavLink>
     </TreeSection>
   );
 }
 
-function SourceGroup({ sourceType, sources }: { sourceType: string; sources: SourceSummary[] }) {
+function SourceGroup({
+  sourceType,
+  sources,
+  states,
+}: {
+  sourceType: string;
+  sources: SourceSummary[];
+  states: ReturnType<typeof indexByUnitId>;
+}) {
   return (
     <TreeSection label={`${sourceType} · ${sources.length}`} defaultOpen={false}>
       <ul>
-        {sources.map((source) => (
-          <li key={source.id}>
-            <NavLink
-              to={`/sources/${source.id}`}
-              className={({ isActive }) =>
-                `block truncate rounded px-2 py-1 font-mono text-xs ${
-                  isActive ? "bg-hover text-ink" : "text-secondary hover:bg-hover hover:text-ink"
-                }`
-              }
-            >
-              {source.id}
-            </NavLink>
-          </li>
-        ))}
+        {sources.map((source) => {
+          const unit = states.get(source.id);
+          const drawing = unit ? drawState(unit.converted) : null;
+          return (
+            <li key={source.id}>
+              <NavLink
+                to={`/sources/${source.id}`}
+                className={({ isActive }) =>
+                  `flex items-center gap-1.5 truncate rounded px-2 py-1 font-mono text-xs ${
+                    isActive ? "bg-hover text-ink" : "text-secondary hover:bg-hover hover:text-ink"
+                  }`
+                }
+              >
+                {drawing && (
+                  <span
+                    role="img"
+                    aria-label={drawing.label}
+                    title={drawing.label}
+                    className={`w-3 text-center text-[10px] ${GLYPH_TONE[drawing.tone]}`}
+                  >
+                    {drawing.glyph}
+                  </span>
+                )}
+                {source.id}
+              </NavLink>
+            </li>
+          );
+        })}
       </ul>
     </TreeSection>
   );
