@@ -9,6 +9,7 @@ import pytest
 import sqlite_vec
 
 from memoria import extraction as ex
+from memoria import index as idx
 from memoria.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL_NAME
 from memoria.index import (
     INDEX_RELATIVE_PATH,
@@ -1242,6 +1243,80 @@ def test_a_pinned_source_stays_in_the_set_even_when_matching_would_not_find_it(
 
     result = {g.anchor: g.pinned for g in gather(repository, "SUB-people/bob")}
     assert result == {"src-000001-p1": False, "src-000001-p2": True}
+
+
+def test_paragraphs_by_anchor_chunks_under_sqlites_own_variable_ceiling(
+    tmp_path, monkeypatch
+):
+    """#132: the paragraphs-by-anchor query used to build one
+    `anchor IN (?,?...)` list sized to the whole gathered set - unbounded
+    with the paragraph count, and able to exceed SQLite's own
+    bound-parameter ceiling on the real archive, at which point the query
+    raised and the overlay was silently dropped archive-wide. Lowered here
+    to a real, tiny ceiling via `setlimit` (Python's sqlite3, 3.11+) so this
+    proves the fix against SQLite's actual enforcement, not an assumption
+    about what it is: an unchunked query over these anchors genuinely fails
+    against this connection, while `_paragraphs_by_anchor` still returns
+    every row, correctly."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    paragraphs = [f"Bob was here, paragraph {i}." for i in range(10)]
+    repository = _gather_repo(tmp_path, paragraphs, [entry])
+    anchors = {f"src-000001-p{i}" for i in range(1, 11)}
+    con = sqlite3.connect(repository.root / INDEX_RELATIVE_PATH)
+    con.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 3)
+    placeholders = ",".join("?" for _ in anchors)
+    with pytest.raises(sqlite3.OperationalError, match="too many SQL variables"):
+        con.execute(
+            f"SELECT anchor, src_id FROM paragraphs WHERE anchor IN ({placeholders})",
+            tuple(anchors),
+        )
+    monkeypatch.setattr(idx, "_ANCHOR_CHUNK_SIZE", 2)
+
+    rows = idx._paragraphs_by_anchor(con, anchors)
+
+    assert {anchor for anchor, _ in rows} == anchors
+
+
+def test_gather_is_correct_past_a_forced_anchor_chunk_boundary(tmp_path, monkeypatch):
+    """#132 AC 1/3: the same chunking, exercised through the public
+    `gather()` with the real chunk size forced tiny, so the gathered set
+    spans several chunks without needing tens of thousands of paragraphs -
+    the result must still be the full, correctly-ordered set, not silently
+    truncated to one chunk."""
+    monkeypatch.setattr(idx, "_ANCHOR_CHUNK_SIZE", 2)
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    paragraphs = [f"Bob was here, paragraph {i}." for i in range(5)]
+    repository = _gather_repo(tmp_path, paragraphs, [entry])
+
+    result = gather(repository, "SUB-people/bob")
+
+    assert [g.anchor for g in result] == [f"src-000001-p{i}" for i in range(1, 6)]
+
+
+def test_overlay_for_anchor_opens_one_connection_regardless_of_entry_count(
+    tmp_path, monkeypatch
+):
+    """#132 AC 2: the per-read fan-out over entries must not multiply
+    `gather`'s own per-entry cost - a fresh `connect()` (DDL plus commit)
+    for every entry on disk, on every non-raw read. One shared connection,
+    regardless of how many entries there are."""
+    entries = [
+        Entry(id=f"SUB-people/e{i}", match_terms=[f"word{i}"], body="")
+        for i in range(20)
+    ]
+    repository = _gather_repo(tmp_path, ["Nothing relevant here."], entries)
+    calls = []
+    real_connect = idx.connect
+
+    def counting_connect(repo):
+        calls.append(repo)
+        return real_connect(repo)
+
+    monkeypatch.setattr(idx, "connect", counting_connect)
+
+    idx.overlay_for_anchor(repository, "src-000001-p1")
+
+    assert len(calls) == 1
 
 
 def test_the_gathered_set_carries_no_id():

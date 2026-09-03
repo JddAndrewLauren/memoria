@@ -55,6 +55,7 @@ from memoria.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL_NAME, Embed
 from memoria.records import NormalizedRecord, real_paragraphs, read_all
 from memoria.repository import Repository
 from memoria.subjects import (
+    Entry,
     OverlayAct,
     SubjectError,
     classify_match_term,
@@ -1217,6 +1218,100 @@ def _lexical_match(con: sqlite3.Connection, term: str) -> list[str]:
     ]
 
 
+# SQLite's own bound-parameter ceiling (`SQLITE_MAX_VARIABLE_NUMBER`) is 999
+# on a pre-3.32 build and 32766 from 3.32 on; this stays well under either so
+# an `anchor IN (?,?...)` query never reaches it regardless of which SQLite
+# the running Python was built against (#132 - a gathered set that grew with
+# the paragraph count could otherwise hit "too many SQL variables" and, via
+# `overlay_for_anchor`'s broad ``except sqlite3.Error``, silently drop the
+# overlay archive-wide rather than raise).
+_ANCHOR_CHUNK_SIZE = 500
+
+
+def _paragraphs_by_anchor(
+    con: sqlite3.Connection, anchors: set[str]
+) -> list[tuple[str, str]]:
+    """``(anchor, src_id)`` for every anchor in ``anchors``, queried in
+    chunks of ``_ANCHOR_CHUNK_SIZE`` so the ``IN`` list's parameter count
+    cannot scale past SQLite's ceiling with the size of a gathered set
+    (#132). One SQL variable per anchor either way - chunking only bounds
+    how many go into a single statement."""
+    ordered = sorted(anchors)
+    rows: list[tuple[str, str]] = []
+    for start in range(0, len(ordered), _ANCHOR_CHUNK_SIZE):
+        chunk = ordered[start : start + _ANCHOR_CHUNK_SIZE]
+        placeholders = ",".join("?" for _ in chunk)
+        rows.extend(
+            con.execute(
+                f"SELECT anchor, src_id FROM paragraphs WHERE anchor IN ({placeholders})",
+                chunk,
+            )
+        )
+    return rows
+
+
+def _gathered_anchors(
+    con: sqlite3.Connection, entry_id: str, entry: Entry
+) -> set[str]:
+    """The gathered set's anchors alone (part 06 §8.3) - the matching logic
+    ``gather`` runs, without the ``paragraphs`` join that attaches
+    ``src_id``.
+
+    Takes a connection the caller already holds open and an ``Entry`` the
+    caller already loaded, so a caller testing many entries against one
+    anchor (``overlay_for_anchor``) pays for one connection and one entry
+    read each, not one of each per entry (#132 - a `gather()` per entry, on
+    every non-raw read, was linear in the number of entries on disk)."""
+    anchors: set[str] = {
+        row[0]
+        for row in con.execute(
+            "SELECT anchor FROM placements WHERE entry_id = ?", (entry_id,)
+        )
+    }
+    # Entry/relation-shaped match terms are intersected with each other
+    # (co-occurrence), then unioned into `anchors` alongside the word-shaped
+    # terms' lexical matches - see `gather`'s docstring.
+    cooccurrence: set[str] | None = None
+    for term in entry.match_terms:
+        kind = classify_match_term(term)
+        if kind == "word":
+            anchors.update(_lexical_match(con, term))
+        elif kind == "entry":
+            term_anchors = {
+                row[0]
+                for row in con.execute(
+                    "SELECT anchor FROM placements WHERE entry_id = ?", (term,)
+                )
+            }
+            cooccurrence = (
+                term_anchors if cooccurrence is None else cooccurrence & term_anchors
+            )
+        else:  # "relation"
+            left, verb, right = (part.strip() for part in term.split(" -> "))
+            term_anchors = {
+                row[0]
+                for row in con.execute(
+                    "SELECT anchor FROM relations "
+                    "WHERE from_ref = ? AND verb = ? AND to_ref = ?",
+                    (left, verb, right),
+                )
+            }
+            cooccurrence = (
+                term_anchors if cooccurrence is None else cooccurrence & term_anchors
+            )
+    if cooccurrence:
+        anchors.update(cooccurrence)
+
+    # The overlay lives on the entry itself (#21), already loaded above - no
+    # query against this index needed.
+    for act in entry.overlay:
+        if act.action == "exclude":
+            anchors.discard(act.anchor)
+        else:
+            anchors.add(act.anchor)
+    return anchors
+
+
 def gather(repository: Repository, entry_id: str) -> list[GatheredSource]:
     """The gathered set (part 06 §8.3): every paragraph this entry's subject
     matched, plus the author's pin/exclude overlay.
@@ -1266,70 +1361,17 @@ def gather(repository: Repository, entry_id: str) -> list[GatheredSource]:
         return []
     con = connect(repository)
     try:
-        anchors: set[str] = {
-            row[0]
-            for row in con.execute(
-                "SELECT anchor FROM placements WHERE entry_id = ?", (entry_id,)
-            )
-        }
-        # Entry/relation-shaped match terms are intersected with each other
-        # (co-occurrence), then unioned into `anchors` alongside the
-        # word-shaped terms' lexical matches - see the docstring.
-        cooccurrence: set[str] | None = None
-        for term in entry.match_terms:
-            kind = classify_match_term(term)
-            if kind == "word":
-                anchors.update(_lexical_match(con, term))
-            elif kind == "entry":
-                term_anchors = {
-                    row[0]
-                    for row in con.execute(
-                        "SELECT anchor FROM placements WHERE entry_id = ?", (term,)
-                    )
-                }
-                cooccurrence = (
-                    term_anchors
-                    if cooccurrence is None
-                    else cooccurrence & term_anchors
-                )
-            else:  # "relation"
-                left, verb, right = (part.strip() for part in term.split(" -> "))
-                term_anchors = {
-                    row[0]
-                    for row in con.execute(
-                        "SELECT anchor FROM relations "
-                        "WHERE from_ref = ? AND verb = ? AND to_ref = ?",
-                        (left, verb, right),
-                    )
-                }
-                cooccurrence = (
-                    term_anchors
-                    if cooccurrence is None
-                    else cooccurrence & term_anchors
-                )
-        if cooccurrence:
-            anchors.update(cooccurrence)
-
-        # The overlay lives on the entry itself (#21), already loaded above
-        # - no query against this index needed.
-        overlay = {act.anchor: act.action for act in entry.overlay}
-        for anchor, action in overlay.items():
-            if action == "exclude":
-                anchors.discard(anchor)
-            else:
-                anchors.add(anchor)
-
+        anchors = _gathered_anchors(con, entry_id, entry)
         if not anchors:
             return []
-        placeholders = ",".join("?" for _ in anchors)
-        rows = con.execute(
-            f"SELECT anchor, src_id FROM paragraphs WHERE anchor IN ({placeholders})",
-            tuple(anchors),
-        ).fetchall()
+        rows = _paragraphs_by_anchor(con, anchors)
     finally:
         con.close()
 
-    pinned = {anchor for anchor, action in overlay.items() if action == "pin"}
+    # Last action per anchor wins, matching `_gathered_anchors`'s own
+    # discard-then-add application of `entry.overlay` in list order.
+    last_action = {act.anchor: act.action for act in entry.overlay}
+    pinned = {anchor for anchor, action in last_action.items() if action == "pin"}
     return sorted(
         (
             GatheredSource(src_id=src_id, anchor=anchor, pinned=anchor in pinned)
@@ -1366,10 +1408,15 @@ def overlay_for_anchor(repository: Repository, anchor: str) -> ReadOverlay | Non
     intended entry, and the same pin/exclude overlay it applies, just read
     backwards from the anchor rather than forward from one entry. A
     placements-only version under-reports exactly the recall ``gather``
-    itself exists to mitigate (part 06 §8.3's "central risk"), so this calls
-    ``gather`` once per entry rather than duplicating its matching logic - a
-    second, drifting copy of that logic would be worse than the extra
-    queries.
+    itself exists to mitigate (part 06 §8.3's "central risk"), so this reuses
+    ``gather``'s own matching logic (``_gathered_anchors``) once per entry
+    rather than duplicating it - a second, drifting copy would be worse than
+    the extra queries. It reuses one connection across every entry rather
+    than calling ``gather`` itself per entry, though (#132): ``gather``
+    opens its own connection and joins the anchor set back against
+    ``paragraphs`` for a ``src_id`` this caller does not need, and paying
+    for both once per entry on every non-raw read made this the hot path's
+    dominant cost.
 
     ``exclusions`` names every entry that has excluded this anchor, whether
     or not it was otherwise gathered - the curator act itself, not just its
@@ -1394,17 +1441,22 @@ def overlay_for_anchor(repository: Repository, anchor: str) -> ReadOverlay | Non
     if not db_path.exists():
         return ReadOverlay(entry_links=[], exclusions=[], citing_settlements=[])
     try:
-        # `entry_links` still comes out of the index, by way of `gather`, so
-        # an unreadable index means no overlay at all. Probed up front rather
-        # than left to `gather` so the answer does not depend on whether any
-        # entries happen to be on disk to trigger a read.
-        connect(repository).close()
+        # `entry_links` still comes out of the index, by way of
+        # `_gathered_anchors`, so an unreadable index means no overlay at
+        # all. Opened up front, once, rather than left to the per-entry
+        # loop so the answer does not depend on whether any entries happen
+        # to be on disk to trigger a read (and so every entry shares the
+        # one open connection - #132).
         entries = load_all_entries(repository)
-        entry_links = sorted(
-            entry_id
-            for entry_id in entries
-            if any(g.anchor == anchor for g in gather(repository, entry_id))
-        )
+        con = connect(repository)
+        try:
+            entry_links = sorted(
+                entry_id
+                for entry_id, entry in entries.items()
+                if anchor in _gathered_anchors(con, entry_id, entry)
+            )
+        finally:
+            con.close()
     except (IndexSchemaError, sqlite3.Error):
         return None
     # Off the entry files, not the index: #21 moved the overlay onto the
