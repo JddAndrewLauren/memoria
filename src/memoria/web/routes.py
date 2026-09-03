@@ -10,12 +10,14 @@ SQLite database and reads no evidence file itself
 
 from __future__ import annotations
 
+import ipaddress
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 import memoria.references as references
 from memoria.index import SearchFilters
 from memoria.index import search as search_index
-from memoria.records import NormalizedRecord, Read, ReadError
+from memoria.records import LaunchError, NormalizedRecord, Read, ReadError
 from memoria.records import list_sources as list_sources_core
 from memoria.records import load as load_source
 from memoria.records import read as read_ref
@@ -48,12 +50,18 @@ router = APIRouter()
 # A loopback peer address is the one fact an HTTP server can check for
 # "is the browser on this machine" without trusting anything the client
 # claims - a header is just text the client sent. #65's locality gate.
-_LOOPBACK_HOSTS = {"127.0.0.1", "::1"}
 
 
 def _is_local(request: Request) -> bool:
     client = request.client
-    return client is not None and client.host in _LOOPBACK_HOSTS
+    if client is None:
+        return False
+    try:
+        return ipaddress.ip_address(client.host).is_loopback
+    except ValueError:
+        # Not a parseable IP address at all (ASGI test doubles included) -
+        # fails closed, same as any other address `is_loopback` says no to.
+        return False
 
 
 def _to_summary(record: NormalizedRecord) -> SourceSummary:
@@ -157,6 +165,12 @@ def reveal_source(
     ``/locality`` reports. This is what keeps the action purely additive
     (ADR-0002): a hosted client gets a plain 403, never a launch on a
     machine it is not sitting at.
+
+    ``opened: true`` is only ever returned once the launch has actually
+    survived its grace period (``records._launch``) - a missing opener
+    binary or one that exits immediately both raise ``LaunchError`` here,
+    reported as a real error response rather than a 500 traceback or a
+    claim this route cannot back up.
     """
     if not _is_local(request):
         raise HTTPException(status_code=403, detail="reveal is local-only")
@@ -164,6 +178,8 @@ def reveal_source(
         reveal_original_source_core(repository, record_id)
     except (ReadError, NoEvidenceRoot) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LaunchError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     return RevealSourceResponse(opened=True)
 
 

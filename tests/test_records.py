@@ -9,10 +9,13 @@ The read side proper - the composed ``read(ref)``, its reference forms and
 its errors - is exercised in ``test_read_ref.py``.
 """
 
+import subprocess
+
 import pytest
 
 from memoria.records import (
     NORMALIZED_RELATIVE_PATH,
+    LaunchError,
     NormalizedRecord,
     ReadError,
     is_page_marker,
@@ -24,6 +27,7 @@ from memoria.records import (
     reveal_original_source,
     write_normalized_records,
 )
+from memoria.records import _launch
 from memoria.repository import NoEvidenceRoot, Repository
 
 
@@ -428,3 +432,124 @@ def test_reveal_original_source_without_an_evidence_root_is_a_named_refusal(
 
     with pytest.raises(NoEvidenceRoot):
         reveal_original_source(repository, "SRC-000184")
+
+
+def test_reveal_original_source_propagates_a_launch_error(tmp_path, monkeypatch):
+    """`reveal_original_source` does not swallow `_launch`'s verdict - a
+    caller (the web route) needs it to report a launch failure rather than
+    the `opened: true` it cannot back up (#146)."""
+    evidence_root = tmp_path / "evidence"
+    (evidence_root / "raw" / "vol-01").mkdir(parents=True)
+    (evidence_root / "raw" / "vol-01" / "text.txt").write_text(
+        "The unnormalized text.\n", encoding="utf-8"
+    )
+    repository = _write(tmp_path, _record())
+    repository = Repository(root=repository.root, evidence_root=evidence_root)
+
+    def _fail(path):
+        raise LaunchError("no opener available on this host: xdg-open")
+
+    monkeypatch.setattr("memoria.records._launch", _fail)
+
+    with pytest.raises(LaunchError):
+        reveal_original_source(repository, "SRC-000184")
+
+
+# --- _launch's launch-failure reporting (#146) ------------------------------
+
+
+class _FakeProcess:
+    """A `Popen` double whose `wait` either raises `TimeoutExpired` - the
+    opener is still running when the grace period elapses, same as a real
+    slow-to-open GUI - or returns a fixed exit status."""
+
+    def __init__(self, *, still_running=False, returncode=0):
+        self._still_running = still_running
+        self.returncode = returncode
+
+    def wait(self, timeout):
+        if self._still_running:
+            raise subprocess.TimeoutExpired(cmd="opener", timeout=timeout)
+        return self.returncode
+
+
+def test_launch_raises_a_launch_error_for_a_missing_opener_binary(monkeypatch, tmp_path):
+    """The exact defect reported: `Popen` raises `FileNotFoundError`
+    synchronously when the opener binary itself does not exist - `_launch`
+    must turn that into `LaunchError`, not let it escape uncaught (#146)."""
+
+    def _missing(argv):
+        raise FileNotFoundError(2, "No such file or directory")
+
+    monkeypatch.setattr("memoria.records.subprocess.Popen", _missing)
+
+    with pytest.raises(LaunchError):
+        _launch(tmp_path / "text.txt")
+
+
+def test_launch_raises_a_launch_error_when_the_opener_exits_immediately_with_failure(
+    monkeypatch, tmp_path
+):
+    """The reproduced case: `xdg-open` present but no handler registered
+    exits non-zero right away (#146) - `_launch` must not call that a
+    success."""
+    monkeypatch.setattr(
+        "memoria.records.subprocess.Popen",
+        lambda argv: _FakeProcess(returncode=3),
+    )
+
+    with pytest.raises(LaunchError):
+        _launch(tmp_path / "text.txt")
+
+
+def test_launch_on_win32_does_not_treat_a_non_zero_exit_as_failure(
+    monkeypatch, tmp_path
+):
+    """`explorer.exe` hands the path to the running shell and exits 1 on
+    success, promptly - so on Windows a non-zero exit status is not a
+    failure, and reporting it as one would be the inverse of #146. The
+    missing-binary case stays a `LaunchError` there like everywhere else."""
+    monkeypatch.setattr("memoria.records.sys.platform", "win32")
+    monkeypatch.setattr(
+        "memoria.records.subprocess.Popen",
+        lambda argv: _FakeProcess(returncode=1),
+    )
+
+    _launch(tmp_path / "text.txt")  # does not raise
+
+
+def test_launch_on_win32_still_reports_a_missing_opener_binary(monkeypatch, tmp_path):
+    monkeypatch.setattr("memoria.records.sys.platform", "win32")
+
+    def _missing(argv):
+        raise FileNotFoundError(2, "No such file or directory")
+
+    monkeypatch.setattr("memoria.records.subprocess.Popen", _missing)
+
+    with pytest.raises(LaunchError):
+        _launch(tmp_path / "text.txt")
+
+
+def test_launch_succeeds_when_the_opener_exits_zero_within_the_grace_period(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        "memoria.records.subprocess.Popen",
+        lambda argv: _FakeProcess(returncode=0),
+    )
+
+    _launch(tmp_path / "text.txt")  # does not raise
+
+
+def test_launch_succeeds_when_the_opener_is_still_running_past_the_grace_period(
+    monkeypatch, tmp_path
+):
+    """A normal GUI editor is still starting up when the grace period
+    elapses - `_launch` must not wait it out, and must not call that a
+    failure either (#146: stays the non-blocking launch #65 chose)."""
+    monkeypatch.setattr(
+        "memoria.records.subprocess.Popen",
+        lambda argv: _FakeProcess(still_running=True),
+    )
+
+    _launch(tmp_path / "text.txt")  # does not raise

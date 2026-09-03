@@ -109,6 +109,12 @@ export interface paths {
          *     ``/locality`` reports. This is what keeps the action purely additive
          *     (ADR-0002): a hosted client gets a plain 403, never a launch on a
          *     machine it is not sitting at.
+         *
+         *     ``opened: true`` is only ever returned once the launch has actually
+         *     survived its grace period (``records._launch``) - a missing opener
+         *     binary or one that exits immediately both raise ``LaunchError`` here,
+         *     reported as a real error response rather than a 500 traceback or a
+         *     claim this route cannot back up.
          */
         post: operations["reveal_source_api_sources__record_id__reveal_post"];
         delete?: never;
