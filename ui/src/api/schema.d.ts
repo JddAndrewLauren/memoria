@@ -202,22 +202,132 @@ export interface paths {
         };
         /**
          * Read Entry
-         * @description One entry read whole - #64's third subject read, built here (#157).
+         * @description One entry read whole - #64's third subject read, built in #157.
          *
-         *     Resolves an entry whose file has been renamed: ``load_entry`` reads
+         *     Served through ``serve_entry`` rather than ``load_entry`` (#26): the
+         *     author edits match terms from this surface, and ADR-0003's staleness
+         *     check compares against *the file as it was read*, so the token has to be
+         *     minted by the read that produced what is on screen rather than by the
+         *     write that follows it.
+         *
+         *     Resolves an entry whose file has been renamed: ``serve_entry`` goes
          *     through ``find_entry_path``, which falls back to matching the
          *     frontmatter ``id``, so #16's stable ``SUB-x/y`` IDs survive a rename on
          *     disk and this route inherits that without repeating it.
          *
-         *     One ``except`` covers every 404 the read has, because the core raises
-         *     for all three: an unknown subject, an unknown entry, and a
-         *     ``subject_id`` that is not a subject ID at all.
-         *
          *     ``extra`` is not served - it exists so a rewrite does not drop an
          *     unmodelled frontmatter key, not to be published (``EntryDetail``).
+         *
+         *     The gathered set and appearances are not here either, and that is the
+         *     §8.11 separation rather than an economy: this is a read of the entry
+         *     *file*, and those two are index reads with their own build signal and
+         *     their own failure. They have their own routes below.
          */
         get: operations["read_entry_api_subjects__subject_id__entries__entry_slug__get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/subjects/{subject_id}/entries/{entry_slug}/gathered": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Gathered Set
+         * @description An entry's gathered set, with the author's overlay legible on it.
+         *
+         *     ``gather`` has already applied the overlay - it drops an excluded anchor
+         *     and adds a pinned one - so membership needs nothing here. What it does
+         *     not carry is the *act*: which anchors the author pinned, who did it and
+         *     when. That is on the entry file (part 04 §42 keeps it there, so it
+         *     survives the index being deleted), and joining the two is this route's
+         *     whole job.
+         *
+         *     The exclusions are served separately because they are absent from
+         *     ``items`` by construction. A surface that got only the list would show a
+         *     shorter set with no account of why, which is an author act rendered as
+         *     nothing.
+         */
+        get: operations["read_gathered_set_api_subjects__subject_id__entries__entry_slug__gathered_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/subjects/{subject_id}/entries/{entry_slug}/appearances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Appearances
+         * @description An entry's appearances - the already-written prose it touches.
+         *
+         *     ``engine_supported`` is what stops an empty list from meaning two
+         *     things. For a Person it means the lexical pass found nothing; for a
+         *     Theme or an Arc it means the pass never ran, and will not until the
+         *     audit at M5 (part 06 §8.11). ``memoria.index.appearances_supported``
+         *     decides, the same predicate ``compute_appearances`` skips on.
+         *
+         *     The entry is served first so an unknown entry is a 404 here too, rather
+         *     than an empty list for something that does not exist.
+         */
+        get: operations["read_appearances_api_subjects__subject_id__entries__entry_slug__appearances_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/subjects/{subject_id}/entries/{entry_slug}/match-terms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Match Terms
+         * @description Replace an entry's match terms - the first durable write over HTTP.
+         *
+         *     Match terms are author-owned (part 06 §8.2), so this commits as the
+         *     author: ``repository_actor`` supplies the identity from the repository's
+         *     own git config, never from the request, because ADR-0002 forbids
+         *     assuming the browser and the repository share a machine and a name in a
+         *     payload is an unverified claim about who acted.
+         *
+         *     The three outcomes, each a different status:
+         *
+         *     - **409** for a stale token. The file changed since the client read it -
+         *       in Obsidian, or in another tab - and nothing was written, merged or
+         *       partially applied (ADR-0003 decision 1). The client re-reads for the
+         *       current content and a fresh token; this response deliberately carries
+         *       neither (decision 5), because #64 already builds that read.
+         *     - **400** for a malformed match term, refused by ``set_match_terms``
+         *       before the file is touched.
+         *     - **500** for a write that cannot be attempted - no configured git
+         *       identity, or a failing commit.
+         *
+         *     On success the *new* token is returned, because the write has just
+         *     invalidated the one the client presented and the editor is still open
+         *     over the file.
+         */
+        put: operations["update_match_terms_api_subjects__subject_id__entries__entry_slug__match_terms_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -263,6 +373,48 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AppearanceOut
+         * @description One manuscript passage an entry turns out to touch (part 06 §8.11).
+         *
+         *     ``note`` names the match term that found it. No pin or exclude field
+         *     here, unlike ``GatheredSourceOut``, and that is the design rather than
+         *     an omission: an author act against one passage would be a durable
+         *     pointer into mutable prose, which part 04 §4.1 forbids.
+         */
+        AppearanceOut: {
+            /** Src Id */
+            src_id: string;
+            /** Anchor */
+            anchor: string;
+            /** Note */
+            note: string;
+        };
+        /**
+         * AppearancesResponse
+         * @description An entry's appearances, and whether an engine could produce any.
+         *
+         *     Kept in its own response rather than folded onto ``EntryDetail``
+         *     alongside the gathered set, because part 06 §8.11's separation is the
+         *     point: a gathered set is evidence to write *from*, appearances are prose
+         *     already written, and merging them would put manuscript text into what a
+         *     writing agent reads as material.
+         *
+         *     ``engine_supported`` is ``memoria.index.appearances_supported``. False
+         *     for Themes and Arcs, whose engine waits for the audit at M5 - without
+         *     it, an empty list says "nothing appears" when the truth is "nothing has
+         *     looked yet".
+         *
+         *     ``is_built`` reports ``memoria rebuild``, as elsewhere.
+         */
+        AppearancesResponse: {
+            /** Items */
+            items: components["schemas"]["AppearanceOut"][];
+            /** Is Built */
+            is_built: boolean;
+            /** Engine Supported */
+            engine_supported: boolean;
+        };
         /**
          * CitationOut
          * @description One resolved reference - the slide-over citation panel's read (§19.9).
@@ -335,6 +487,13 @@ export interface components {
          *     not to be published; the parsed statements are the served form of the
          *     body, and a client that wants the markdown is asking for the file rather
          *     than for the entry.
+         *
+         *     ``token`` is ``memoria.write.serve``'s content hash of the entry file as
+         *     it was served (ADR-0003 decision 1), opaque to the client and presented
+         *     back on a match-term write. This is where the staleness token first
+         *     crosses HTTP: entry files are editable in Obsidian too, so a write has
+         *     to be checked against the file the client actually read rather than
+         *     against whatever is on disk when it arrives.
          */
         EntryDetail: {
             /** Id */
@@ -348,6 +507,8 @@ export interface components {
              * @default []
              */
             overlay: components["schemas"]["OverlayActOut"][];
+            /** Token */
+            token: string;
         };
         /**
          * EntryListResponse
@@ -372,6 +533,65 @@ export interface components {
             /** Match Terms */
             match_terms: string[];
         };
+        /**
+         * GatheredSetResponse
+         * @description An entry's gathered set, and the exclusions kept out of it.
+         *
+         *     ``items`` is ``memoria.index.gather``'s result, which has already
+         *     applied the overlay: a pinned anchor is in it whatever the pass found,
+         *     and an excluded one is gone. ``excluded`` carries those removed acts
+         *     separately, because an exclusion the surface cannot render is an author
+         *     act with nothing to show for it - the reader sees a shorter list and no
+         *     reason for it.
+         *
+         *     ``is_built`` is ``memoria.index.is_built``, the same field and the same
+         *     meaning as on ``SearchResponse``: an empty gathered set with it false
+         *     means the corpus was never indexed, which is a different fact from an
+         *     entry nothing matched. An entry with an empty gathered set is a valid
+         *     state either way (part 06 §8.2), never an error.
+         */
+        GatheredSetResponse: {
+            /** Items */
+            items: components["schemas"]["GatheredSourceOut"][];
+            /**
+             * Excluded
+             * @default []
+             */
+            excluded: components["schemas"]["OverlayActOut"][];
+            /** Is Built */
+            is_built: boolean;
+        };
+        /**
+         * GatheredSourceOut
+         * @description One paragraph in an entry's gathered set (part 06 §8.3), with the
+         *     author's overlay act over it if there is one.
+         *
+         *     ``anchor`` is the whole address a reader needs - it is what
+         *     ``/api/read`` resolves - because the gathered set has no stable ID of
+         *     its own: it is derived, asserts nothing, and nothing outside it ever
+         *     names one (``memoria.index.GatheredSource``).
+         *
+         *     ``pinned`` is ``gather``'s own flag - membership. ``overlay_action`` and
+         *     the two fields after it are the *act* behind it, read off the entry
+         *     file: ``"pin"``, ``"exclude"``, or ``None`` where the pass alone
+         *     accounts for the row. Both are served because they answer different
+         *     questions and an excluded anchor is not in ``items`` at all - see
+         *     ``GatheredSetResponse``.
+         */
+        GatheredSourceOut: {
+            /** Src Id */
+            src_id: string;
+            /** Anchor */
+            anchor: string;
+            /** Pinned */
+            pinned: boolean;
+            /** Overlay Action */
+            overlay_action?: string | null;
+            /** Actor Name */
+            actor_name?: string | null;
+            /** At */
+            at?: string | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -392,6 +612,35 @@ export interface components {
             is_local: boolean;
         };
         /**
+         * MatchTermsResponse
+         * @description What an accepted match-term write stored, and a fresh token.
+         *
+         *     The new token is served so the editor stays usable without a reload:
+         *     the file it holds a token for has just changed - by its own write - so
+         *     the one it presented is now stale by construction.
+         */
+        MatchTermsResponse: {
+            /** Match Terms */
+            match_terms: string[];
+            /** Token */
+            token: string;
+        };
+        /**
+         * MatchTermsUpdate
+         * @description A match-term write: the terms to store, and the token the entry was
+         *     served with (ADR-0003).
+         *
+         *     The token is the whole staleness check from the client's side - it
+         *     presents back what ``EntryDetail`` gave it, unread and unmodified, and a
+         *     file changed underneath since then is rejected rather than merged.
+         */
+        MatchTermsUpdate: {
+            /** Token */
+            token: string;
+            /** Match Terms */
+            match_terms: string[];
+        };
+        /**
          * OverlayActOut
          * @description One pin or exclusion recorded on an entry (#157's entry read).
          *
@@ -403,18 +652,23 @@ export interface components {
          *     on the entry file itself - part 04 §42's "never regenerated", which
          *     survives the index being deleted outright.
          *
-         *     ``memoria.subjects.OverlayAct`` also carries ``actor_name`` and
-         *     ``actor_email``, and they are deliberately not served. The act stays
-         *     fully attributable on disk, which is what §42 requires; nothing in the
-         *     client attributes a pin to a person, and ADR-0002 forbids assuming the
-         *     browser and the repository share a machine, so an address crossing this
-         *     boundary would be a liability with no consumer.
+         *     ``actor_name`` is served and ``actor_email`` is not. The address was
+         *     withheld with the name when this model was written (#157) on the
+         *     grounds that nothing in the client attributed a pin to a person; the
+         *     entry view is that consumer, and part 06 §8.3 requires the overlay to be
+         *     *attributable* on the surface that renders it - a gathered-set row
+         *     marked "excluded" without saying by whom is an unexplained absence. The
+         *     address stays withheld: ADR-0002 forbids assuming the browser and the
+         *     repository share a machine, and an email crossing that boundary is a
+         *     liability that no rendering needs.
          */
         OverlayActOut: {
             /** Anchor */
             anchor: string;
             /** Action */
             action: string;
+            /** Actor Name */
+            actor_name: string;
             /** At */
             at: string;
         };
@@ -928,6 +1182,106 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EntryDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_gathered_set_api_subjects__subject_id__entries__entry_slug__gathered_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subject_id: string;
+                entry_slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatheredSetResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_appearances_api_subjects__subject_id__entries__entry_slug__appearances_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subject_id: string;
+                entry_slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppearancesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_match_terms_api_subjects__subject_id__entries__entry_slug__match_terms_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subject_id: string;
+                entry_slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MatchTermsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MatchTermsResponse"];
                 };
             };
             /** @description Validation Error */

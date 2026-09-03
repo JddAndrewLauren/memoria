@@ -19,6 +19,7 @@ from memoria.index import (
     Appearance,
     GatheredSource,
     SearchFilters,
+    appearances_supported,
     build_index,
     compute_appearances,
     exclude,
@@ -1709,6 +1710,40 @@ def test_appearances_are_regenerated_identically_by_rebuild(tmp_path):
 
     assert list_appearances(repository, "SUB-people/bob") == before
     assert report2.appearances == report.appearances
+
+
+@pytest.mark.parametrize("entry_id", ["SUB-themes/control", "SUB-arcs/departure"])
+def test_themes_and_arcs_have_no_appearances_engine(entry_id):
+    assert appearances_supported(entry_id) is False
+
+
+@pytest.mark.parametrize(
+    "entry_id", ["SUB-people/bob", "SUB-events/acquisition", "SUB-timeline/1962"]
+)
+def test_every_lexically_matchable_subject_has_one(entry_id):
+    assert appearances_supported(entry_id) is True
+
+
+def test_an_empty_appearances_list_means_two_different_things(tmp_path):
+    """The predicate exists because `list_appearances` cannot say which.
+    For a Person an empty list means the lexical pass found nothing; for a
+    Theme it means the pass never ran, and will not until the audit at M5 -
+    and a surface that renders both as "no appearances" is telling the
+    author something false about their own archive."""
+    bob = Entry(id="SUB-people/bob", match_terms=["Bob"], body="")
+    control = Entry(id="SUB-themes/control", match_terms=["SUB-people/bob"], body="")
+    repository = Repository(root=tmp_path)
+    _write_entry(tmp_path, bob)
+    _write_entry(tmp_path, control)
+    book = _record("SRC-000001", ["Carol argued with Dave."], source_type="book")
+    write_normalized_records([book], tmp_path / NORMALIZED_RELATIVE_PATH)
+    build_index(repository, [book])
+    compute_appearances(repository)
+
+    assert list_appearances(repository, "SUB-people/bob") == []
+    assert list_appearances(repository, "SUB-themes/control") == []
+    assert appearances_supported("SUB-people/bob") is True
+    assert appearances_supported("SUB-themes/control") is False
 
 
 def test_appearances_report_names_the_themes_and_arcs_gap(tmp_path):

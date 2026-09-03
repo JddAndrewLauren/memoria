@@ -15,10 +15,12 @@ This module owns both directions of both formats, the same way
 written by `*_to_markdown` and read back by `parse_*` must round-trip, and a
 change to either that the other does not match is a corruption.
 
-Nothing here writes through the durable write path (#66, not yet built):
 `write_builtin_subjects` seeds the five built-ins the way
 `records.write_normalized_records` writes derived records, and it never
-overwrites a file the author has already touched.
+overwrites a file the author has already touched - it is not a durable
+write. The one durable write this module owns is `set_match_terms` (#26),
+the author editing an entry's match terms, and it goes through `memoria.write`
+like every other write to a durable state class (ADR-0003).
 """
 
 from __future__ import annotations
@@ -26,11 +28,13 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, field
+from dataclasses import replace as dataclass_replace
 from pathlib import Path
 
 import yaml
 
 from memoria.repository import Repository
+from memoria.write import Actor, WriteError, WriteResult, serve, write as write_file
 
 # Where subjects live inside the book repository (part 04 §2's
 # `subjects/<slug>/_subject.md`, `subjects/<slug>/<entry-slug>.md`).
@@ -372,6 +376,25 @@ def parse_statements(body: str) -> list[Statement]:
     return statements
 
 
+def is_audit_visible(statement: Statement) -> bool:
+    """Whether a statement belongs to the **audit-visible body** - the part
+    of an entry assembly loads and the audit compares prose against
+    (CONTEXT.md, part 06 §8.2): testimony and every badged statement except
+    ``[open]``.
+
+    One owner for the rule, called by ``memoria.audit.audit_visible_body``
+    (which decides a memoization key) and by the entry view (#26, which
+    decides what renders inside the body and what renders outside it). Two
+    copies of a one-line predicate is how the two drift, and the surface
+    would then show as audit-visible something the audit never reads.
+
+    Memoria notes sit outside the body too (part 08 §14.2), but this
+    codebase does not write them yet (#32); when it does they join
+    ``[open]`` here rather than at either call site.
+    """
+    return statement.badge != "open"
+
+
 def _split_frontmatter(text: str, source: str) -> tuple[dict, str]:
     """The frontmatter mapping and the raw body below it."""
     if not text.startswith("---\n"):
@@ -461,6 +484,98 @@ def load_entry(repository: Repository, subject_id: str, entry_slug: str) -> Entr
     if path is None:
         raise SubjectError(f"no such entry: {subject_id}/{entry_slug}")
     return parse_entry(path.read_text(encoding="utf-8"), source=str(path))
+
+
+def entry_relative_path(repository: Repository, subject_id: str, entry_slug: str) -> str:
+    """Where this entry's file lives, relative to the repository root.
+
+    The write path takes a repository-relative path, and resolving one is
+    this module's job rather than a caller's: ``find_entry_path`` is what
+    makes a renamed file still resolve, and a caller that rebuilt the path
+    from the slug would silently write a *second* file beside the renamed
+    one.
+    """
+    subject_dir = repository.root / SUBJECTS_RELATIVE_PATH / _slug(subject_id)
+    if not subject_dir.is_dir():
+        raise SubjectError(f"no such subject: {subject_id}")
+    path = find_entry_path(repository, subject_id, entry_slug)
+    if path is None:
+        raise SubjectError(f"no such entry: {subject_id}/{entry_slug}")
+    return path.relative_to(repository.root).as_posix()
+
+
+def serve_entry(repository: Repository, subject_id: str, entry_slug: str) -> tuple[Entry, str]:
+    """One entry, plus the staleness token a later write must present.
+
+    ``load_entry`` reads; this serves *for editing* (ADR-0003): the second
+    value is ``memoria.write.serve``'s content hash of the file as it was
+    read, opaque to whoever carries it. #26 is where that token first
+    crosses HTTP - the author edits match terms in a browser and presents it
+    back - so it has to be an explicit value the caller holds rather than
+    something re-derived at write time, which is exactly what it exists to
+    detect a change against.
+
+    The file is read once, through ``serve``, and parsed from those same
+    bytes: reading it a second time to parse would open a window in which
+    the token describes a file the returned ``Entry`` did not come from.
+    """
+    relative_path = entry_relative_path(repository, subject_id, entry_slug)
+    served = serve(repository, relative_path)
+    return parse_entry(served.text, source=relative_path), served.token
+
+
+def set_match_terms(
+    repository: Repository,
+    subject_id: str,
+    entry_slug: str,
+    match_terms: list[str],
+    token: str,
+    actor: Actor,
+) -> WriteResult:
+    """Replace an entry's match terms - the author's first durable write.
+
+    Match terms are the author's (part 06 §8.2) and the system's only alias
+    store, so this is an author act: it goes through the single write path
+    with the token ``serve_entry`` minted, and a file changed underneath
+    since then is ``Rejected(outcome="stale")`` rather than merged. Stale is
+    not an exception (ADR-0003 decision 5) - it is the normal outcome a
+    surface reports.
+
+    Two things happen before the file is touched at all, both for
+    ``index._record_overlay``'s reason - ``write`` replaces the file before
+    it commits, so anything checked afterwards would be checked after a
+    partial application:
+
+    - an unattributed ``actor`` is refused, because an author act that
+      cannot be committed as anyone's must not land on disk;
+    - every term is classified, so a malformed one is refused here rather
+      than written into a file that ``parse_entry`` then cannot read back.
+      That failure mode is total: a bad term makes the whole entry
+      unparseable, taking its testimony and its overlay with it.
+
+    Everything else on the entry - the body, the pin/exclude overlay,
+    ``extra``'s unmodelled frontmatter keys - round-trips untouched, which
+    is what makes this safe to do to a file the author also edits in
+    Obsidian.
+    """
+    if not actor.name.strip() or not actor.email.strip():
+        raise WriteError(
+            f"cannot set match terms on {subject_id}/{entry_slug}: an author "
+            "act must be attributed - actor name and email may not be empty"
+        )
+    for term in match_terms:
+        classify_match_term(term)
+
+    relative_path = entry_relative_path(repository, subject_id, entry_slug)
+    # Read through `serve_entry`, so this module has exactly one way of
+    # turning an entry file into an `Entry`. Its token is discarded on
+    # purpose: minting a fresh one here and writing against *that* would
+    # pass the staleness check every time, which is the one thing this
+    # write must not do. The token compared is the caller's, from the read
+    # that produced what the author actually edited.
+    entry, _minted_here_and_unused = serve_entry(repository, subject_id, entry_slug)
+    content = entry_to_markdown(dataclass_replace(entry, match_terms=list(match_terms)))
+    return write_file(repository, relative_path, token, content, actor)
 
 
 # --- the five built-in subjects ---------------------------------------------

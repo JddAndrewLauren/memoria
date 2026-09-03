@@ -6,6 +6,7 @@ import App from "./App";
 import Home from "./routes/Home";
 import SourceDetailPage from "./routes/SourceDetailPage";
 import RawSourcePage from "./routes/RawSourcePage";
+import EntryPage from "./routes/EntryPage";
 import "./index.css";
 import "./prose.css";
 
@@ -25,6 +26,10 @@ ReactDOM.createRoot(rootElement).render(
             <Route index element={<Home />} />
             <Route path="sources/:id" element={<SourceDetailPage />} />
             <Route path="sources/:id/raw" element={<RawSourcePage />} />
+            <Route
+              path="subjects/:subjectId/entries/:entrySlug"
+              element={<EntryPage />}
+            />
           </Route>
         </Routes>
       </BrowserRouter>

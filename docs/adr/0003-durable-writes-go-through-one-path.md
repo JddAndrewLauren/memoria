@@ -128,6 +128,26 @@ client can simply issue one.
   It can never overwrite, which is the property the token exists to protect; what it
   gives up is only the ability to be told a file was changed underneath it, and a file
   that does not exist has nothing underneath.
+- **The author's identity comes from the repository, never from the request**
+  (added 2026-09-02, #26). The first caller of this path over HTTP is the author editing
+  an entry's match terms, and decision 2 requires that write to commit as *them* — but
+  ADR-0002 forbids any surface assuming the browser and the repository share a machine,
+  so a name arriving in a payload is an unverified claim about who acted.
+  `write.repository_actor` reads the repository's own git `user.name`/`user.email`
+  instead: it is the identity already on the server side of that boundary, and the one
+  `checkpoint` — which takes no `Actor` at all — already commits under, so an app write
+  and a checkpoint of the same author's Obsidian edits agree about who they are. An unset
+  identity **raises** rather than defaulting: git's own fallback is a guessed
+  `user@hostname`, and a guess is indistinguishable afterwards from a real identity, in a
+  mechanism whose whole output is attribution. Multi-author hosting would need a real
+  identity source; it is out of scope while the PoC is one author on localhost.
+- **The token crosses HTTP as an opaque field on the entry read** (added 2026-09-02, #26).
+  `EntryDetail.token` is minted by `subjects.serve_entry` — the read that produces what is
+  on screen — rather than by the write that follows it, because the comparison decision 1
+  specifies is against *the file as it was read*. A rejection is a **409** carrying the
+  file path and nothing else, and the client re-reads through #64's own read for the
+  current content and a fresh token, exactly as "returning the file's current contents
+  with a rejection" was rejected above.
 - **Revisit if** a durable write appears that genuinely needs two files changed together,
   or if Curator passes become atomic over a run rather than per-file — at which point the
   token is the wrong shape for that caller and it needs a pass-level baseline instead.

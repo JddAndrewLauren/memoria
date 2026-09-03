@@ -660,3 +660,78 @@ def test_create_makes_the_parent_directory(tmp_path):
 
     assert isinstance(result, Written)
     assert (tmp_path / "subjects" / "locations" / "capital.md").is_file()
+
+
+# --- the author's identity, for a surface's write (#26) ----------------------
+
+
+def test_the_repository_actor_is_the_repositorys_own_git_identity(tmp_path):
+    """ADR-0002 forbids assuming the browser and the repository share a
+    machine, so a surface cannot take the author's name from the request.
+    The repository's own git config is the identity already on the server
+    side of that boundary - and the one `checkpoint` commits under."""
+    repository = _repo(tmp_path, {"book.md": "seed\n"})
+
+    actor = write.repository_actor(repository)
+
+    assert actor.name == "Local Author"
+    assert actor.email == "local-author@memoria.test"
+
+
+def test_the_repository_actor_is_human(tmp_path):
+    """§41: a direct human change is human-authored, so a write through it
+    carries ADR-0008's `change-id:` trailer. A surface's write is one."""
+    repository = _repo(tmp_path, {"book.md": "seed\n"})
+
+    assert write.repository_actor(repository).human is True
+
+
+@pytest.mark.parametrize("unset", ["user.name", "user.email"])
+def test_an_unconfigured_git_identity_refuses_rather_than_guessing(
+    tmp_path, monkeypatch, unset
+):
+    """Git's own fallback is a guessed `user@hostname`, and attributing an
+    author act to a guess is worse than refusing it: afterwards the guess is
+    indistinguishable from a real identity, and #32's human-touched flag is
+    defined over exactly these commits. Both settings are named, because
+    whoever hits this has to set both.
+
+    The global and system files are pointed at nothing, because `git config
+    --get` falls through to them: without that, this asserts nothing on a
+    developer machine that has a global identity - and passes for the wrong
+    reason on CI, which does not.
+    """
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "absent-global"))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(tmp_path / "absent-system"))
+    repository = _repo(tmp_path, {"book.md": "seed\n"})
+    _git(tmp_path, "config", "--unset", unset)
+
+    with pytest.raises(WriteError) as excinfo:
+        write.repository_actor(repository)
+
+    assert "user.name" in str(excinfo.value)
+    assert "user.email" in str(excinfo.value)
+
+
+def test_a_write_by_the_repository_actor_commits_as_that_identity(tmp_path):
+    """The whole point of the value: it is what git ends up recording."""
+    repository = _repo(tmp_path, {"subjects/people/bob.md": "Bob\n"})
+    served = write.serve(repository, "subjects/people/bob.md")
+
+    result = write.write(
+        repository,
+        "subjects/people/bob.md",
+        served.token,
+        "Robert\n",
+        write.repository_actor(repository),
+    )
+
+    assert isinstance(result, Written)
+    author = subprocess.run(
+        ["git", "log", "-1", "--format=%an <%ae>"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert author == "Local Author <local-author@memoria.test>"

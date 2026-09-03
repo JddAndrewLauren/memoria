@@ -147,10 +147,20 @@ The reads are: list sources (`GET /api/sources`, filterable by `source_type`,
 (`GET /api/read?ref=…`, #25), search (`GET /api/search`, wrapping
 `memoria.index.search`), list subjects with their entry counts
 (`GET /api/subjects`, #24), one subject's entries
-(`GET /api/subjects/{id}/entries`, #24), and one entry read whole with its
+(`GET /api/subjects/{id}/entries`, #24), one entry read whole with its
 match terms, badged statements and curated overlay
-(`GET /api/subjects/{id}/entries/{slug}`, #157). See `docs/tool-surface.md` for what
-each filter means and `src/memoria/web/schemas.py` for the response shapes.
+(`GET /api/subjects/{id}/entries/{slug}`, #157), that entry's gathered set
+(`…/gathered`) and its appearances (`…/appearances`, both #26). See
+`docs/tool-surface.md` for what each filter means and
+`src/memoria/web/schemas.py` for the response shapes.
+
+The gathered set and appearances are separate routes rather than fields on the
+entry, and that is part 06 §8.11's separation at the API boundary: a gathered
+set is evidence to write *from* and appearances are prose already written, so
+nothing serves them as one list. Each carries its own `is_built`, and
+appearances additionally carries `engine_supported` — false for Themes and
+Arcs, whose engine waits for the audit at M5, so an empty list is never
+mistaken for "nothing appears" when the truth is "nothing has looked".
 
 `GET /api/read` is the MCP server's `read(ref)` over HTTP, the same composed
 core: a `SRC-` paragraph anchor — a search hit's, or a paragraph's own —
@@ -166,6 +176,24 @@ an action: it launches the un-normalized file behind a record in the host's
 editor or file manager (#65). Reveal makes the same locality check itself and
 refuses a non-local request with a 403 whatever the UI showed, which is what
 keeps it purely additive (`docs/adr/0002-ui-is-a-react-client.md`).
+
+### The one write
+
+`PUT /api/subjects/{id}/entries/{slug}/match-terms` is the only route in the
+app that writes, and the first durable write in the system (#26). Match terms
+are author-owned (part 06 §8.2), so it goes through the single write path and
+its staleness check (`docs/adr/0003-durable-writes-go-through-one-path.md`):
+the entry read serves a `token` — a SHA-256 of the entry file's bytes, opaque
+to the client — and the write presents it back. A file changed underneath
+since it was read, in Obsidian or in another tab, comes back **409** and
+nothing is written, merged or partially applied; the client re-reads for the
+current content and a fresh token. An accepted write commits, path-scoped and
+attributed to the repository's own git `user.name`/`user.email`, so the tree
+is left clean and #32's dirty-tree rule never closes the file to the Curator.
+An unconfigured git identity refuses the write rather than guessing.
+
+Pins and exclusions are rendered on the entry view but not authored there —
+they are #18's, from the source side.
 
 No auth, HTTPS or remote-access code exists — localhost, one machine
 (`docs/poc-plan.md` §5).
@@ -195,7 +223,9 @@ compile error in `ui/`, not a runtime surprise nobody sees.
 React + Vite + TypeScript, client-rendered over the JSON API above
 (`docs/adr/0002-ui-is-a-react-client.md`, #24). The shell carries three
 trees — `MANUSCRIPT` (empty until M5), `SUBJECTS` and `SOURCES` — plus
-cross-layer search. Every read goes through `ui/src/api/client.ts`, the
+cross-layer search. `SOURCES` opens the source viewer (#25) and `SUBJECTS`
+opens the entry view (#26), the surface M3's gate is walked on; see
+`docs/gates/m3-gate-walk.md`. Every read goes through `ui/src/api/client.ts`, the
 client's only path to the API; no view opens SQLite or reads the evidence
 repository directly, and a dependency boundary rule
 (`tests/test_ui_dependency_boundary.py`) fails the Python suite if `ui/`

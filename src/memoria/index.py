@@ -1483,6 +1483,31 @@ def _lexical_match_book(con: sqlite3.Connection, term: str) -> list[str]:
     ]
 
 
+def appearances_supported(entry_id: str) -> bool:
+    """Whether the appearances engine can say anything about this entry at
+    all - false for Themes and Arcs.
+
+    ``list_appearances`` returning ``[]`` is two different facts, and a
+    surface that cannot tell them apart lies to the author: for a Person it
+    means the lexical pass found nothing, and for a Theme it means the pass
+    never ran. Their match terms name entries and relations, manuscript
+    prose is never extracted, so there is nothing to intersect against; a
+    paragraph about the fear of dependence need not contain any of the
+    entry's words, and the judgement that finds it needs a model reading the
+    passage against the entry, which waits for the audit at M5 (part 06
+    §8.11).
+
+    ``compute_appearances`` skips exactly these entries, and calls this to
+    decide - one owner for the rule, so what the pass skips and what a
+    surface explains cannot come apart.
+    """
+    # Local, for `compute_appearances`'s reason: `memoria.extraction`
+    # imports this module, so the reverse import cannot sit at module scope.
+    from memoria.extraction import CO_OCCURRENCE_SUBJECTS
+
+    return entry_id.split("/", 1)[0] not in CO_OCCURRENCE_SUBJECTS
+
+
 def compute_appearances(repository: Repository) -> AppearancesReport:
     """Recompute the ``appearances`` table: every audit-target passage a
     lexically-matchable entry's word-shaped match terms - or its own
@@ -1519,7 +1544,7 @@ def compute_appearances(repository: Repository) -> AppearancesReport:
     # Imported here, not at module scope, for the same reason `rebuild` does
     # it: `memoria.extraction` imports this module, so the reverse import
     # must stay local to avoid a cycle.
-    from memoria.extraction import CO_OCCURRENCE_SUBJECTS, implicit_name_term
+    from memoria.extraction import implicit_name_term
 
     entries = load_all_entries(repository)
     con = connect(repository)
@@ -1530,7 +1555,7 @@ def compute_appearances(repository: Repository) -> AppearancesReport:
         skipped_subjects: set[str] = set()
         for entry_id, entry in sorted(entries.items()):
             subject_id = entry_id.split("/", 1)[0]
-            if subject_id in CO_OCCURRENCE_SUBJECTS:
+            if not appearances_supported(entry_id):
                 skipped += 1
                 skipped_subjects.add(subject_id)
                 continue

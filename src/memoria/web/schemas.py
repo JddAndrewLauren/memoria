@@ -246,16 +246,20 @@ class OverlayActOut(BaseModel):
     on the entry file itself - part 04 §42's "never regenerated", which
     survives the index being deleted outright.
 
-    ``memoria.subjects.OverlayAct`` also carries ``actor_name`` and
-    ``actor_email``, and they are deliberately not served. The act stays
-    fully attributable on disk, which is what §42 requires; nothing in the
-    client attributes a pin to a person, and ADR-0002 forbids assuming the
-    browser and the repository share a machine, so an address crossing this
-    boundary would be a liability with no consumer.
+    ``actor_name`` is served and ``actor_email`` is not. The address was
+    withheld with the name when this model was written (#157) on the
+    grounds that nothing in the client attributed a pin to a person; the
+    entry view is that consumer, and part 06 §8.3 requires the overlay to be
+    *attributable* on the surface that renders it - a gathered-set row
+    marked "excluded" without saying by whom is an unexplained absence. The
+    address stays withheld: ADR-0002 forbids assuming the browser and the
+    repository share a machine, and an email crossing that boundary is a
+    liability that no rendering needs.
     """
 
     anchor: str
     action: str
+    actor_name: str
     at: str
 
 
@@ -272,10 +276,126 @@ class EntryDetail(EntrySummary):
     not to be published; the parsed statements are the served form of the
     body, and a client that wants the markdown is asking for the file rather
     than for the entry.
+
+    ``token`` is ``memoria.write.serve``'s content hash of the entry file as
+    it was served (ADR-0003 decision 1), opaque to the client and presented
+    back on a match-term write. This is where the staleness token first
+    crosses HTTP: entry files are editable in Obsidian too, so a write has
+    to be checked against the file the client actually read rather than
+    against whatever is on disk when it arrives.
     """
 
     statements: list[StatementOut]
     overlay: list[OverlayActOut] = []
+    token: str
+
+
+class GatheredSourceOut(BaseModel):
+    """One paragraph in an entry's gathered set (part 06 §8.3), with the
+    author's overlay act over it if there is one.
+
+    ``anchor`` is the whole address a reader needs - it is what
+    ``/api/read`` resolves - because the gathered set has no stable ID of
+    its own: it is derived, asserts nothing, and nothing outside it ever
+    names one (``memoria.index.GatheredSource``).
+
+    ``pinned`` is ``gather``'s own flag - membership. ``overlay_action`` and
+    the two fields after it are the *act* behind it, read off the entry
+    file: ``"pin"``, ``"exclude"``, or ``None`` where the pass alone
+    accounts for the row. Both are served because they answer different
+    questions and an excluded anchor is not in ``items`` at all - see
+    ``GatheredSetResponse``.
+    """
+
+    src_id: str
+    anchor: str
+    pinned: bool
+    overlay_action: str | None = None
+    actor_name: str | None = None
+    at: str | None = None
+
+
+class GatheredSetResponse(BaseModel):
+    """An entry's gathered set, and the exclusions kept out of it.
+
+    ``items`` is ``memoria.index.gather``'s result, which has already
+    applied the overlay: a pinned anchor is in it whatever the pass found,
+    and an excluded one is gone. ``excluded`` carries those removed acts
+    separately, because an exclusion the surface cannot render is an author
+    act with nothing to show for it - the reader sees a shorter list and no
+    reason for it.
+
+    ``is_built`` is ``memoria.index.is_built``, the same field and the same
+    meaning as on ``SearchResponse``: an empty gathered set with it false
+    means the corpus was never indexed, which is a different fact from an
+    entry nothing matched. An entry with an empty gathered set is a valid
+    state either way (part 06 §8.2), never an error.
+    """
+
+    items: list[GatheredSourceOut]
+    excluded: list[OverlayActOut] = []
+    is_built: bool
+
+
+class AppearanceOut(BaseModel):
+    """One manuscript passage an entry turns out to touch (part 06 §8.11).
+
+    ``note`` names the match term that found it. No pin or exclude field
+    here, unlike ``GatheredSourceOut``, and that is the design rather than
+    an omission: an author act against one passage would be a durable
+    pointer into mutable prose, which part 04 §4.1 forbids.
+    """
+
+    src_id: str
+    anchor: str
+    note: str
+
+
+class AppearancesResponse(BaseModel):
+    """An entry's appearances, and whether an engine could produce any.
+
+    Kept in its own response rather than folded onto ``EntryDetail``
+    alongside the gathered set, because part 06 §8.11's separation is the
+    point: a gathered set is evidence to write *from*, appearances are prose
+    already written, and merging them would put manuscript text into what a
+    writing agent reads as material.
+
+    ``engine_supported`` is ``memoria.index.appearances_supported``. False
+    for Themes and Arcs, whose engine waits for the audit at M5 - without
+    it, an empty list says "nothing appears" when the truth is "nothing has
+    looked yet".
+
+    ``is_built`` reports ``memoria rebuild``, as elsewhere.
+    """
+
+    items: list[AppearanceOut]
+    is_built: bool
+    engine_supported: bool
+
+
+class MatchTermsUpdate(BaseModel):
+    """A match-term write: the terms to store, and the token the entry was
+    served with (ADR-0003).
+
+    The token is the whole staleness check from the client's side - it
+    presents back what ``EntryDetail`` gave it, unread and unmodified, and a
+    file changed underneath since then is rejected rather than merged.
+    """
+
+    token: str
+    match_terms: list[str]
+
+
+class MatchTermsResponse(BaseModel):
+    """What an accepted match-term write stored, and a fresh token.
+
+    The new token is served so the editor stays usable without a reload:
+    the file it holds a token for has just changed - by its own write - so
+    the one it presented is now stale by construction.
+    """
+
+    match_terms: list[str]
+    token: str
 
 
 class SearchResultOut(BaseModel):

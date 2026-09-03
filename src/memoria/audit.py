@@ -62,6 +62,7 @@ from memoria.scope import resolve_scope
 from memoria.subjects import (
     Entry,
     Subject,
+    is_audit_visible,
     load_all_entries,
     load_subject,
     parse_statements,
@@ -183,13 +184,16 @@ def paragraph_hash(paragraph_text: str) -> str:
 
 def audit_visible_body(entry: Entry) -> str:
     """The part of an entry's body the audit compares prose against
-    (CONTEXT.md's "Audit-visible body"): testimony and every badged
-    statement except ``[open]``. Memoria notes are not yet a construct this
-    codebase writes (part 08 §14.2 is not built), so there is nothing else
-    to exclude today; when they land, they join `[open]` here rather than
-    changing the judgement key's shape.
+    (CONTEXT.md's "Audit-visible body"), rendered back as text so it can be
+    hashed into a judgement key.
+
+    ``subjects.is_audit_visible`` owns *which* statements those are, because
+    the entry view (#26) has to draw the same line on screen and a second
+    copy of the predicate is how the key and the surface drift apart.
+    Memoria notes join ``[open]`` there when #32 lands, without changing the
+    judgement key's shape.
     """
-    statements = [s for s in parse_statements(entry.body) if s.badge != "open"]
+    statements = [s for s in parse_statements(entry.body) if is_audit_visible(s)]
     return "\n\n".join(
         f"[{s.badge}] {s.text}" if s.badge else s.text for s in statements
     )

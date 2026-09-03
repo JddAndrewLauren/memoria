@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { NavLink } from "react-router-dom";
 import { listSubjects, listEntries, type EntrySummary } from "../api/client";
 import { TreeSection } from "./TreeSection";
 
@@ -73,27 +74,25 @@ function SubjectRow({ id, entryCount }: { id: string; entryCount: number }) {
   );
 }
 
+// A link into the entry view (#26), the way `SourcesTree` links into the
+// source viewer. It was an expander showing match terms inline until the
+// entry view existed to show them properly; leaving both would give the
+// author two places to read the same field and only one place to edit it.
 function EntryRow({ entry }: { entry: EntrySummary }) {
-  const [expanded, setExpanded] = useState(false);
-  const label = entry.id.split("/")[1] ?? entry.id;
+  const [subjectId, slug] = entry.id.split("/");
 
   return (
     <li>
-      <button
-        type="button"
-        onClick={() => setExpanded((value) => !value)}
-        aria-expanded={expanded}
-        className="block w-full truncate rounded px-1 py-1 text-left text-xs text-secondary hover:bg-hover hover:text-ink"
+      <NavLink
+        to={`/subjects/${subjectId}/entries/${slug}`}
+        className={({ isActive }) =>
+          `block w-full truncate rounded px-1 py-1 text-left text-xs ${
+            isActive ? "bg-hover text-ink" : "text-secondary hover:bg-hover hover:text-ink"
+          }`
+        }
       >
-        {label}
-      </button>
-      {expanded && (
-        <p className="px-1 pb-1 text-[11px] text-muted">
-          {entry.match_terms.length > 0
-            ? `Match terms: ${entry.match_terms.join(", ")}`
-            : "No match terms yet."}
-        </p>
-      )}
+        {slug ?? entry.id}
+      </NavLink>
     </li>
   );
 }

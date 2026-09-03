@@ -21,6 +21,14 @@ export type SearchResponse = components["schemas"]["SearchResponse"];
 export type EditorialRecordOut = components["schemas"]["EditorialRecordOut"];
 export type ReadOverlayOut = components["schemas"]["ReadOverlayOut"];
 export type CitationOut = components["schemas"]["CitationOut"];
+export type StatementOut = components["schemas"]["StatementOut"];
+export type OverlayActOut = components["schemas"]["OverlayActOut"];
+export type EntryDetail = components["schemas"]["EntryDetail"];
+export type GatheredSourceOut = components["schemas"]["GatheredSourceOut"];
+export type GatheredSetResponse = components["schemas"]["GatheredSetResponse"];
+export type AppearanceOut = components["schemas"]["AppearanceOut"];
+export type AppearancesResponse = components["schemas"]["AppearancesResponse"];
+export type MatchTermsResponse = components["schemas"]["MatchTermsResponse"];
 
 class ApiError extends Error {
   constructor(
@@ -45,6 +53,23 @@ async function post<T>(path: string): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new ApiError(response.status, body?.detail ?? response.statusText);
+  }
+  return response.json() as Promise<T>;
+}
+
+// The first request in this client that carries a body: #26's match-term
+// write. `ApiError.status` matters more here than anywhere else - 409 is
+// the staleness rejection (ADR-0003), and the editor tells it apart from a
+// failure by that number.
+async function put<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const failure = await response.json().catch(() => null);
+    throw new ApiError(response.status, failure?.detail ?? response.statusText);
   }
   return response.json() as Promise<T>;
 }
@@ -96,6 +121,48 @@ export function listSubjects(): Promise<SubjectListResponse> {
 
 export function listEntries(subjectId: string): Promise<EntryListResponse> {
   return get(`/api/subjects/${encodeURIComponent(subjectId)}/entries`);
+}
+
+// The entry view's three reads (#26). Three rather than one: the entry is a
+// read of its *file*, while the gathered set and appearances are index reads
+// with their own build signal - and part 06 §8.11 keeps the last two apart
+// on purpose, since one is evidence to write from and the other is prose
+// already written.
+function entryPath(subjectId: string, entrySlug: string): string {
+  return `/api/subjects/${encodeURIComponent(subjectId)}/entries/${encodeURIComponent(entrySlug)}`;
+}
+
+export function readEntry(subjectId: string, entrySlug: string): Promise<EntryDetail> {
+  return get(entryPath(subjectId, entrySlug));
+}
+
+export function readGatheredSet(
+  subjectId: string,
+  entrySlug: string,
+): Promise<GatheredSetResponse> {
+  return get(`${entryPath(subjectId, entrySlug)}/gathered`);
+}
+
+export function readAppearances(
+  subjectId: string,
+  entrySlug: string,
+): Promise<AppearancesResponse> {
+  return get(`${entryPath(subjectId, entrySlug)}/appearances`);
+}
+
+// The author editing match terms - the one write this surface makes (#26).
+// `token` is whatever `readEntry` served, passed back unread: it is the
+// staleness check's whole client-side half (ADR-0003).
+export function updateMatchTerms(
+  subjectId: string,
+  entrySlug: string,
+  token: string,
+  matchTerms: string[],
+): Promise<MatchTermsResponse> {
+  return put(`${entryPath(subjectId, entrySlug)}/match-terms`, {
+    token,
+    match_terms: matchTerms,
+  });
 }
 
 export function search(query: string): Promise<SearchResponse> {
