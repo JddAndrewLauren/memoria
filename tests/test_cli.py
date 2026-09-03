@@ -392,6 +392,54 @@ def test_derive_session_end_to_end_through_the_cli(tmp_path):
     assert (tmp_path / "sessions" / "2026" / "09" / "SES-20260912-1432" / "metadata.yaml").is_file()
 
 
+def test_derive_session_with_no_path_resolves_from_the_env(tmp_path):
+    """#198: with no positional path, the command resolves Claude Code's
+    own JSONL from CLAUDE_CODE_SESSION_ID under a fixture projects root."""
+    (tmp_path / "pyproject.toml").write_text("")
+    projects_root = tmp_path / "claude-projects"
+    project_dir = projects_root / "-some-project"
+    project_dir.mkdir(parents=True)
+    entries = [
+        {
+            "uuid": "u1",
+            "parentUuid": None,
+            "type": "user",
+            "timestamp": "2026-09-12T14:30:00+00:00",
+            "sessionId": "claude-code-session-uuid",
+            "message": {"role": "user", "content": "Hello?"},
+        },
+    ]
+    (project_dir / "claude-code-session-uuid.jsonl").write_text(
+        "\n".join(json.dumps(entry) for entry in entries) + "\n", encoding="utf-8"
+    )
+    env = {k: v for k, v in os.environ.items() if k != "MEMORIA_EVIDENCE_ROOT"}
+    env["CLAUDE_CODE_SESSION_ID"] = "claude-code-session-uuid"
+    env["MEMORIA_CLAUDE_PROJECTS_DIR"] = str(projects_root)
+
+    result = run_cli("derive-session", "SES-20260912-1432", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "derived 1 turn(s)" in result.stdout
+    transcript = (
+        tmp_path / "sessions" / "2026" / "09" / "SES-20260912-1432" / "transcript.md"
+    )
+    assert "Hello?" in transcript.read_text(encoding="utf-8")
+
+
+def test_derive_session_with_no_path_and_no_env_var_names_it(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("")
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("MEMORIA_EVIDENCE_ROOT", "CLAUDE_CODE_SESSION_ID")
+    }
+
+    result = run_cli("derive-session", "SES-20260912-1432", env=env, cwd=tmp_path)
+
+    assert result.returncode == 1
+    assert "CLAUDE_CODE_SESSION_ID" in result.stderr
+
+
 def test_derive_context_manifest_end_to_end_through_the_cli(tmp_path):
     """#155: the sibling gap to the one above - `memoria.context_manifest`
     is unit tested directly, but the `derive-context-manifest` subcommand

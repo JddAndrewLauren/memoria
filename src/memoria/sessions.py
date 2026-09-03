@@ -43,6 +43,7 @@ case this module is built for.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from bisect import bisect_left
@@ -57,6 +58,12 @@ from memoria.repository import Repository
 
 METADATA_FILENAME = "metadata.yaml"
 TRANSCRIPT_FILENAME = "transcript.md"
+
+# The one piece of Claude Code's own filesystem layout this repository
+# knows (#198's triage decision, 2026-09-03) - see `resolve_claude_transcript`.
+CLAUDE_CODE_SESSION_ID_ENV_VAR = "CLAUDE_CODE_SESSION_ID"
+CLAUDE_PROJECTS_DIR_ENV_VAR = "MEMORIA_CLAUDE_PROJECTS_DIR"
+DEFAULT_CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
 # Only these two JSONL entry types are turns at all; everything else (a
 # `summary` entry from a compaction, for instance) is DAG scaffolding this
@@ -188,6 +195,58 @@ def turn_role(repository: Repository, session_id: str, turn: int) -> str:
     raise SessionError(
         f"{session_id} has {len(headings)} turn(s); there is no T{turn:03d}"
     )
+
+
+def resolve_claude_transcript(
+    session_id: str | None = None, projects_root: Path | str | None = None
+) -> Path:
+    """Find Claude Code's own per-session JSONL without being told its path.
+
+    ``CLAUDE_CODE_SESSION_ID`` is the one piece of Claude Code's own
+    filesystem layout this repository chooses to depend on (#198's triage
+    decision, 2026-09-03): an environment variable Claude Code sets for
+    every session it runs, whose value is also that session's transcript
+    filename (``<id>.jsonl``) under whichever of Claude Code's own project
+    directories the session lives in. The two alternatives on the table at
+    issue-filing time - the ``/curation`` skill guessing "most recently
+    modified", or this module computing the project-directory slug itself -
+    both guess at "newest" or duplicate a piece of Claude Code's own
+    slugging; keying off this id does neither, and is a smaller step for a
+    module that already depends on Claude Code's transcript format for
+    everything else in it.
+
+    ``session_id`` is the Claude Code session id to search for - distinct
+    from this module's own ``SES-`` ids - and defaults to
+    ``CLAUDE_CODE_SESSION_ID`` from the environment. ``projects_root``
+    defaults to ``MEMORIA_CLAUDE_PROJECTS_DIR`` if set, else
+    ``~/.claude/projects``. Both are accepted as explicit arguments so a
+    test can resolve against a fixture layout without touching the
+    environment. Refuses, naming the id (or the variable that would have
+    carried it) and the directory searched, when the id is unavailable, when
+    no ``<id>.jsonl`` exists under any project directory, or when more than
+    one does - an ambiguity this function is not in a position to guess its
+    way out of.
+    """
+    if session_id is None:
+        session_id = os.environ.get(CLAUDE_CODE_SESSION_ID_ENV_VAR)
+    if projects_root is None:
+        configured = os.environ.get(CLAUDE_PROJECTS_DIR_ENV_VAR)
+        projects_root = Path(configured) if configured else DEFAULT_CLAUDE_PROJECTS_DIR
+    projects_root = Path(projects_root)
+    if not session_id:
+        raise SessionError(
+            f"{CLAUDE_CODE_SESSION_ID_ENV_VAR} is not set, so there is no "
+            f"session id to search {projects_root} for"
+        )
+    matches = sorted(projects_root.glob(f"*/{session_id}.jsonl"))
+    if not matches:
+        raise SessionError(f"no transcript for {session_id} under {projects_root}")
+    if len(matches) > 1:
+        raise SessionError(
+            f"more than one transcript for {session_id} under {projects_root}: "
+            + ", ".join(str(match) for match in matches)
+        )
+    return matches[0]
 
 
 def derive_session(repository: Repository, session_id: str, jsonl_path: Path) -> DerivationResult:

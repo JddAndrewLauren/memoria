@@ -26,13 +26,13 @@ doubt it is not a decision. Everything that is not a decision is `[open]`.
 2. To derive one, the author (or you, in a shell) runs:
 
    ```
-   memoria derive-session <SES-id> <path to the Claude Code JSONL>
+   memoria derive-session <SES-id>
    ```
 
    The `SES-` id is the directory name under `sessions/` that the session's
-   own `events.jsonl` landed in. The JSONL is Claude Code's own record of that
-   conversation, under `~/.claude/projects/<cwd with / as ->/<uuid>.jsonl`;
-   the most recently modified file there is usually the session just held.
+   own `events.jsonl` landed in. With no path argument, the command resolves
+   Claude Code's own JSONL for the *current* session itself, from
+   `CLAUDE_CODE_SESSION_ID` in the environment - no path to find or guess at.
    Then **commit** the derived `sessions/` directory: the dirty-tree rule
    (part 08 §14.2) refuses every write while tracked files carry uncommitted
    changes, and `curation_status` names them.
