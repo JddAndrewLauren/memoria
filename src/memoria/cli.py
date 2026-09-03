@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from memoria import changes
+from memoria import changes, health
 from memoria.context_manifest import derive_context_manifest
 from memoria.embeddings import default_embed_fn
 from memoria.extraction import RECURRENCE_THRESHOLD_DEFAULT
@@ -80,6 +80,76 @@ def _report_staleness(staleness_map) -> None:
     )
 
 
+def _report_health(report) -> None:
+    """Print the §47 health report (#44) - every category it lists, model-
+    free, safe to run unasked. Only prints what is actionable, the same
+    "zero is not printed specially" shape ``_report_staleness`` keeps, with
+    one exception: the autonomy statement and the two not-yet-built
+    categories always print, since §47 itself requires the report to say
+    it is safe to run unasked (acceptance criterion 5)."""
+    print(
+        "health: safe to run autonomously - every item below is a hash "
+        "comparison, a git fact or mechanical validation; no model call, "
+        "unlike the audit, which runs only on demand"
+    )
+    if report.stale_sections:
+        print(
+            f"health: {len(report.stale_sections)} section(s) not worked on "
+            f"in {report.stale_after_days}+ day(s)"
+        )
+    if report.not_current.not_current:
+        causes = ", ".join(
+            f"{count} {cause}" for cause, count in sorted(report.not_current.count_by_cause().items())
+        )
+        print(
+            f"health: {report.not_current.paragraphs_not_current} "
+            f"paragraph(s) not current ({causes})"
+        )
+    if report.unconfirmed_briefs:
+        print(f"health: {len(report.unconfirmed_briefs)} unconfirmed brief(s)")
+    old_questions = report.old_questions()
+    if old_questions:
+        print(
+            f"health: {len(old_questions)} question(s) open "
+            f"{report.old_question_days}+ day(s) ({len(report.open_questions)} open in total)"
+        )
+    elif report.open_questions:
+        print(
+            f"health: {len(report.open_questions)} open question(s), none "
+            f"older than {report.old_question_days} day(s)"
+        )
+    if report.themes_not_current:
+        print(
+            f"health: {len(report.themes_not_current)} Themes judgement(s) "
+            "not current - new evidence with no recent review"
+        )
+    if report.arcs_not_current:
+        print(
+            f"health: {len(report.arcs_not_current)} Arcs judgement(s) not "
+            "current - cached judgements gone stale"
+        )
+    if report.broken_provenance is None:
+        print("health: provenance not checked - no evidence corpus configured (MEMORIA_EVIDENCE_ROOT)")
+    elif report.broken_provenance:
+        print(f"health: {len(report.broken_provenance)} provenance error(s) - see `memoria validate`")
+    if report.unprocessed_source_additions:
+        print(
+            f"health: {len(report.unprocessed_source_additions)} raw unit(s) "
+            "added but not yet normalized"
+        )
+    if report.incomplete_research_memos:
+        print(
+            f"health: {len(report.incomplete_research_memos)} research "
+            "memo(s) left with unresolved questions"
+        )
+    print(
+        "health: human/Curator conflicts and unsupported-interpretation "
+        "statements are not yet reported - their producing mechanisms (the "
+        "Memoria note write path, part 08 §14.2, and the model-based "
+        "unsupported-claims check, §23) are not built"
+    )
+
+
 def _report_appearances(report) -> None:
     """Print what the appearances pass produced (#19, part 06 §8.11).
 
@@ -129,6 +199,33 @@ def main(argv=None):
             "Also discard the extraction's memo cache. This throws away model "
             "output that only another extraction pass can replace; a plain "
             "rebuild keeps it."
+        ),
+    )
+    health_parser = subparsers.add_parser(
+        "health",
+        help=(
+            "Print the §47 health report - what has gone stale, computed "
+            "without a model, safe to run unasked"
+        ),
+    )
+    health_parser.add_argument(
+        "--stale-after-days",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Days without a commit before a section counts as not worked on "
+            f"recently (default {health.STALE_SECTION_DAYS_DEFAULT})"
+        ),
+    )
+    health_parser.add_argument(
+        "--old-question-after-days",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Days before an open question counts as old (default "
+            f"{health.OLD_QUESTION_DAYS_DEFAULT})"
         ),
     )
     subparsers.add_parser(
@@ -295,6 +392,16 @@ def main(argv=None):
             print(f"derive-context-manifest: wrote {result.manifest_path}")
         else:
             print(f"derive-context-manifest: {args.session_id} already derived, unchanged")
+        return 0
+
+    if args.command == "health":
+        kwargs = {}
+        if args.stale_after_days is not None:
+            kwargs["stale_after_days"] = args.stale_after_days
+        if args.old_question_after_days is not None:
+            kwargs["old_question_days"] = args.old_question_after_days
+        report = health.compute_health_report(repository, **kwargs)
+        _report_health(report)
         return 0
 
     if args.command == "checkpoint":
