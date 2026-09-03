@@ -7,7 +7,7 @@ import pytest
 
 from memoria.manifest import ManifestEntry, format_id, load_manifest, save_manifest
 from memoria.normalize import EMAIL_CONVERTER_VERSION
-from memoria.record_extractor import statement_provenance
+from memoria.record_extractor import check_provenance, statement_provenance
 from memoria.subjects import Entry, Subject, entry_to_markdown, parse_statements, subject_to_markdown
 from memoria.validate import validate, validate_warnings
 
@@ -27,6 +27,20 @@ def _lift_example(section_heading):
     )
     assert match, f"no fenced markdown example found under {section_heading!r}"
     return match.group(1).strip()
+
+
+def _lift_examples(section_heading):
+    """Every fenced ``markdown`` code block under ``## <section_heading>``
+    in part 06, up to the next heading - §9.2 shows two."""
+    doc = PLAN_06.read_text(encoding="utf-8")
+    match = re.search(
+        rf"^## {re.escape(section_heading)}\n(.*?)(?=^#)",
+        doc, re.DOTALL | re.MULTILINE,
+    )
+    assert match, f"no section found under {section_heading!r}"
+    blocks = re.findall(r"```markdown\n(.*?)```", match.group(1), re.DOTALL)
+    assert blocks, f"no fenced markdown example found under {section_heading!r}"
+    return [block.strip() for block in blocks]
 
 
 def _make_subject(**overrides):
@@ -765,6 +779,25 @@ def test_93s_example_parses_as_one_inferred_statement_with_its_two_references():
         "SRC-000184 ¶17",
         "SES-20260912-1432#T017",
     )
+
+
+@pytest.mark.parametrize(
+    "section", ["9.1 Source statements", "9.2 Author statements", "9.3 Inferred statements"]
+)
+def test_the_plans_provenance_examples_use_references_check_provenance_accepts(section):
+    """Part 06 §9's examples cite bare references (#187): `check_provenance`
+    rejects the markdown-link form as not original material, so an example
+    a reader copies must be one the validator would pass."""
+    references = [
+        line[len("— "):]
+        for example in _lift_examples(section)
+        for line in example.splitlines()
+        if line.startswith("— ")
+    ]
+
+    assert references
+    for reference in references:
+        assert check_provenance(reference) == reference
 
 
 def test_validate_passes_the_plans_93_example_lifted_verbatim(tmp_path):

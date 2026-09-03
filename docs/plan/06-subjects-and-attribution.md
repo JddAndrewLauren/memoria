@@ -575,7 +575,7 @@ or:
 
 ```markdown
 [author] The conflict should be framed primarily around autonomy.
-— [CHG-20261014-003](...)
+— CHG-20261014-003
 ```
 
 The Curator must not turn the AI's suggestion into an `[author]` position merely
