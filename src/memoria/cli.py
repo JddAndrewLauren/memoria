@@ -132,7 +132,11 @@ def _report_health(report) -> None:
         print("health: provenance not checked - no evidence corpus configured (MEMORIA_EVIDENCE_ROOT)")
     elif report.broken_provenance:
         print(f"health: {len(report.broken_provenance)} provenance error(s) - see `memoria validate`")
-    if report.unprocessed_source_additions:
+    if report.unprocessed_source_additions is None:
+        print(
+            "health: source additions not checked - no evidence corpus configured (MEMORIA_EVIDENCE_ROOT)"
+        )
+    elif report.unprocessed_source_additions:
         print(
             f"health: {len(report.unprocessed_source_additions)} raw unit(s) "
             "added but not yet normalized"

@@ -910,7 +910,13 @@ def audit_tasks_for_target(
         section_number=section_number,
         paragraph_index=paragraph_index,
     )
-    for item in pending[:limit]:
+    # ``limit`` bounds the tasks served, not the pending rows walked: a row
+    # whose paragraph or entry has gone since the map was computed is dropped
+    # here, and dropping it must not silently under-fill the batch a caller
+    # asked for.
+    for item in pending:
+        if len(tasks) >= limit:
+            break
         paragraph = paragraph_at(
             repository, item.chapter_number, item.section_number, item.paragraph_index
         )

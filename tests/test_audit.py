@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 
+import memoria.audit as audit_module
 from memoria.audit import (
     AuditRecordOutcome,
     AuditTask,
@@ -691,6 +692,33 @@ def test_audit_tasks_for_target_is_bounded_by_the_scope_resolver(tmp_path):
     tasks = audit_tasks_for_target(repository, chapter_number=chapter.number, section_number=section.number)
 
     assert all(t.entry_id == "SUB-people/bob" for t in tasks)
+
+
+def test_audit_tasks_fill_the_limit_despite_vanished_paragraphs(tmp_path, monkeypatch):
+    """`limit` bounds the tasks served, not the pending rows walked: a
+    paragraph that vanished from draft.md between the staleness map and this
+    read is dropped, and dropping it must not under-fill the batch."""
+    entry = Entry(id="SUB-people/bob", match_terms=["Bob"], body="Bob is tall.")
+    draft = "\n\n".join(f"Bob did thing {n}." for n in range(1, 9))
+    repository = _basic_repo(
+        tmp_path, entry=entry, brief_text="About Bob.", draft=draft
+    )
+    real_paragraph_at = audit_module.paragraph_at
+
+    def _vanished_first_two(repo, chapter_number, section_number, paragraph_index):
+        if paragraph_index in (1, 2):
+            return None
+        return real_paragraph_at(repo, chapter_number, section_number, paragraph_index)
+
+    monkeypatch.setattr(audit_module, "paragraph_at", _vanished_first_two)
+
+    tasks = audit_tasks_for_target(
+        repository, chapter_number=1, section_number=1, limit=6
+    )
+
+    assert len(tasks) == 6
+    assert not any(t.anchor.startswith("01/01#1|") for t in tasks)
+    assert not any(t.anchor.startswith("01/01#2|") for t in tasks)
 
 
 # --- findings: disagreement sets, no category (#40, part 06 §8.10) -----------

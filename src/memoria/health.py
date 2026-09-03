@@ -80,7 +80,13 @@ STALE_SECTION_DAYS_DEFAULT = 30
 # Same reasoning as the section threshold above.
 OLD_QUESTION_DAYS_DEFAULT = 30
 
-_QUESTION_BLOCK_RE = re.compile(r"\[open\] (?P<text>.*?)\n\n— (?P<citation>SES-\S+)\n\n", re.DOTALL)
+# The trailing separator is `\n\n` between blocks, but a hand-edited
+# `questions.md` may end its final block at EOF with one newline or none -
+# `record_question` always writes the blank line, so this only guards the
+# hand-edited case rather than fixing a live bug.
+_QUESTION_BLOCK_RE = re.compile(
+    r"\[open\] (?P<text>.*?)\n\n— (?P<citation>SES-\S+)(?:\n\n|\n?\Z)", re.DOTALL
+)
 _SES_DATE_RE = re.compile(r"^SES-(\d{4})(\d{2})(\d{2})-")
 
 

@@ -3,12 +3,20 @@
 Covers the acceptance criteria: every listed category is present on the
 report; no model call anywhere in the call graph; not-current items are
 sourced from the staleness map (#37) rather than a second scan; unconfirmed
-briefs are listed; the report says it is safe to run autonomously; nothing
-in it is an approve/dismiss action; and computing it writes no durable
-state.
+briefs are listed; the report says it is safe to run autonomously; and
+computing it writes no durable state.
+
+"Nothing in it is an approve/dismiss action" is verified only in the two
+mechanical senses available: computing the report writes no durable state
+(``test_computing_the_report_writes_no_durable_state``) and ``health.py``
+imports no write-path module, so it has no means to approve or dismiss
+anything (``test_the_report_has_no_write_path``). No approve/dismiss
+mechanism exists in this codebase yet, so there is nothing else to assert
+against.
 """
 
 import ast
+import dataclasses
 import subprocess
 from pathlib import Path
 
@@ -125,6 +133,26 @@ def test_computing_the_report_writes_no_durable_state(tmp_path):
     assert before == after
 
 
+def test_the_report_has_no_write_path(tmp_path):
+    """AC: nothing in the report is an approve/dismiss action. There is no
+    approve/dismiss mechanism in this codebase to call, so what is
+    assertable is that `health.py` imports none of the modules that write
+    durable state - it has no means to act on anything - and that the report
+    it hands back is frozen, so a caller cannot turn it into a decision
+    either."""
+    write_path_modules = {"memoria.write", "memoria.changes", "memoria.ledger", "memoria.sessions"}
+    tree = ast.parse((SRC_ROOT / "health.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            assert not write_path_modules & {alias.name for alias in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            assert node.module not in write_path_modules
+
+    report = compute_health_report(_repo(tmp_path))
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        report.open_questions = ()
+
+
 # --- AC: not-current is sourced from the staleness map, not a scan -----------
 
 
@@ -215,6 +243,26 @@ def test_open_questions_are_read_from_the_queue_and_aged(tmp_path):
     assert len(old) == 1
     assert old[0].text == "Was the acquisition contested?"
     assert old[0].date == "2020-01-01"
+
+
+def test_a_final_question_block_ending_at_eof_is_still_read(tmp_path):
+    """`record_question` always writes the trailing blank line, but a
+    hand-edited `questions.md` need not - a final block ending at EOF is
+    read, not silently skipped."""
+    repository = _repo(tmp_path)
+    (repository.root / "questions.md").write_text(
+        "[open] Was the acquisition contested?\n\n— SES-20200101-0900#T003\n\n"
+        "[open] Did Bob attend?\n\n— SES-20200102-0900#T001",
+        encoding="utf-8",
+    )
+
+    report = compute_health_report(repository)
+
+    assert [q.text for q in report.open_questions] == [
+        "Was the acquisition contested?",
+        "Did Bob attend?",
+    ]
+    assert report.open_questions[1].date == "2020-01-02"
 
 
 def test_no_questions_file_means_no_open_questions(tmp_path):
@@ -343,6 +391,19 @@ def test_cli_health_says_it_is_safe_to_run_autonomously(tmp_path, capsys, monkey
     out = capsys.readouterr().out
     assert "safe to run autonomously" in out
     assert "no model call" in out
+
+
+def test_cli_health_reports_both_evidence_backed_checks_as_not_checked(tmp_path, capsys, monkeypatch):
+    """Both fields are ``None`` for the same reason - no evidence corpus -
+    so both say so; neither is silent."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+
+    assert cli.main(["health"]) == 0
+
+    out = capsys.readouterr().out
+    assert "provenance not checked" in out
+    assert "source additions not checked" in out
 
 
 def test_cli_health_accepts_threshold_overrides(tmp_path, capsys, monkeypatch):

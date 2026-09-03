@@ -163,9 +163,12 @@ reached only by something naming a target explicitly.
 
 `audit_pending` always names a target — a chapter, a chapter plus a section,
 or a section plus one highlighted passage (CONTEXT.md's "Audit": "a button on
-a section or a chapter, or on a highlighted passage"). There is no call that
+a section or a chapter, or on a highlighted passage"). No call of this tool
 audits the whole book at once; a chapter-level request is the broadest target
-this tool accepts. Only judgements the staleness map (#37) already knows are
+it accepts. The bound is the tool's, not the function's: `chapter_number` is
+positional and required here, while the underlying
+`memoria.audit.pending_for_target` scopes to the whole manuscript when called
+with no keywords. Only judgements the staleness map (#37) already knows are
 missing or stale are served — a target with nothing not-current says so
 rather than re-serving what is already current.
 
