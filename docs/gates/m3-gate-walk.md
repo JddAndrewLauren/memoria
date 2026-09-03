@@ -10,74 +10,87 @@ real: from an interpretation, to the exact evidence, to the untouched original.
 settled it as** — the raw, unnormalized source served in the page, showing
 `original_locator` as text. No editor launch, no client-local behaviour.
 
-## Who walks it, and why by hand
+## Who walks it, and how
 
-By hand, in a browser, by the author. `ui/src/routes/EntryPage.test.tsx` covers
-the same path automatically — the chip opens the panel, the panel shows the
-cited paragraph, the page underneath never navigates, "Open original ↗" points
-at the raw route in its own tab — and that coverage is what keeps the path from
-regressing. It is not the gate. The gate asks whether a person can follow a
-claim to its evidence without losing their place, and a test asserting that
-`location.pathname` is unchanged cannot answer that. This repo has no visual
-gate by decision (`CLAUDE.md`), so there is no third option.
+`scripts/gate-m3.sh` walks it, in Chromium, and writes down what it saw.
+
+There are three layers here and it is worth keeping them apart.
+`ui/src/routes/EntryPage.test.tsx` covers the path in jsdom — the chip opens
+the panel, the panel shows the cited paragraph, `location.pathname` never
+changes, "Open original ↗" points at the raw route in its own tab. That is the
+cheap regression net and it runs on every `npm test`. What it *cannot* answer
+is the gate's actual question, because jsdom has no `scrollIntoView` and every
+measurement it takes reads 0: "landed on the exact paragraph" and "did not
+lose my place" are unobservable there by construction, not merely untested. So
+the jsdom tests prove the mechanism — that nothing navigated — and the walk
+proves the thing itself.
+
+The walk is the second layer: a real browser, real `window.scrollY`, real
+viewport geometry, over a real server and a real normalized corpus, ending in
+an artifact (`gate/last-run.md`) that says what each step observed. It is not
+part of the standing gate — `CLAUDE.md` keeps routine work browser-free — and
+is run by name, once per milestone and whenever this path is touched.
+
+The third layer is a person. Nothing here stops the author walking it by hand,
+and for anything about how the page *feels* that is still the only instrument.
+What the script removes is the need to spend a person on the seven mechanical
+questions below in order to find out whether the milestone happened.
+
+The pattern the script follows — and the traps it is built against — is
+`gate/README.md`.
 
 ## The corpus
 
-No evidence corpus is chosen (`docs/open-problems.md` §2.4), so the walk runs
-against the four-custodian Enron slice, which exists for exactly this kind of
-exercise — reproducible from `scripts/fetch-enron.py` and
-`docs/corpora/enron-acquisition.yaml`, and nothing about the gate depends on it
-being the eventual corpus.
+`gate/corpus/`: three invented, Enron-shaped `.eml` messages, committed to
+this repository. Small on purpose. No evidence corpus is chosen
+(`docs/open-problems.md` §2.4), and the four-custodian Enron slice — the
+honest stand-in — takes about **50 minutes to normalize** (4,426 records) and
+**over an hour to rebuild**, measured 2026-09-03. A check that costs two hours
+is a check that runs once and then never again, which is the opposite of what
+a gate is for. The fixture corpus normalizes in 0.2s and rebuilds in about a
+second, so the walk can be run, failed, fixed and re-run inside a minute.
 
-```bash
-export MEMORIA_EVIDENCE_ROOT=../enron-slice
-```
+What is bought back is fidelity, and it is bought deliberately: the corpus
+keeps the defects that matter to this path. The ZL production's stray
+`Microsoft Mail Internet Headers` line is in every message, so the converter
+is exercised on the real failure; one message is a reply whose quoted history
+the converter must excise, which is what makes step 7's comparison show a
+*difference* rather than an identity; and one message mentions nobody the
+entry is about, so gathering is seen to select two records out of three rather
+than to return everything.
 
-Point it at the **slice**, not at the twelve-custodian pool beside it: that pool
-was unpacked before `fetch-enron.py` was fixed to unpack `.eml` only, so it
-holds a `.txt` sidecar beside every message and `memoria normalize` would
-convert both — every message twice. The M1 gate walk lost time to this.
+The claim step 7 makes about the whole corpus — that every served paragraph
+appears verbatim in its original — is also asserted in
+`tests/test_normalization_fidelity.py`, over the `tests/fixtures/enron/`
+messages, through the same two HTTP routes. The walk demonstrates it for a
+reader; the pytest file is what keeps it from regressing between walks.
 
 ## Setup
 
-```bash
-scripts/run.sh          # installs both toolchains and builds ui/; stop it again (Ctrl-C)
-
-.venv/bin/memoria seed-subjects
-.venv/bin/memoria normalize          # a few minutes over the slice; idempotent
-```
-
-Then an entry to walk from. An entry is normally a promoted candidate, and
-promotion runs through the extraction, which needs a model — so for the gate
-write one by hand. That is the same act as writing one in Obsidian, and it is
-what `find_entry_path` and the write path are built to survive. Put this at
-`subjects/people/skilling.md`:
-
-```markdown
----
-id: SUB-people/skilling
-match_terms:
-- Skilling
----
-Jeff Skilling, CEO.
-
-[open] Which of these threads did he actually read?
-```
-
-Then:
+None, beyond the toolchains. `scripts/gate-m3.sh` builds its own throwaway
+repository — it seeds the subjects, copies `gate/corpus/` in as the evidence
+root, normalizes, writes `gate/skilling.md` to `subjects/people/skilling.md`,
+commits that seeded state, rebuilds the index and serves it — because two of
+the seven steps below write to disk and commit, and this checkout is not a
+place to do that.
 
 ```bash
-.venv/bin/memoria rebuild            # fills the gathered set; no model
-scripts/run.sh                       # open http://127.0.0.1:8000
+scripts/run.sh                       # once: installs both toolchains
+cd ui && npx playwright install chromium   # once: the browser
+scripts/gate-m3.sh                   # the walk, ~4s, writes gate/last-run.md
 ```
 
-`rebuild` is what fills the gathered set, and it needs no model: gathering stays
-a deterministic lexical pass over the entry's word-shaped match terms (part 06
+`rebuild` fills the gathered set and needs no model: gathering stays a
+deterministic lexical pass over the entry's word-shaped match terms (part 06
 §8.3), so `Skilling` finds its paragraphs without the extraction having run.
-Appearances stay empty — they match `source_type: book` only, and the slice
+Appearances stay empty — they match `source_type: book` only, and the corpus
 holds no audit targets.
 
 ## The walk
+
+The seven steps, each one a test in `ui/gate/m3-gate-walk.spec.ts` bearing the
+same number. Read them as the questions the walk asks; read the spec for what
+exactly is asserted.
 
 1. **Open the entry.** `SUBJECTS` → `people` → `skilling`. Before clicking
    anything, check the regions: the audit-visible body is drawn and says the
@@ -88,7 +101,9 @@ holds no audit targets.
    example content.
 2. **Read the match terms, then edit them** — add a term and press `Save`. This
    is the first durable write in the system. Then `git log -1`: the commit is
-   path-scoped to `subjects/people/skilling.md` and attributed to you.
+   path-scoped to `subjects/people/skilling.md` and attributed to you. (The
+   spec checks the file; `scripts/gate-m3.sh` checks the commit, since it is
+   the thing that owns the repository.)
 3. **The staleness check.** With the entry still open in the browser, edit
    `subjects/people/skilling.md` in another editor and save it. Then add another
    match term in the browser and press `Save`. It must be refused, name the
@@ -108,13 +123,37 @@ holds no audit targets.
 
 ## Result
 
-_Not yet walked._ Record the outcome here: the date, who walked it, what each
-step did, and anything that did not behave as described above. A step that
-failed is worth more in this section than a clean report.
+_Pasted from a run's own artifact (`gate/last-run.md`). Replace this with the
+current one when the walk is re-run; a step that failed is worth more here
+than a clean report._
+
+Walked by `scripts/gate-m3.sh` in Chromium at 1280×720, over a scratch
+repository built from `gate/corpus/` (3 records normalized,
+seeded at `b8268dc`). Memoria at `95cc44d`.
+
+### What each step did
+
+- **Step 1 — the entry opens** — all six regions drawn; Settlements and Memoria notes name M4; the `[open]` line renders inside the “Outside the audit-visible body” region
+- **Step 2 — the first durable write** — `Jeffrey Skilling` added and saved; the term is in `subjects/people/skilling.md` on disk
+- **Step 3 — the staleness check** — an out-of-band edit made the held token stale; the save was refused, the file on disk is byte-for-byte what the other editor left, and the rejected term is still in the editor
+- **Step 4 — the citation opens the panel** — scrolled to y=432px, clicked `src-000006-p1`; the slide-over opened over a scrim starting at the sidebar's edge, and the URL did not change
+- **Step 5 — the exact paragraph** — the panel drew the same text `/api/read?ref=src-000006-p1` served, fully inside the viewport at y=131px, with the record's badge row and a `Cited by` backlink to people/skilling
+- **Step 6 — the reader's place** — panel closed; `window.scrollY` is still 432px, the URL is unchanged, and the pre-click sentinel on `window` survived, so the page underneath was never remounted
+- **Step 7 — the original** — “Open original ↗” opened `/sources/SRC-000006/raw` in its own tab with the entry still open behind it; the served paragraph (“The deck went up to Skilling unchanged, so whatever we send Friday has to…”) appears verbatim in the raw `.eml`, whose headers and quoted reply the record does not carry
+
+### The durable write, in git
+
+- The last commit is path-scoped to `subjects/people/skilling.md` and
+  nothing else, authored by `M3 gate walk`: "write: subjects/people/skilling.md"
+
+### Verdict
+
+**Passed**, 2026-09-03. All seven steps behaved as described above.
 
 ## Cleanup
 
-`subjects/people/skilling.md` is a durable file and the walk commits it. Remove
-it and its commits before opening a PR, or run the walk in a scratch worktree.
-`sources/normalized/`, `.memoria/` and `changes/` are gitignored derived state
-and need no cleanup.
+None. `scripts/gate-m3.sh` builds its repository in a `mktemp -d` and deletes
+it on the way out (`--keep` if you want to poke at it afterwards), so nothing
+the walk writes or commits — `subjects/people/skilling.md` included — ever
+touches this checkout. `gate/last-run.md` is gitignored; the run worth keeping
+is the one pasted above.

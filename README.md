@@ -81,6 +81,21 @@ see *Installing* above, or run `scripts/run.sh` once, which installs both.
 This is the one command every issue uses to run the Python suite on its own.
 It needs no evidence corpus and no environment variables.
 
+### Walking a milestone gate
+
+```
+scripts/gate-m3.sh
+```
+
+Separate from the standing suites above, and run by name rather than every
+time. It drives the M3 gate (`docs/gates/m3-gate-walk.md`) in a real browser
+over a throwaway repository built from `gate/corpus/`, and writes what it
+observed to `gate/last-run.md`. About four seconds. It needs a Chromium for
+Playwright once: `cd ui && npx playwright install chromium`.
+
+`CLAUDE.md` keeps browsers out of routine work; `gate/README.md` explains the
+pattern and why the walk exists beside the vitest suite rather than inside it.
+
 ### Evidence corpus location
 
 When an evidence corpus exists, it lives in a **sibling repository, read-only**,

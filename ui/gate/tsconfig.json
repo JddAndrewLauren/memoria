@@ -1,0 +1,13 @@
+{
+  // The gate walk runs in Node, not in the browser bundle, so it gets its
+  // own project: `@types/node` here rather than in `../tsconfig.json`,
+  // where it would put `process` and `node:fs` in reach of `src/` - code
+  // that ships to a browser and must not have them.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "allowImportingTsExtensions": false,
+    "noEmit": true
+  },
+  "include": [".", "../playwright.config.ts"]
+}

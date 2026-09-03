@@ -26,3 +26,10 @@ changes/
 # `ui/`'s production build, gitignored into the package (docs/adr/0002-ui-is-a-react-client.md's
 # "Layout" consequence). Regenerate with `npm run build` (see README).
 src/memoria/web/static/
+
+# The M3 gate walk's own output: the artifact `scripts/gate-m3.sh` writes,
+# and Playwright's traces for a failed step. A run's record belongs in the
+# gate doc's Result section, pasted deliberately, not committed on every run.
+gate/last-run.md
+ui/test-results/
+ui/playwright-report/
