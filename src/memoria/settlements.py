@@ -68,7 +68,6 @@ from datetime import date as date_type
 from typing import TYPE_CHECKING, Iterable, Sequence
 
 from memoria import references, subjects, write
-from memoria.record_extractor import RecordExtractorError, check_provenance
 from memoria.repository import Repository
 from memoria.subjects import Entry, Statement
 from memoria.write import Actor, Rejected
@@ -478,6 +477,11 @@ def _check_evidence(ref: str) -> None:
     """A claim's evidence is what an entry statement's provenance may be
     (#31's ``check_provenance``) plus an entry itself - the settled side of
     a settlement - and never manuscript prose or another derived artifact."""
+    # Imported here, not at module scope: `memoria.record_extractor` reaches
+    # this module (via `human_touched` -> `index` -> `records`), so the
+    # reverse import must stay local to avoid a cycle.
+    from memoria.record_extractor import RecordExtractorError, check_provenance
+
     try:
         reference = references.parse(ref)
     except references.BadReference as exc:

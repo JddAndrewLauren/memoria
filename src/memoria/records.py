@@ -34,7 +34,6 @@ from memoria import (
     changes,
     context_manifest,
     manuscript,
-    record_extractor,
     references,
     sessions,
     settlements,
@@ -974,6 +973,12 @@ def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
         return Read(ref=ref, citation=citation, text=text, context_manifest=manifest)
 
     if isinstance(reference, references.DecisionReference):
+        # Local import: `memoria.record_extractor` reaches this module (via
+        # `human_touched` -> `index` -> `records`), so the reverse import
+        # must stay local to avoid a cycle - the same shape as the
+        # `memoria.index` import above.
+        from memoria import record_extractor
+
         try:
             text = record_extractor.read_decision(repository, reference.decision_id)
         except record_extractor.RecordExtractorError as exc:
@@ -981,6 +986,8 @@ def read(repository: Repository, ref: str, *, raw: bool = False) -> Read:
         return Read(ref=ref, citation=citation, text=text)
 
     if isinstance(reference, references.ResearchMemoReference):
+        from memoria import record_extractor
+
         try:
             text = record_extractor.read_research_memo(repository, reference.memo_id)
         except record_extractor.RecordExtractorError as exc:
