@@ -733,18 +733,27 @@ def _launch(path: Path) -> None:
     promptly either way. Raises ``LaunchError`` for a missing opener binary
     or one that exits within the grace period with a non-zero status -
     both cases this module can actually vouch for, unlike an opener still
-    running when the grace period elapses.
+    running when the grace period elapses. Except on Windows: ``explorer``
+    hands the path to the already-running shell and exits 1 promptly on
+    success, so its exit status says nothing, and only the missing-binary
+    case is reported there.
     """
+    exit_status_is_meaningful = True
     if sys.platform == "darwin":
         argv = ["open", str(path)]
     elif sys.platform == "win32":
         argv = ["explorer", str(path)]
+        # explorer.exe exits 1 on success (it delegates to the running
+        # shell), so a non-zero status is not a failure here.
+        exit_status_is_meaningful = False
     else:
         argv = ["xdg-open", str(path)]
     try:
         process = subprocess.Popen(argv)
     except FileNotFoundError as exc:
         raise LaunchError(f"no opener available on this host: {argv[0]}") from exc
+    if not exit_status_is_meaningful:
+        return
     try:
         returncode = process.wait(timeout=_LAUNCH_GRACE_SECONDS)
     except subprocess.TimeoutExpired:

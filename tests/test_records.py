@@ -502,6 +502,34 @@ def test_launch_raises_a_launch_error_when_the_opener_exits_immediately_with_fai
         _launch(tmp_path / "text.txt")
 
 
+def test_launch_on_win32_does_not_treat_a_non_zero_exit_as_failure(
+    monkeypatch, tmp_path
+):
+    """`explorer.exe` hands the path to the running shell and exits 1 on
+    success, promptly - so on Windows a non-zero exit status is not a
+    failure, and reporting it as one would be the inverse of #146. The
+    missing-binary case stays a `LaunchError` there like everywhere else."""
+    monkeypatch.setattr("memoria.records.sys.platform", "win32")
+    monkeypatch.setattr(
+        "memoria.records.subprocess.Popen",
+        lambda argv: _FakeProcess(returncode=1),
+    )
+
+    _launch(tmp_path / "text.txt")  # does not raise
+
+
+def test_launch_on_win32_still_reports_a_missing_opener_binary(monkeypatch, tmp_path):
+    monkeypatch.setattr("memoria.records.sys.platform", "win32")
+
+    def _missing(argv):
+        raise FileNotFoundError(2, "No such file or directory")
+
+    monkeypatch.setattr("memoria.records.subprocess.Popen", _missing)
+
+    with pytest.raises(LaunchError):
+        _launch(tmp_path / "text.txt")
+
+
 def test_launch_succeeds_when_the_opener_exits_zero_within_the_grace_period(
     monkeypatch, tmp_path
 ):
