@@ -707,6 +707,18 @@ def read_raw_source(repository: Repository, record_id: str) -> RawSource:
     return RawSource(text=text, original_locator=record.original_locator)
 
 
+class LaunchError(Exception):
+    """The host could not open the file - no such opener on this machine,
+    or the opener started and immediately gave up on it."""
+
+
+# How long `_launch` waits for an opener to fail before it declares success.
+# Long enough to catch a launcher that exits immediately for lack of a
+# registered handler (empirically milliseconds); short enough that a normal
+# GUI editor, still starting up, never makes the request wait on it.
+_LAUNCH_GRACE_SECONDS = 0.5
+
+
 def reveal_original_source(repository: Repository, record_id: str) -> Path:
     """Launch ``record_id``'s un-normalized file in the host's editor or
     file manager - "Reveal in editor" (#65), the local convenience
@@ -715,7 +727,9 @@ def reveal_original_source(repository: Repository, record_id: str) -> Path:
     exactly as ``read_raw_source`` does - the same ``ReadError`` for an
     unknown record or a missing file, the same ``NoEvidenceRoot`` for no
     evidence corpus configured - but never reads the bytes: launching is a
-    side effect on the host machine, not a read.
+    side effect on the host machine, not a read. Raises ``LaunchError`` if
+    the opener could not be started at all, or exited immediately with a
+    failure.
 
     Whether this should be attempted at all - is the caller on this machine
     - is an HTTP-request fact this module has no request to inspect, and
@@ -737,14 +751,38 @@ def _launch(path: Path) -> None:
     The one part of ``reveal_original_source`` that differs per platform,
     isolated here so a test can monkeypatch it rather than actually
     spawning a GUI editor or file manager. ``Popen``, not ``run`` - this
-    never waits on the child, so the request it backs returns immediately.
+    does not wait out a slow-to-open GUI, only ``_LAUNCH_GRACE_SECONDS`` for
+    an opener that is going to fail, so the request it backs still returns
+    promptly either way. Raises ``LaunchError`` for a missing opener binary
+    or one that exits within the grace period with a non-zero status -
+    both cases this module can actually vouch for, unlike an opener still
+    running when the grace period elapses. Except on Windows: ``explorer``
+    hands the path to the already-running shell and exits 1 promptly on
+    success, so its exit status says nothing, and only the missing-binary
+    case is reported there.
     """
+    exit_status_is_meaningful = True
     if sys.platform == "darwin":
-        subprocess.Popen(["open", str(path)])
+        argv = ["open", str(path)]
     elif sys.platform == "win32":
-        subprocess.Popen(["explorer", str(path)])
+        argv = ["explorer", str(path)]
+        # explorer.exe exits 1 on success (it delegates to the running
+        # shell), so a non-zero status is not a failure here.
+        exit_status_is_meaningful = False
     else:
-        subprocess.Popen(["xdg-open", str(path)])
+        argv = ["xdg-open", str(path)]
+    try:
+        process = subprocess.Popen(argv)
+    except FileNotFoundError as exc:
+        raise LaunchError(f"no opener available on this host: {argv[0]}") from exc
+    if not exit_status_is_meaningful:
+        return
+    try:
+        returncode = process.wait(timeout=_LAUNCH_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        return
+    if returncode != 0:
+        raise LaunchError(f"{argv[0]} exited immediately with status {returncode}")
 
 
 @dataclass(frozen=True)

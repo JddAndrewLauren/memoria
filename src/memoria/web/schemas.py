@@ -152,9 +152,17 @@ class CitationOut(BaseModel):
     with ``record``/``paragraph``/``overlay`` all ``None`` - a backlink is
     clickable into the same panel, and the panel does not need a second shape
     to render it (#25's "traverse in both directions"). Wraps
-    ``memoria.records.read`` exactly - the same core function the MCP tool
-    surface calls - so this is the one generic reference read the viewer has,
-    never a second one duplicating ``/sources/{id}``.
+    ``memoria.records.read``, the same composed core the MCP tool surface
+    calls, but narrower: only those two reference kinds resolve, and a bare
+    ``SUB-`` subject or a repository path is a 404 (#145) - so this is the
+    one generic reference read the viewer has, never a second one duplicating
+    ``/sources/{id}`` or a browse over the repository.
+
+    ``anchor`` is the cited paragraph's own stable anchor, from
+    ``NormalizedRecord.anchor_id()`` - served, not reconstructed client-side,
+    the same "no reconstruction by the caller" discipline
+    ``docs/tool-surface.md`` already holds for a search hit's anchor.
+    ``None`` whenever ``paragraph`` is, the same pairing.
 
     ``EntryDetail`` is **not** a second copy of this for entries, and the two
     are not collapsible (#157). Reading ``SUB-x/y`` here serves the entry's
@@ -169,6 +177,7 @@ class CitationOut(BaseModel):
     text: str
     record: SourceSummary | None = None
     paragraph: int | None = None
+    anchor: str | None = None
     overlay: ReadOverlayOut | None = None
 
 
@@ -260,7 +269,16 @@ class OverlayActOut(BaseModel):
 
 
 class EntryDetail(EntrySummary):
-    """One entry read whole - #64's third subject read, built here (#157).
+    """One entry read whole - #64's third subject read, built here (#148,
+    #157).
+
+    Distinct from ``GET /api/read?ref=SUB-x/y`` (#25's ``CitationOut``),
+    which serves the entry's raw file verbatim, frontmatter included - the
+    MCP tool surface's "the entry, verbatim" contract
+    (``docs/tool-surface.md``), reached through a reference for the
+    slide-over citation panel's backlink navigation. This is the `SUBJECTS`
+    tree's own read, shaped like its ``SubjectSummary``/``EntrySummary``
+    siblings rather than conflated with that one.
 
     ``statements`` is the body split by ``memoria.subjects.parse_statements``:
     Memoria's badged statements and the author's unbadged testimony are

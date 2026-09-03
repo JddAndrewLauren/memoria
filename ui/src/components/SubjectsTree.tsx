@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { listSubjects, listEntries, type EntrySummary } from "../api/client";
+import { listSubjects, listEntries, readEntry, type EntrySummary } from "../api/client";
 import { TreeSection } from "./TreeSection";
 
 export function SubjectsTree() {
@@ -66,16 +66,24 @@ function SubjectRow({ id, entryCount }: { id: string; entryCount: number }) {
           {!isError && data?.items.length === 0 && (
             <li className="py-1 text-xs text-muted">No entries yet.</li>
           )}
-          {!isError && data?.items.map((entry) => <EntryRow key={entry.id} entry={entry} />)}
+          {!isError &&
+            data?.items.map((entry) => (
+              <EntryRow key={entry.id} subjectId={id} entry={entry} />
+            ))}
         </ul>
       )}
     </div>
   );
 }
 
-function EntryRow({ entry }: { entry: EntrySummary }) {
+function EntryRow({ subjectId, entry }: { subjectId: string; entry: EntrySummary }) {
   const [expanded, setExpanded] = useState(false);
   const label = entry.id.split("/")[1] ?? entry.id;
+  const { data, isError } = useQuery({
+    queryKey: ["entry", subjectId, label],
+    queryFn: () => readEntry(subjectId, label),
+    enabled: expanded,
+  });
 
   return (
     <li>
@@ -88,11 +96,23 @@ function EntryRow({ entry }: { entry: EntrySummary }) {
         {label}
       </button>
       {expanded && (
-        <p className="px-1 pb-1 text-[11px] text-muted">
-          {entry.match_terms.length > 0
-            ? `Match terms: ${entry.match_terms.join(", ")}`
-            : "No match terms yet."}
-        </p>
+        <div className="px-1 pb-1 text-[11px] text-muted">
+          <p>
+            {entry.match_terms.length > 0
+              ? `Match terms: ${entry.match_terms.join(", ")}`
+              : "No match terms yet."}
+          </p>
+          {isError && <p>The entry could not be read.</p>}
+          {data?.statements.length === 0 && <p>No statements yet.</p>}
+          {data?.statements.map((statement, index) => (
+            <p key={index}>
+              {statement.badge && (
+                <span className="font-mono uppercase">[{statement.badge}] </span>
+              )}
+              {statement.text}
+            </p>
+          ))}
+        </div>
       )}
     </li>
   );

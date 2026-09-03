@@ -1,4 +1,4 @@
-"""The HTTP surface #64, #24, #25, #65 and #157 build: list sources, read one
+"""The HTTP surface #64, #24, #25, #65, #148 and #157 build: list sources, read one
 source, raw source, resolve a reference to a citation, search, list subjects,
 list one subject's entries, read one entry - plus one connection fact
 (locality) and one action (reveal).
@@ -11,12 +11,15 @@ SQLite database and reads no evidence file itself
 
 from __future__ import annotations
 
+import ipaddress
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+import memoria.references as references
 from memoria.index import SearchFilters
 from memoria.index import is_built as index_is_built
 from memoria.index import search as search_index
-from memoria.records import NormalizedRecord, Read, ReadError
+from memoria.records import LaunchError, NormalizedRecord, Read, ReadError
 from memoria.records import is_normalized
 from memoria.records import list_sources as list_sources_core
 from memoria.records import load as load_source
@@ -60,12 +63,18 @@ router = APIRouter()
 # A loopback peer address is the one fact an HTTP server can check for
 # "is the browser on this machine" without trusting anything the client
 # claims - a header is just text the client sent. #65's locality gate.
-_LOOPBACK_HOSTS = {"127.0.0.1", "::1"}
 
 
 def _is_local(request: Request) -> bool:
     client = request.client
-    return client is not None and client.host in _LOOPBACK_HOSTS
+    if client is None:
+        return False
+    try:
+        return ipaddress.ip_address(client.host).is_loopback
+    except ValueError:
+        # Not a parseable IP address at all (ASGI test doubles included) -
+        # fails closed, same as any other address `is_loopback` says no to.
+        return False
 
 
 def _to_summary(record: NormalizedRecord) -> SourceSummary:
@@ -170,6 +179,12 @@ def reveal_source(
     ``/locality`` reports. This is what keeps the action purely additive
     (ADR-0002): a hosted client gets a plain 403, never a launch on a
     machine it is not sitting at.
+
+    ``opened: true`` is only ever returned once the launch has actually
+    survived its grace period (``records._launch``) - a missing opener
+    binary or one that exits immediately both raise ``LaunchError`` here,
+    reported as a real error response rather than a 500 traceback or a
+    claim this route cannot back up.
     """
     if not _is_local(request):
         raise HTTPException(status_code=403, detail="reveal is local-only")
@@ -177,6 +192,8 @@ def reveal_source(
         reveal_original_source_core(repository, record_id)
     except (ReadError, NoEvidenceRoot) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LaunchError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     return RevealSourceResponse(opened=True)
 
 
@@ -187,6 +204,9 @@ def _to_citation(ref: str, result: Read) -> CitationOut:
         text=result.text,
         record=_to_summary(result.record) if result.record is not None else None,
         paragraph=result.paragraph,
+        anchor=result.record.anchor_id(result.paragraph)
+        if result.record is not None and result.paragraph is not None
+        else None,
         overlay=ReadOverlayOut(
             entry_links=result.overlay.entry_links,
             exclusions=result.overlay.exclusions,
@@ -197,21 +217,53 @@ def _to_citation(ref: str, result: Read) -> CitationOut:
     )
 
 
+def _is_citable(reference: references.Reference) -> bool:
+    """Whether ``reference`` is one of the two shapes the citation panel
+    actually cites - a ``SRC-`` record or paragraph, or a ``SUB-x/y`` entry -
+    rather than the wider set ``memoria.records.read`` resolves for the MCP
+    tool surface (chapters, sections, changes, sessions, decisions, research
+    memos, a bare ``SUB-`` subject, or a repository path). #145: that wider
+    contract was never something the panel needed, and left standing it is
+    the kind of thing that becomes load-bearing by accident - ``GET
+    /api/read?ref=.git/config`` served the file.
+    """
+    if isinstance(reference, references.SourceReference):
+        return True
+    return (
+        isinstance(reference, references.SubjectReference)
+        and reference.entry_slug is not None
+    )
+
+
 @router.get("/read")
 def read(ref: str, repository: Repository = Depends(get_repository)) -> CitationOut:
     """Resolve one reference - the slide-over citation panel's read (§19.9).
 
-    Wraps ``memoria.records.read`` exactly, the same composed core the MCP
-    tool surface's ``read(ref)`` calls: a ``SRC-`` paragraph anchor (a search
-    hit's or a paragraph's own ``anchor``) serves the cited text, its record
-    and its curated-overlay backlinks (#20); a ``SUB-x/y`` entry reference -
-    an overlay's own ``entry_links``/``exclusions`` - serves the entry's raw
-    text, so a backlink is clickable into the same panel in both directions
-    (#25's acceptance criteria) without a second read shape. Ledgering the
-    served read is the caller's job (``memoria.records.read``'s own
-    docstring) - this route never imports ``memoria.ledger``, so an author's
-    own read here writes nothing to ``events.jsonl``.
+    Wraps ``memoria.records.read``, the same composed core the MCP tool
+    surface's ``read(ref)`` calls, but narrower: a ``SRC-`` paragraph anchor
+    (a search hit's or a paragraph's own ``anchor``) serves the cited text,
+    its record and its curated-overlay backlinks (#20); a ``SUB-x/y`` entry
+    reference - an overlay's own ``entry_links``/``exclusions`` - serves the
+    entry's raw text, so a backlink is clickable into the same panel in both
+    directions (#25's acceptance criteria) without a second read shape.
+    Anything else - including a bare ``SUB-`` subject or a repository path
+    that would otherwise resolve - is a 404: this route is not the MCP
+    ``read(ref)`` tool and does not owe it the same contract (#145,
+    ``_is_citable``). Ledgering the served read is the caller's job
+    (``memoria.records.read``'s own docstring) - this route never imports
+    ``memoria.ledger``, so an author's own read here writes nothing to
+    ``events.jsonl``.
     """
+    try:
+        reference = references.parse(ref)
+    except references.BadReference:
+        reference = None
+    if reference is not None and not _is_citable(reference):
+        raise HTTPException(
+            status_code=404,
+            detail=f"{ref!r} is not a citable reference: /api/read serves "
+            "SRC- records and paragraphs, and SUB-x/y entries, only",
+        )
     try:
         result = read_ref(repository, ref)
     except ReadError as exc:
@@ -265,16 +317,24 @@ def read_entry(
     entry_slug: str,
     repository: Repository = Depends(get_repository),
 ) -> EntryDetail:
-    """One entry read whole - #64's third subject read, built here (#157).
+    """Read one entry: #64's third subject read, built here for #148 and
+    #157.
 
-    Resolves an entry whose file has been renamed: ``load_entry`` reads
-    through ``find_entry_path``, which falls back to matching the
-    frontmatter ``id``, so #16's stable ``SUB-x/y`` IDs survive a rename on
-    disk and this route inherits that without repeating it.
+    `GET /api/read?ref=SUB-x/y` (#25) already serves this same entry, but as
+    the raw file verbatim, frontmatter included - the MCP tool surface's "the
+    entry, verbatim" contract (`docs/tool-surface.md`), reached through a
+    reference for the slide-over citation panel's backlink navigation. That
+    is a different read from this one: the `SUBJECTS` tree needs an entry
+    shaped like its `list subjects`/`list a subject's entries` siblings -
+    parsed fields, not a raw blob - the same way `read_source` parses a
+    record into paragraphs rather than pointing callers at `raw_source`.
 
-    One ``except`` covers every 404 the read has, because the core raises
-    for all three: an unknown subject, an unknown entry, and a
-    ``subject_id`` that is not a subject ID at all.
+    `load_entry` survives a renamed entry file the same way `find_entry_path`
+    does (issue #16). One ``except`` covers every 404 the read has, because
+    the core raises `SubjectError` for all three: an unknown subject, an
+    unknown entry, and a `subject_id` that is not a subject ID at all - the
+    honest-empty-state `list_entries` gives a *known* subject with no
+    entries is unaffected.
 
     ``extra`` is not served - it exists so a rewrite does not drop an
     unmodelled frontmatter key, not to be published (``EntryDetail``).

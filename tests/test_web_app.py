@@ -20,6 +20,7 @@ from memoria.index import (
 )
 from memoria.records import (
     NORMALIZED_RELATIVE_PATH,
+    LaunchError,
     NormalizedRecord,
     write_normalized_records,
 )
@@ -41,11 +42,13 @@ ALLOWED_IMPORTS = {
     "collections",
     "collections.abc",
     "contextlib",
+    "ipaddress",
     "pathlib",
     "fastapi",
     "pydantic",
     "memoria.web",
     "memoria.records",
+    "memoria.references",
     "memoria.repository",
     "memoria.index",
     "memoria.subjects",
@@ -90,6 +93,13 @@ def _local_client(repository):
     case #65's locality gate must refuse."""
     app = create_app(repository=repository)
     return TestClient(app, client=("127.0.0.1", 55001)).__enter__()
+
+
+def _client_with_peer(repository, host):
+    """A client whose peer address is exactly `host` - for probing
+    `_is_local`'s edge cases (#146: `127/8` and IPv4-mapped IPv6 forms)."""
+    app = create_app(repository=repository)
+    return TestClient(app, client=(host, 55001)).__enter__()
 
 
 # --- isolation ---------------------------------------------------------
@@ -317,6 +327,34 @@ def test_locality_reports_local_for_a_loopback_peer(tmp_path):
     assert body == {"is_local": True}
 
 
+@pytest.mark.parametrize(
+    "host",
+    [
+        "::ffff:127.0.0.1",  # the IPv4-mapped form a dual-stack bind hands you (#146)
+        "127.5.5.5",  # any address in 127/8 is loopback, not just 127.0.0.1
+    ],
+)
+def test_locality_reports_local_for_the_rest_of_the_loopback_range(tmp_path, host):
+    repository = _repo(tmp_path)
+    client = _client_with_peer(repository, host)
+
+    body = client.get("/api/locality").json()
+
+    assert body == {"is_local": True}
+
+
+@pytest.mark.parametrize("host", ["not-an-ip", ""])
+def test_locality_reports_not_local_for_an_unparseable_host(tmp_path, host):
+    """Fails closed: a host `_is_local` cannot even parse is not-local, the
+    same as any other address that is not loopback (#146)."""
+    repository = _repo(tmp_path)
+    client = _client_with_peer(repository, host)
+
+    body = client.get("/api/locality").json()
+
+    assert body == {"is_local": False}
+
+
 def test_reveal_is_refused_for_a_non_local_client_without_launching_anything(
     tmp_path, monkeypatch
 ):
@@ -376,6 +414,58 @@ def test_reveal_of_an_unknown_record_is_a_404(tmp_path, monkeypatch):
     response = client.post("/api/sources/SRC-000999/reveal")
 
     assert response.status_code == 404
+
+
+def test_reveal_of_a_launch_that_fails_immediately_is_a_handled_error_not_opened_true(
+    tmp_path, monkeypatch
+):
+    """#146: an opener that starts and exits right away (e.g. `xdg-open`
+    with no handler registered) must not come back as `{"opened": true}` -
+    the server cannot stand behind a launch it just watched fail."""
+    evidence_root = tmp_path / "evidence"
+    (evidence_root / "raw" / "vol-01").mkdir(parents=True)
+    (evidence_root / "raw" / "vol-01" / "text.txt").write_text(
+        "The unnormalized text.\n", encoding="utf-8"
+    )
+    repository = _repo(tmp_path, _record())
+    repository = Repository(root=repository.root, evidence_root=evidence_root)
+
+    def _fail(path):
+        raise LaunchError("xdg-open exited immediately with status 3")
+
+    monkeypatch.setattr("memoria.records._launch", _fail)
+    client = _local_client(repository)
+
+    response = client.post("/api/sources/SRC-000184/reveal")
+
+    assert response.status_code == 502
+    assert response.json() != {"opened": True}
+
+
+def test_reveal_with_a_missing_opener_binary_is_a_handled_error_not_a_500(
+    tmp_path, monkeypatch
+):
+    """#146: the route handler used to catch only `ReadError` and
+    `NoEvidenceRoot`, so a missing opener binary raised an uncaught
+    `FileNotFoundError` and 500'd. It must come back as a real error
+    response instead."""
+    evidence_root = tmp_path / "evidence"
+    (evidence_root / "raw" / "vol-01").mkdir(parents=True)
+    (evidence_root / "raw" / "vol-01" / "text.txt").write_text(
+        "The unnormalized text.\n", encoding="utf-8"
+    )
+    repository = _repo(tmp_path, _record())
+    repository = Repository(root=repository.root, evidence_root=evidence_root)
+
+    def _missing_opener(path):
+        raise LaunchError("no opener available on this host: xdg-open")
+
+    monkeypatch.setattr("memoria.records._launch", _missing_opener)
+    client = _local_client(repository)
+
+    response = client.post("/api/sources/SRC-000184/reveal")
+
+    assert response.status_code == 502
 
 
 # --- search ----------------------------------------------------------------
@@ -566,7 +656,7 @@ def test_list_entries_for_an_unknown_subject_is_a_404(tmp_path):
     assert "SUB-nonexistent" in response.json()["detail"]
 
 
-# --- read one entry (#64's third subject read, built in #157) ---------------
+# --- read one entry (#64's third subject read, built in #148 and #157) -----
 
 
 def test_read_one_entry_serves_its_id_match_terms_statements_and_overlay(tmp_path):
@@ -697,6 +787,18 @@ def test_read_one_entry_for_an_unknown_subject_is_a_404(tmp_path):
 
     assert response.status_code == 404
     assert "SUB-nonexistent" in response.json()["detail"]
+
+
+def test_read_one_entry_over_an_unseeded_repository_is_a_404_not_a_crash(tmp_path):
+    """No `memoria seed-subjects` run yet, and no `subjects/` directory at
+    all - the honest-empty-state discipline #64 gives every other read,
+    landing here as a 404 rather than an unhandled exception."""
+    repository = Repository(root=tmp_path)
+    client = _client(repository)
+
+    response = client.get("/api/subjects/SUB-people/entries/bob")
+
+    assert response.status_code == 404
 
 
 def test_read_one_entry_for_an_unknown_entry_is_a_404(tmp_path):
