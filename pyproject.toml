@@ -79,6 +79,14 @@ web = [
 convert = [
     "markitdown[docx]==0.1.7",
     "pdfplumber==0.11.10",
+    # `.msg` (#104): read directly with olefile rather than MarkItDown's own
+    # outlook extra - `.msg`'s `PR_TRANSPORT_MESSAGE_HEADERS`/`PR_BODY`
+    # properties are reassembled into an RFC822 message and reused by the
+    # same email converter `.eml`/`.mbox` already share (memoria.normalize's
+    # `_read_msg_message`), so its pin is `EMAIL_CONVERTER_VERSION`, not a
+    # package version string - pinned exactly here anyway for the same
+    # reproducibility as the other two.
+    "olefile==0.47",
 ]
 # The extraction's clustering (#17). Unlike `mcp` and `web` this is not an
 # adapter - it is core index-maintainer logic - but it takes the same shape

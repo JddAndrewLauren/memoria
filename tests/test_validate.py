@@ -4,6 +4,7 @@ import pytest
 
 
 from memoria.manifest import ManifestEntry, format_id, load_manifest, save_manifest
+from memoria.normalize import EMAIL_CONVERTER_VERSION
 from memoria.subjects import Entry, Subject, entry_to_markdown, subject_to_markdown
 from memoria.validate import validate, validate_warnings
 
@@ -321,6 +322,34 @@ def test_validate_passes_when_the_manifest_pin_matches_pyprojects(tmp_path):
     errors = validate(evidence_root, repo_root)
 
     assert errors == []
+
+
+def test_validate_fails_when_the_manifest_email_pin_is_behind_the_source_constant(
+    tmp_path,
+):
+    """The email converter's pin is `normalize.EMAIL_CONVERTER_VERSION`, not
+    a pyproject.toml line (#104). A manifest recording the previous
+    `email N` - a bump without the reconverting `memoria normalize` run -
+    is the same drift as a stale markitdown pin, and used to pass silently
+    because no package named `email` is pinned in the `convert` extra."""
+    evidence_root = _make_corpus(
+        tmp_path, {"raw/vol-01/text.txt": "hello evidence"}
+    )
+    _write_manifest(evidence_root, ["raw/vol-01/text.txt"])
+    stale = f"email {int(EMAIL_CONVERTER_VERSION.split()[1]) - 1}"
+    _record_converter_pin(evidence_root, ".eml", stale)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "pyproject.toml").write_text(
+        'convert = [\n    "markitdown[docx]==0.1.7",\n    "pdfplumber==0.11.10",\n]\n'
+    )
+
+    errors = validate(evidence_root, repo_root)
+
+    assert len(errors) == 1
+    assert stale in errors[0]
+    assert EMAIL_CONVERTER_VERSION in errors[0]
+    assert "'.eml'" in errors[0]
 
 
 def test_validate_ignores_a_suffix_the_manifest_has_never_recorded_a_pin_for(
