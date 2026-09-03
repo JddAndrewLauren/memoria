@@ -1,9 +1,9 @@
 import hashlib
 
 
-from memoria.manifest import format_id, load_manifest, save_manifest
+from memoria.manifest import ManifestEntry, format_id, load_manifest, save_manifest
 from memoria.subjects import Entry, Subject, entry_to_markdown, subject_to_markdown
-from memoria.validate import validate
+from memoria.validate import validate, validate_warnings
 
 
 def _make_subject(**overrides):
@@ -98,6 +98,48 @@ def test_validate_fails_when_manifest_file_is_missing(tmp_path):
 
     assert len(errors) == 1
     assert rel_path in errors[0]
+
+
+def test_validate_reports_a_failed_unit_as_a_warning_not_an_error(tmp_path):
+    """#106: a corrupt pdf that failed to convert has no record and is not a
+    hash mismatch either, so `validate()` itself must not fail over it -
+    `validate_warnings()` is where it is reported."""
+    rel_path = "raw/a.pdf"
+    evidence_root = _make_corpus(tmp_path, {rel_path: "not a pdf at all"})
+    digest = hashlib.sha256((evidence_root / rel_path).read_bytes()).hexdigest()
+    save_manifest(
+        evidence_root / "raw" / "manifest.yaml",
+        [
+            ManifestEntry(
+                id=format_id(1),
+                path=rel_path,
+                sha256=digest,
+                extra={
+                    "failed": {
+                        "reason": "PdfminerException: No /Root object!",
+                        "converter": "pdfplumber 0.11.0",
+                        "raw_sha256": digest,
+                    }
+                },
+            )
+        ],
+    )
+
+    errors = validate(evidence_root)
+    warnings = validate_warnings(evidence_root)
+
+    assert errors == []
+    assert len(warnings) == 1
+    assert format_id(1) in warnings[0]
+
+
+def test_validate_warnings_is_empty_when_no_unit_has_failed(tmp_path):
+    evidence_root = _make_corpus(
+        tmp_path, {"raw/vol-01/text.txt": "hello evidence"}
+    )
+    _write_manifest(evidence_root, ["raw/vol-01/text.txt"])
+
+    assert validate_warnings(evidence_root) == []
 
 
 def test_validate_fails_when_the_manifest_itself_does_not_exist(tmp_path):
