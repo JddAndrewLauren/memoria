@@ -24,6 +24,7 @@ from memoria.index import (
     exclude,
     filter_predicate,
     gather,
+    is_built,
     list_appearances,
     list_overlay,
     pin,
@@ -158,6 +159,28 @@ def test_search_over_a_missing_index_returns_no_results_rather_than_raising(tmp_
 
     assert search(repository, "fox") == []
     assert not (tmp_path / INDEX_RELATIVE_PATH).exists()
+
+
+# --- is_built (#157) --------------------------------------------------------
+
+
+def test_a_repository_with_no_index_file_is_not_built(tmp_path):
+    """The unbuilt half of the pair `search`'s empty list cannot express -
+    and asking must not create the file any more than searching does."""
+    repository = Repository(root=tmp_path)
+
+    assert is_built(repository) is False
+    assert not (tmp_path / INDEX_RELATIVE_PATH).exists()
+
+
+def test_an_index_built_over_no_records_is_built_and_finds_nothing(tmp_path):
+    """The other half, and the state the flag exists to name: `rebuild` ran,
+    there was nothing to index, and that is not the same fact as never
+    having run it."""
+    repository = _index(tmp_path, [])
+
+    assert is_built(repository) is True
+    assert search(repository, "fox") == []
 
 
 def test_search_filters_by_source_type(tmp_path):

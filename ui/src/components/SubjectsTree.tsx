@@ -14,8 +14,22 @@ export function SubjectsTree() {
       {isLoading && <p className="px-2 py-2 text-xs text-muted">Loading…</p>}
       {isError && <p className="px-2 py-2 text-xs text-muted">Subjects could not be loaded.</p>}
       {data && data.items.length === 0 && (
+        // Branched on is_built (#157): naming the command is only honest
+        // when `memoria seed-subjects` has not run. The nested "No entries
+        // yet." below carries no such branch on purpose - a subject that
+        // exists with no entries is genuinely empty, and EntryListResponse
+        // ships no flag.
         <p className="px-2 py-2 text-xs text-muted">
-          No subjects yet. Run <code className="font-mono">memoria seed-subjects</code>.
+          {!data.is_built ? (
+            <>
+              No subjects yet. Run <code className="font-mono">memoria seed-subjects</code>.
+            </>
+          ) : (
+            <>
+              No subjects yet. <code className="font-mono">subjects/</code> holds no subject
+              prompts.
+            </>
+          )}
         </p>
       )}
       {data &&

@@ -18,6 +18,7 @@ from memoria.records import (
     LaunchError,
     NormalizedRecord,
     ReadError,
+    is_normalized,
     is_page_marker,
     list_sources,
     read_all,
@@ -215,6 +216,38 @@ def test_writing_removes_records_a_later_run_no_longer_produces(tmp_path):
 def test_reading_a_directory_that_does_not_exist_is_empty_not_an_error(tmp_path):
     """An un-normalized checkout is an empty corpus, not a failure."""
     assert read_all(Repository(root=tmp_path / "nothing-here")) == []
+
+
+# --- is_normalized (#157) ---------------------------------------------------
+
+
+def test_a_repository_with_no_normalized_directory_is_not_normalized(tmp_path):
+    """The unbuilt half of the pair `read_all`'s empty list cannot express."""
+    repository = Repository(root=tmp_path / "nothing-here")
+
+    assert is_normalized(repository) is False
+    assert read_all(repository) == []
+
+
+def test_a_normalized_directory_that_holds_no_records_is_still_normalized(tmp_path):
+    """The other half, and the whole point of #157.
+
+    Both states read as `[]` from `read_all`; only the predicate tells them
+    apart, so the pairing is asserted in one test rather than two.
+    """
+    (tmp_path / NORMALIZED_RELATIVE_PATH).mkdir(parents=True)
+    repository = Repository(root=tmp_path)
+
+    assert is_normalized(repository) is True
+    assert read_all(repository) == []
+
+
+def test_the_normalized_predicate_creates_nothing(tmp_path):
+    """Asking is not building - the same discipline `search` keeps."""
+    repository = Repository(root=tmp_path)
+
+    assert is_normalized(repository) is False
+    assert not (tmp_path / NORMALIZED_RELATIVE_PATH).exists()
 
 
 # --- list_sources (#64) -----------------------------------------------------

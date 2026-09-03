@@ -318,8 +318,13 @@ def search_text(query: str, filters: SearchFilters | None = None) -> str:
     match the record's verbatim frontmatter string exactly.
 
     Returns "No results." rather than an empty string when nothing matches.
-    An unbuilt corpus (no `.memoria/index.db` yet) is the same as an empty
-    one - not an error.
+    An unbuilt corpus (no `.memoria/index.db` yet) returns no results rather
+    than raising - the corpus not being built is an answer, not a driver
+    exception. It is not, however, *the same* as an empty one: an earlier
+    wording here said so and overreached (#157). The two states are told
+    apart by `memoria.index.is_built`, which this tool does not yet report -
+    changing what a hit list returns is `docs/tool-surface.md`'s contract and
+    its own conversation.
     """
     results = search_index(repository(), query, filters)
     append_search(repository(), session_id(), query, filters, results)
