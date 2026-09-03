@@ -57,7 +57,6 @@ property and nothing here adds a second source of variation.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 from memoria import ledger
@@ -66,7 +65,7 @@ from memoria.extraction import candidates as list_candidates
 from memoria.index import GatheredSource, gather
 from memoria.manuscript import Brief
 from memoria.repository import Repository
-from memoria.scope import resolve_scope
+from memoria.scope import contains_term, resolve_scope
 from memoria.subjects import load_entry
 
 
@@ -115,26 +114,33 @@ class WorkingContext:
     empty: bool
 
 
-def _label_matches(brief_text: str, label: str) -> bool:
-    """Whether ``label`` appears in ``brief_text`` as a whole word or phrase,
-    case-insensitively - a candidate's label is free-form surface text, not a
-    match term, so it gets the same lookaround-bounded scan
-    ``scope._contains_term`` uses for the same reason: a trailing period in a
-    label must not need a word-character after it to still count."""
-    pattern = r"(?<!\w)" + re.escape(label) + r"(?!\w)"
-    return re.search(pattern, brief_text, re.IGNORECASE) is not None
+def _fallbacks(
+    repository: Repository, brief: Brief, matched_terms: tuple[str, ...]
+) -> tuple[ScopeFallback, ...]:
+    """Every unpromoted candidate whose label the brief text names and no
+    resolved entry already accounts for - part 06 §8.4's fallback, for a
+    phrase "with no entry" only.
 
+    A candidate is an unplaced surface form *when it is built*
+    (``extraction.build_candidates`` only groups forms no entry's match terms
+    licensed), but ``extraction.promote_candidate`` leaves the row in place
+    until the next extraction rebuild, so between promotion and that rebuild
+    the same phrase both resolves to its new entry and still has a candidate
+    row. Reporting it as a fallback then would claim a gap that does not
+    exist - a false gap is the same failure as a hidden one for a report
+    about recall. So a label some resolved entry's own matching term
+    already contains (the phrase ``resolve_scope`` found it by, ``matched_by``)
+    is not a fallback: the fallback set is disjoint from the resolved set.
 
-def _fallbacks(repository: Repository, brief: Brief) -> tuple[ScopeFallback, ...]:
-    """Every unpromoted candidate whose label the brief text names - part 06
-    §8.4's fallback, computed independently of which entries resolved: a
-    candidate is by definition an unplaced surface form, so it can never
-    collide with an entry's own match terms (``extraction.build_candidates``
-    only ever groups forms that were *not* licensed by one)."""
+    The label scan is the same lookaround-bounded match ``resolve_scope``
+    uses on entry terms (``scope.contains_term``): a label is free-form
+    surface text with the same trailing-period hazard.
+    """
     found = [
         ScopeFallback(candidate.subject_id, candidate.candidate_id, candidate.label)
         for candidate in list_candidates(repository)
-        if _label_matches(brief.text, candidate.label)
+        if contains_term(brief.text, candidate.label)
+        and not any(contains_term(term, candidate.label) for term in matched_terms)
     ]
     return tuple(sorted(found, key=lambda fallback: (fallback.subject_id, fallback.label)))
 
@@ -160,7 +166,10 @@ def assemble(repository: Repository, session_id: str, brief: Brief) -> WorkingCo
         )
         for entry_id in resolution.entry_ids
     )
-    fallbacks = _fallbacks(repository, brief)
+    matched_terms = tuple(
+        term for terms in resolution.matched_by.values() for term in terms
+    )
+    fallbacks = _fallbacks(repository, brief, matched_terms)
 
     ledger.append_assembly(
         repository,

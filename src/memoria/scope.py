@@ -90,7 +90,7 @@ def _terms_for(entry_id: str, entry: Entry) -> list[str]:
     return terms
 
 
-def _contains_term(text: str, term: str) -> bool:
+def contains_term(text: str, term: str) -> bool:
     """Whether ``term`` appears in ``text`` as a whole word or phrase,
     case-insensitively.
 
@@ -122,7 +122,7 @@ def resolve_scope(repository: Repository, brief: Brief) -> ScopeResolution:
     for entry_id, entry in sorted(entries.items()):
         hits = tuple(
             term for term in _terms_for(entry_id, entry)
-            if _contains_term(brief.text, term)
+            if contains_term(brief.text, term)
         )
         if hits:
             matched_by[entry_id] = hits

@@ -157,6 +157,40 @@ def test_a_candidate_whose_label_the_brief_does_not_name_is_not_a_fallback(tmp_p
     assert context.fallbacks == ()
 
 
+def test_a_promoted_entry_with_its_stale_candidate_row_is_not_also_a_fallback(tmp_path):
+    """``extraction.promote_candidate`` leaves the promoted candidate's row in
+    place until the next extraction rebuild. The phrase resolves to its entry;
+    reporting it as a fallback too would claim a gap that does not exist."""
+    _write_entry(tmp_path, Entry(id="SUB-people/carol", body="Carol is a neighbour."))
+    repository = _repo(tmp_path)
+    _seed_candidate(
+        repository, candidate_id="CAN-0001", subject_id="SUB-people", label="Carol"
+    )
+
+    context = assemble(repository, "SES-test", _brief("Covers my dealings with Carol."))
+
+    assert [resolved.entry_id for resolved in context.resolved_entries] == [
+        "SUB-people/carol"
+    ]
+    assert context.fallbacks == ()
+
+
+def test_a_candidate_the_resolved_set_does_not_account_for_is_still_a_fallback(tmp_path):
+    _write_entry(tmp_path, Entry(id="SUB-people/bob"))
+    repository = _repo(tmp_path)
+    _seed_candidate(
+        repository, candidate_id="CAN-0001", subject_id="SUB-people", label="Carol"
+    )
+
+    context = assemble(repository, "SES-test", _brief("Bob's dealings with Carol."))
+
+    assert [resolved.entry_id for resolved in context.resolved_entries] == [
+        "SUB-people/bob"
+    ]
+    (fallback,) = context.fallbacks
+    assert fallback.candidate_id == "CAN-0001"
+
+
 # --- countable domain units only - no token figure (ADR-0001) ---------------
 
 
@@ -250,8 +284,8 @@ def test_the_same_session_reassembles_identically_at_the_same_revision(tmp_path)
     repository = _repo(tmp_path)
     brief = _brief("Bob's role, called Robert by his mother.")
 
-    first = assemble(repository, "SES-first", brief)
-    second = assemble(repository, "SES-second", brief)
+    first = assemble(repository, "SES-same", brief)
+    second = assemble(repository, "SES-same", brief)
 
     assert first == second
     assert isinstance(first.resolved_entries[0], ResolvedEntry)
