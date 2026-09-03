@@ -140,7 +140,7 @@ DERIVED_TABLES = (
 MEMO_SCHEMA_VERSION = "1"
 
 # The column list `memo` is created with, and the one `_widen_memo_kinds`
-# rewrites a pre-#37 table into - one definition, so they cannot drift.
+# rewrites any out-of-date table into - one definition, so they cannot drift.
 _MEMO_COLUMNS = (
     "key TEXT PRIMARY KEY, "
     "kind TEXT NOT NULL CHECK (kind IN ("
@@ -581,28 +581,42 @@ def _ensure_preserved(con: sqlite3.Connection) -> None:
 
 
 def _widen_memo_kinds(con: sqlite3.Connection) -> None:
-    """Rewrite a ``memo`` table built before #37 so it accepts the two
-    judgement kinds, keeping every row.
+    """Rewrite a ``memo`` table built to an older ``_MEMO_COLUMNS`` into the
+    current one, keeping every row - and every column a row already had.
 
     ``memo`` is preserved, so ``rebuild`` never drops it, and ``CREATE TABLE
     IF NOT EXISTS`` leaves an existing table exactly as it is - which means
-    the old two-kind CHECK constraint would otherwise survive forever and
-    the first ``memoria.audit`` write would fail with a bare
-    ``sqlite3.IntegrityError``. The rows are model output the author paid
-    for, so this is not a ``MEMO_SCHEMA_VERSION`` bump (that forces
-    ``--reset-cache``): it is a lossless copy into the current DDL. SQLite
-    cannot alter a CHECK in place, hence create-copy-drop-rename.
+    an old CHECK constraint (#37's two judgement kinds) or an old, narrower
+    column set would otherwise survive forever, and the first write past it
+    would fail with a bare ``sqlite3.IntegrityError`` or ``OperationalError``.
+    The rows are model output the author paid for, so this is not a
+    ``MEMO_SCHEMA_VERSION`` bump (that forces ``--reset-cache``): it is a
+    lossless copy into the current DDL. SQLite cannot alter a CHECK in
+    place, hence create-copy-drop-rename.
+
+    The copied column list is never hand-maintained: it is read back from
+    ``memo_widened`` (built with ``_MEMO_COLUMNS``, the same definition
+    ``memo`` itself is created with) via ``PRAGMA table_info``, filtered to
+    the columns the old table actually has. A column ``_MEMO_COLUMNS`` adds
+    is left for its own ``DEFAULT`` to fill in on existing rows.
     """
     row = con.execute(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memo'"
     ).fetchone()
-    if row is None or "'engagement'" in row[0]:
+    if row is None:
+        return
+    current_columns = row[0][row[0].index("(") + 1 : row[0].rindex(")")]
+    if current_columns == _MEMO_COLUMNS:
         return
     con.execute("DROP TABLE IF EXISTS memo_widened")
     con.execute("CREATE TABLE memo_widened(" + _MEMO_COLUMNS + ")")
+    old_columns = {r[1] for r in con.execute("PRAGMA table_info(memo)")}
+    shared_columns = ", ".join(
+        r[1] for r in con.execute("PRAGMA table_info(memo_widened)") if r[1] in old_columns
+    )
     con.execute(
-        "INSERT INTO memo_widened (key, kind, anchor, value, written_at) "
-        "SELECT key, kind, anchor, value, written_at FROM memo"
+        f"INSERT INTO memo_widened ({shared_columns}) "
+        f"SELECT {shared_columns} FROM memo"
     )
     con.execute("DROP TABLE memo")
     con.execute("ALTER TABLE memo_widened RENAME TO memo")
