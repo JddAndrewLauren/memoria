@@ -42,6 +42,11 @@ export type ReviewOut = components["schemas"]["ReviewOut"];
 export type FindingOut = components["schemas"]["FindingOut"];
 export type DisagreementMemberOut = components["schemas"]["DisagreementMemberOut"];
 export type RewriteResponse = components["schemas"]["RewriteResponse"];
+export type SuppliedContextOut = components["schemas"]["SuppliedContextOut"];
+export type SessionSuppliedContextOut = components["schemas"]["SessionSuppliedContextOut"];
+export type AssembledEntryOut = components["schemas"]["AssembledEntryOut"];
+export type FallbackOut = components["schemas"]["FallbackOut"];
+export type ServedSinceOut = components["schemas"]["ServedSinceOut"];
 
 class ApiError extends Error {
   constructor(
@@ -198,6 +203,15 @@ export function readSection(sectionId: string): Promise<SectionView> {
 
 export function readReview(sectionId: string): Promise<ReviewOut> {
   return get(`/api/sections/${encodeURIComponent(sectionId)}/review`);
+}
+
+// The supplied-context surface (#61, ADR-0001): what Memoria supplied to
+// each session that assembled this section - the working context assembly
+// produced, and every read served since - in countable domain units. The
+// page re-reads this while it is open and never while it is closed; there
+// is no count on the opener and no figure in the response to put on one.
+export function readSuppliedContext(sectionId: string): Promise<SuppliedContextOut> {
+  return get(`/api/sections/${encodeURIComponent(sectionId)}/supplied-context`);
 }
 
 export function applyRewrite(

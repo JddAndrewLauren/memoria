@@ -458,6 +458,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sections/{section_id}/supplied-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Supplied Context
+         * @description The supplied-context surface (#61, ADR-0001): for each session that
+         *     assembled this section, what assembly resolved and every read served
+         *     since - composed from the session ledgers at this call, so a surface
+         *     that asks again while open sees what has been served so far. It claims
+         *     what Memoria supplied, in countable domain units, and nothing else.
+         */
+        get: operations["read_supplied_context_api_sections__section_id__supplied_context_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sections/{section_id}/paragraphs/{paragraph_index}": {
         parameters: {
             query?: never;
@@ -535,6 +559,20 @@ export interface components {
             is_built: boolean;
             /** Engine Supported */
             engine_supported: boolean;
+        };
+        /**
+         * AssembledEntryOut
+         * @description One entry the declared scope resolved to: which phrase named it, and
+         *     its gathered set's anchors - the sources behind it, as identifiers only
+         *     (assembly reports a gathered set, it does not load one; #38).
+         */
+        AssembledEntryOut: {
+            /** Entry Id */
+            entry_id: string;
+            /** Matched By */
+            matched_by: string[];
+            /** Sources */
+            sources: string[];
         };
         /**
          * CitationOut
@@ -693,6 +731,20 @@ export interface components {
             id: string;
             /** Match Terms */
             match_terms: string[];
+        };
+        /**
+         * FallbackOut
+         * @description A phrase the scope named that resolved to no entry, and the
+         *     unpromoted candidate assembly fell back to - named, never silent
+         *     (part 06 §8.4).
+         */
+        FallbackOut: {
+            /** Subject Id */
+            subject_id: string;
+            /** Candidate Id */
+            candidate_id: string;
+            /** Label */
+            label: string;
         };
         /**
          * FindingOut
@@ -1148,6 +1200,49 @@ export interface components {
             questions: components["schemas"]["QuestionOut"][];
         };
         /**
+         * ServedSinceOut
+         * @description One read the tool surface served after assembly: the tool, the
+         *     reference it was asked for (a ``read``), and the references it served.
+         */
+        ServedSinceOut: {
+            /** Tool */
+            tool: string;
+            /** Ref */
+            ref?: string | null;
+            /** Served */
+            served: string[];
+        };
+        /**
+         * SessionSuppliedContextOut
+         * @description The supplied context for one session on one section (#61,
+         *     ADR-0001): the working context assembly produced - ``briefs``,
+         *     ``entries``, ``fallbacks`` - and, apart from it, ``served_since``.
+         *
+         *     An account of what Memoria *supplied*, in countable domain units:
+         *     briefs, entries, fallbacks and the references served. No field here
+         *     is, or will be, a size or capacity figure of any kind - the ledger's
+         *     measurement belongs to the context manifest (#29), a development
+         *     instrument, and no code path runs from it to this model (ADR-0001).
+         */
+        SessionSuppliedContextOut: {
+            /** Session Id */
+            session_id: string;
+            /** Assembled At */
+            assembled_at: string;
+            /** Briefs */
+            briefs: string[];
+            /** Entries */
+            entries: components["schemas"]["AssembledEntryOut"][];
+            /** Fallbacks */
+            fallbacks: components["schemas"]["FallbackOut"][];
+            /** Unconfirmed */
+            unconfirmed: boolean;
+            /** Empty */
+            empty: boolean;
+            /** Served Since */
+            served_since: components["schemas"]["ServedSinceOut"][];
+        };
+        /**
          * SourceDetail
          * @description A source read in full: frontmatter, verbatim paragraphs, apparatus.
          *
@@ -1284,6 +1379,17 @@ export interface components {
             id: string;
             /** Entry Count */
             entry_count: number;
+        };
+        /**
+         * SuppliedContextOut
+         * @description The supplied-context surface for one section: one account per
+         *     session that assembled it, latest assembly first.
+         */
+        SuppliedContextOut: {
+            /** Section Id */
+            section_id: string;
+            /** Sessions */
+            sessions: components["schemas"]["SessionSuppliedContextOut"][];
         };
         /** ValidationError */
         ValidationError: {
@@ -1773,6 +1879,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_supplied_context_api_sections__section_id__supplied_context_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                section_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuppliedContextOut"];
                 };
             };
             /** @description Validation Error */
