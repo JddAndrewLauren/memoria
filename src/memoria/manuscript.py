@@ -223,6 +223,21 @@ def section_path(repository: Repository, chapter_number: int, section_number: in
     return section_dir(repository, chapter_number, section_number) / "section.md"
 
 
+def draft_relative_path(repository: Repository, section: "SectionEntry") -> str:
+    """Where a section's prose lives, repository-relative - the form
+    ``memoria.write`` takes.
+
+    ``draft.md``'s filename stays ``memoria.audit``'s to own (its module
+    docstring explains why: prose is outside the three briefs this module's
+    docstring scopes itself to) - imported locally, not at module level, so
+    that ownership doesn't reopen the audit/manuscript import cycle #194
+    just closed. Safe: this only runs after both modules have finished
+    initializing, never during either one's import."""
+    from memoria.audit import DRAFT_FILENAME
+
+    return (section.dir / DRAFT_FILENAME).relative_to(repository.root).as_posix()
+
+
 # --- discovery ------------------------------------------------------------
 
 

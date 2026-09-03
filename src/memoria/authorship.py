@@ -44,12 +44,11 @@ staleness token (ADR-0003) guards the file as a whole underneath that.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from memoria import manuscript, references, write
-from memoria.audit import DRAFT_FILENAME
+from memoria.audit import DRAFT_FILENAME, paragraph_spans
 from memoria.manuscript import Brief, brief_to_markdown, parse_brief
 from memoria.repository import Repository
 from memoria.write import Actor, Rejected
@@ -62,11 +61,6 @@ AUTHORIZED_SCOPE_TRAILER = "authorized-scope"
 # `human=False`, so the commit carries no change-id and the write path
 # checkpoints the author's outside edits first (ADR-0008).
 WRITER = Actor(name="Memoria", email="writer@memoria.local", human=False)
-
-# The same blank-line split `memoria.audit.manuscript_paragraphs` numbers
-# paragraphs by, applied here to byte offsets rather than text so a rewrite
-# can be spliced in place. A test asserts the two agree on every paragraph.
-_BLANK_LINE = re.compile(r"\n\s*\n")
 
 
 class AuthorshipError(Exception):
@@ -189,40 +183,16 @@ ApplyResult = Applied | Refused
 # --- the prose, read positionally --------------------------------------------
 
 
-def paragraph_spans(text: str) -> list[tuple[int, int]]:
-    """``(start, end)`` character offsets of every paragraph's stripped text,
-    in order - the byte-level twin of ``audit._split_paragraphs``: the same
-    blank-line separator, the same stripping, so ¶N here is ¶N there."""
-    spans: list[tuple[int, int]] = []
-    position = 0
-    for match in _BLANK_LINE.finditer(text):
-        _add_span(spans, text, position, match.start())
-        position = match.end()
-    _add_span(spans, text, position, len(text))
-    return spans
-
-
-def _add_span(spans: list[tuple[int, int]], text: str, start: int, end: int) -> None:
-    chunk = text[start:end]
-    stripped = chunk.strip()
-    if not stripped:
-        return
-    lead = len(chunk) - len(chunk.lstrip())
-    spans.append((start + lead, start + lead + len(stripped)))
-
-
-def draft_relative_path(repository: Repository, section: manuscript.SectionEntry) -> str:
-    """Where a section's prose lives, repository-relative - the form
-    ``memoria.write`` takes."""
-    return (section.dir / DRAFT_FILENAME).relative_to(repository.root).as_posix()
-
-
 def _draft(repository: Repository, section_id: str) -> tuple[manuscript.SectionEntry, str, Path]:
     try:
         section = manuscript.resolve_section(repository, section_id)
     except manuscript.ManuscriptError as exc:
         raise AuthorshipError(str(exc)) from exc
-    return section, draft_relative_path(repository, section), section.dir / DRAFT_FILENAME
+    return (
+        section,
+        manuscript.draft_relative_path(repository, section),
+        section.dir / DRAFT_FILENAME,
+    )
 
 
 def read_paragraph(repository: Repository, section_id: str, paragraph: int) -> str:
