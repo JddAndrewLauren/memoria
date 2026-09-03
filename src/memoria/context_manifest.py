@@ -7,6 +7,13 @@ up by a read. It is a **projection of `events.jsonl`** (#13), never a
 separate declaration of intent: nothing here is invented, and a session
 that ran no tool call gets an empty manifest rather than a stale one.
 
+``scope_resolutions`` is a different kind of entry than the rest: not a read
+or a search, but ``memoria.assembly.assemble``'s own report of what a
+declared scope resolved to (#38, §33.1) - which entries, their gathered
+sets' sources, and which unpromoted candidates it fell back to. Recorded
+here rather than on the section itself, per CONTEXT.md's "Declared scope":
+"the resolution is never written back onto the section."
+
 **The completeness claim is conditioned on the routed layout** (§33).
 `events.jsonl` records every read and search the tool surface served; it
 says nothing about a read made some other way - a development session
@@ -98,6 +105,17 @@ def build_context_manifest(repository: Repository, session_id: str) -> dict:
         else:
             other_reads.append(item)
 
+    scope_resolutions: list[dict] = [
+        {
+            "entries": event.get("entries", []),
+            "fallbacks": event.get("fallbacks", []),
+            "unconfirmed": event.get("unconfirmed", False),
+            "empty": event.get("empty", False),
+        }
+        for event in events
+        if event.get("tool") == "assemble"
+    ]
+
     searches: list[dict] = []
     for event in events:
         tool = event.get("tool")
@@ -126,6 +144,7 @@ def build_context_manifest(repository: Repository, session_id: str) -> dict:
         "entries_resolved": entries_resolved,
         "other_reads": other_reads,
         "searches": searches,
+        "scope_resolutions": scope_resolutions,
     }
 
 
