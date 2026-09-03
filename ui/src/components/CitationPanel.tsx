@@ -1,9 +1,21 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { readRef, type CitationOut } from "../api/client";
 import { Badge } from "./Badge";
-import { CitationPanelContext, useCitationPanel, type CitationPanelApi } from "../lib/citationPanel";
+import {
+  CitationPanelContext,
+  isTurnRef,
+  sentencesOf,
+  useCitationPanel,
+  type CitationPanelApi,
+  type OpenOptions,
+} from "../lib/citationPanel";
+
+interface Opened {
+  ref: string;
+  highlight?: string;
+}
 
 /**
  * Owns the slide-over's state - a small stack of references, last pushed is
@@ -12,10 +24,11 @@ import { CitationPanelContext, useCitationPanel, type CitationPanelApi } from ".
  * panel's own backlinks all open into the same panel this way.
  */
 export function CitationPanelProvider({ children }: { children: ReactNode }) {
-  const [refs, setRefs] = useState<string[]>([]);
+  const [refs, setRefs] = useState<Opened[]>([]);
 
   const api: CitationPanelApi = {
-    open: (ref) => setRefs((stack) => [...stack, ref]),
+    open: (ref, options?: OpenOptions) =>
+      setRefs((stack) => [...stack, { ref, highlight: options?.highlight }]),
     close: () => setRefs([]),
   };
 
@@ -32,7 +45,7 @@ export function CitationPanelProvider({ children }: { children: ReactNode }) {
 }
 
 interface CitationPanelProps {
-  refs: string[];
+  refs: Opened[];
   onBack: () => void;
   onClose: () => void;
 }
@@ -45,7 +58,8 @@ interface CitationPanelProps {
  * inside it, via "Open full source".
  */
 function CitationPanel({ refs, onBack, onClose }: CitationPanelProps) {
-  const current = refs[refs.length - 1];
+  const opened = refs[refs.length - 1];
+  const current = opened?.ref;
   const open = refs.length > 0;
 
   useEffect(() => {
@@ -108,7 +122,11 @@ function CitationPanel({ refs, onBack, onClose }: CitationPanelProps) {
         <div className="flex-1 overflow-y-auto p-4">
           {isLoading && <p className="text-sm text-muted">Loading…</p>}
           {isError && <p className="text-sm text-muted">This reference could not be read.</p>}
-          {data && <CitationBody data={data} onNavigateAway={onClose} />}
+          {data && current && isTurnRef(current) ? (
+            <TurnBody data={data} highlight={opened?.highlight} />
+          ) : (
+            data && <CitationBody data={data} onNavigateAway={onClose} />
+          )}
         </div>
       </aside>
     </div>
@@ -175,6 +193,50 @@ function CitationBody({
       )}
 
       {data.overlay && <Backlinks overlay={data.overlay} onOpen={open} />}
+    </div>
+  );
+}
+
+/**
+ * One transcript turn (#34): what was said, as sentences, with the sentence
+ * the citation was made for marked and scrolled into view. "Clicking it
+ * lands on the sentence in which you decided" (part 16 M4's gate) is this
+ * component; the mark carries `data-testid="cited-sentence"` so both the
+ * jsdom test and the browser walk can find it, and only the walk can say
+ * whether it is on screen.
+ */
+function TurnBody({ data, highlight }: { data: CitationOut; highlight?: string }) {
+  const cited = useRef<HTMLElement | null>(null);
+  const sentences = sentencesOf(data.text, highlight);
+
+  useEffect(() => {
+    // jsdom has no scrollIntoView; the guard keeps the mechanism testable
+    // there while the browser walk observes the geometry.
+    cited.current?.scrollIntoView?.({ block: "center" });
+  }, [data.text, highlight]);
+
+  const firstCited = sentences.findIndex((sentence) => sentence.cited);
+  return (
+    <div>
+      <div className="mb-3 font-mono text-[10px] uppercase tracking-wide text-muted">
+        Transcript turn
+      </div>
+      <p className="whitespace-pre-wrap font-serif text-[15px] leading-relaxed text-ink">
+        {sentences.map((sentence, index) =>
+          sentence.cited ? (
+            <mark
+              key={index}
+              data-testid="cited-sentence"
+              ref={index === firstCited ? cited : undefined}
+              className="rounded bg-amber-tint px-0.5 text-ink"
+            >
+              {sentence.text}
+            </mark>
+          ) : (
+            <span key={index}>{sentence.text}</span>
+          ),
+        )}
+      </p>
     </div>
   );
 }

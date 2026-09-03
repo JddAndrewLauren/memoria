@@ -132,7 +132,7 @@ set +e
 (cd ui && MEMORIA_GATE_URL="http://127.0.0.1:$port" \
           MEMORIA_GATE_REPO="$scratch" \
           MEMORIA_GATE_ARTIFACT="$artifact" \
-          npm run gate)
+          npm run gate -- m3-gate-walk)
 walk_status=$?
 set -e
 

@@ -873,6 +873,49 @@ def test_read_one_entry_serves_more_than_the_generic_reference_read(tmp_path):
     assert entry["statements"] == [{"badge": "source", "text": "Bob kept the ledger."}]
 
 
+def _derived_session(repository, session_id, turns):
+    """A derived transcript with one ``## Tnnn`` block per ``(role, text)``."""
+    import json as _json
+
+    from memoria.sessions import derive_session
+
+    entries, parent = [], None
+    for number, (role, text) in enumerate(turns, start=1):
+        uuid = f"u{number}"
+        entries.append({
+            "uuid": uuid, "parentUuid": parent, "type": role,
+            "timestamp": f"2026-09-12T14:{30 + number:02d}:00+00:00",
+            "sessionId": "claude-code-session-uuid",
+            "message": {"role": role, "content": text},
+        })
+        parent = uuid
+    jsonl_path = repository.root / "session.jsonl"
+    jsonl_path.write_text("\n".join(_json.dumps(e) for e in entries) + "\n", encoding="utf-8")
+    derive_session(repository, session_id, jsonl_path)
+
+
+def test_read_serves_one_transcript_turn_for_a_decisions_citation(tmp_path):
+    """#34: a decision cites `SES-...#T002`, and the Section view's chip opens
+    the panel on that turn - so the panel's read serves it, verbatim, with
+    no record and no overlay. A bare session is still not citable here."""
+    repository = Repository(root=tmp_path)
+    turn = "We should decide this now. Keep Bob's knowledge ambiguous until chapter 9. Nothing else changes."
+    _derived_session(repository, "SES-20260912-1432", [("user", "Where were we?"), ("user", turn)])
+    client = _client(repository)
+
+    response = client.get("/api/read", params={"ref": "SES-20260912-1432#T002"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["text"] == turn
+    assert body["citation"] == "SES-20260912-1432#T002"
+    assert body["record"] is None and body["overlay"] is None and body["anchor"] is None
+
+    bare = client.get("/api/read", params={"ref": "SES-20260912-1432"})
+    assert bare.status_code == 404 and "SES-...#T turns" in bare.json()["detail"]
+    missing = client.get("/api/read", params={"ref": "SES-20260912-1432#T009"})
+    assert missing.status_code == 404 and "no T009" in missing.json()["detail"]
+
+
 # --- serving the built ui/ client -------------------------------------------
 
 

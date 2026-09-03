@@ -64,6 +64,8 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 import memoria.audit as audit
 import memoria.extraction as extraction
+import memoria.human_touched as human_touched
+import memoria.record_extractor as record_extractor
 from memoria.embeddings import default_embed_fn
 from memoria.index import (
     ReadOverlay,
@@ -104,7 +106,11 @@ mcp = MCPServer(
         "archive-wide extraction pass, and are driven by the `extraction` "
         "skill rather than reached for directly. The audit_* tools run one "
         "on-demand audit of a section, a chapter, or a highlighted passage - "
-        "call them only when the author explicitly asked for an audit. "
+        "call them only when the author explicitly asked for an audit. The "
+        "record_decision, record_question, record_statement, revise_statement "
+        "and curation_* tools are the record extractor - the post-session pass "
+        "the `curation` skill drives, writing durable records that cite their "
+        "transcript turn; nothing there is called mid-conversation. "
         "trace(ref) answers why a paragraph of manuscript prose says what it "
         "says: the commit that last touched it, the session turn that "
         "authorized an AI write, and what that session had loaded."
@@ -1074,6 +1080,173 @@ def extraction_promote_cluster(
     except extraction.ExtractionError as exc:
         raise _tool_error(exc) from exc
     return "promoted " + render_promotion(promotion)
+
+
+# --- the record extractor's tools (#34, part 08 §13) ------------------------
+#
+# The Curator's constrained half, driven by the `curation` skill after a
+# session: decisions, questions and entry statements, each one a durable
+# record that commits under the Curator's own identity. Same shape as the
+# extraction tools - the model's judgement (is this turn a decision, or a
+# musing?) arrives as tool arguments, and the core checks the one thing it
+# can check mechanically: whose turn is cited. Nothing here is ledgered - the
+# commit each write makes is the record of the call, attributed and
+# path-scoped (ADR-0003).
+
+
+def _record_error(exc: Exception) -> ToolError:
+    return ToolError(str(exc))
+
+
+@mcp.tool()
+def curation_status() -> str:
+    """What the post-session pass starts from: every session on disk and
+    whether its transcript has been derived (a session without one cannot be
+    cited - run `memoria derive-session` first), how many decisions and open
+    questions already exist, and whether the tree is clean enough for the
+    dirty-tree rule to let a write through (part 08 §14.2).
+    """
+    return render_curation_status(record_extractor.curation_status(repository()))
+
+
+def render_curation_status(status: record_extractor.CurationStatus) -> str:
+    lines = ["## Sessions", ""]
+    if status.sessions:
+        for session in status.sessions:
+            state = "transcript derived" if session.has_transcript else "no transcript yet"
+            lines.append(f"- {session.session_id} - {state}")
+    else:
+        lines.append("None on disk.")
+    lines += [
+        "",
+        f"decisions recorded: {status.decisions}",
+        f"open questions recorded: {status.questions}",
+    ]
+    if status.dirty:
+        lines.append(
+            "uncommitted human modifications: " + ", ".join(status.dirty)
+            + " - the record extractor will refuse to write until they are committed"
+        )
+    else:
+        lines.append("working tree: clean")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def record_decision(session_id: str, turn: int, text: str) -> str:
+    """Record one decision the author made, citing the transcript turn they
+    made it in (part 08 §13.1).
+
+    The cited turn must be the author's own: an assistant turn is refused
+    with the reason, and the refusal names `record_question` as where the
+    item belongs. That is the whole mechanical check - whether the author's
+    words decide something or only wonder is your judgement, made against
+    the turn's text (`read(SES-...#Tnnn)`), before you call this.
+    """
+    try:
+        record = record_extractor.record_decision(repository(), session_id, turn, text)
+    except record_extractor.RecordExtractorError as exc:
+        raise _record_error(exc) from exc
+    return f"{record.id} recorded, citing {record.citation}:\n\n[author] {record.text}"
+
+
+@mcp.tool()
+def record_question(session_id: str, turn: int, text: str) -> str:
+    """Record a musing, an interim interpretation, or an actual question
+    into the queue, citing its turn (part 12 §34.4). Always `[open]`,
+    whichever role spoke the turn: nothing here is an assertion.
+    """
+    try:
+        record = record_extractor.record_question(repository(), session_id, turn, text)
+    except record_extractor.RecordExtractorError as exc:
+        raise _record_error(exc) from exc
+    return f"recorded, citing {record.citation}:\n\n[open] {record.text}"
+
+
+@mcp.tool()
+def record_statement(
+    entry_id: str, badge: str, text: str, provenance: list[str] | None = None
+) -> str:
+    """Append one badged statement to an entry's body, per the write matrix
+    (part 06 §8.2). `badge` is `source`, `inferred`, `open` or `author`;
+    `provenance` is the original material it rests on - `SRC-` records or
+    paragraphs, `SES-...#T` turns, `CHG-` changes. An `[author]` statement
+    needs an author-spoken turn; `[source]` and `[inferred]` need at least one
+    reference; `[open]` may carry none. Testimony is never written here.
+    """
+    try:
+        _, token = record_extractor.serve_entry_for_write(repository(), entry_id)
+        record = record_extractor.record_statement(
+            repository(), entry_id, badge, text, tuple(provenance or ()), token
+        )
+    except record_extractor.RecordExtractorError as exc:
+        raise _record_error(exc) from exc
+    return f"appended to {record.entry_id}:\n\n{_statement_lines(record)}"
+
+
+@mcp.tool()
+def revise_statement(
+    entry_id: str,
+    statement_badge: str,
+    statement_text: str,
+    badge: str,
+    text: str,
+    provenance: list[str] | None = None,
+) -> str:
+    """Revise one existing badged statement to a new one - or, where the
+    write matrix and the human-touched flag say the Curator may not, append
+    a Memoria note after it and leave it byte-identical (part 08 §14.2).
+
+    Name the statement by its badge and text as the entry shows it
+    (whitespace is collapsed when matching, so a reflowed paragraph still
+    resolves). The flag is refreshed before deciding, so a hand edit committed
+    since the last pass is seen. The result says which of the two happened.
+    """
+    try:
+        entry, token = record_extractor.serve_entry_for_write(repository(), entry_id)
+        statement = record_extractor.find_statement(entry, statement_badge, statement_text)
+        outcome = record_extractor.revise_statement(
+            repository(), entry_id, statement, badge, text, tuple(provenance or ()), token
+        )
+    except record_extractor.RecordExtractorError as exc:
+        raise _record_error(exc) from exc
+    if isinstance(outcome, record_extractor.MemoriaNoteRecord):
+        return (
+            f"not rewritten: the statement in {outcome.entry_id} is the author's to keep "
+            f"(unbadged, [author] without a new citing turn, or human-touched). "
+            f"A Memoria note was appended after it and the statement is unchanged:\n\n"
+            f"{outcome.note}"
+        )
+    return f"rewritten in {outcome.entry_id}:\n\n{_statement_lines(outcome)}"
+
+
+def _statement_lines(record: record_extractor.StatementRecord) -> str:
+    lines = [f"[{record.badge}] {record.text}"]
+    lines += [f"— {citation}" for citation in record.provenance]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def curation_flag() -> str:
+    """Run the human-touched flagging step on its own (part 08 §14.2): every
+    badged statement a non-Curator commit changed since the last pass is
+    flagged, and the report names each one. `revise_statement` runs this
+    itself before deciding; call it directly to see what a hand edit did.
+    """
+    report = human_touched.flag(repository())
+    return render_flag_report(report)
+
+
+def render_flag_report(report) -> str:
+    if report.head is None:
+        return "no commits yet - nothing to flag"
+    lines = [
+        f"examined {report.commits} non-Curator commit(s) up to {report.head[:12]}",
+        f"newly flagged human-touched: {len(report.flagged)}",
+    ]
+    for item in report.flagged:
+        lines.append(f"- {item.entry_id}: {item.statement} (commit {item.commit_sha[:12]})")
+    return "\n".join(lines)
 
 
 def main(argv=None) -> int:

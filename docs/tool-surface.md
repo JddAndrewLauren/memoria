@@ -145,6 +145,61 @@ that reason; the narrowing is a decision, not drift.
 
 ---
 
+## Record-extractor tools — forced, issue #34
+
+The Curator's other half (part 08 §12-§13): where the extraction proposes and
+asserts nothing, these write **durable records** - decisions, open questions,
+badged entry statements, Memoria notes - each one a path-scoped commit as the
+Curator. They are driven by the `curation` skill after a research session,
+never reached for by a session mid-conversation, and they call no model: the
+judgement (is this turn a decision or a musing?) arrives as tool arguments,
+and the core checks mechanically the one thing it can - whose turn is cited
+(`memoria.sessions.turn_role`).
+
+| Tool | State |
+|---|---|
+| `curation_status()` | **Forced** — issue #34 |
+| `record_decision(session_id, turn, text)` | **Forced** — issue #34 |
+| `record_question(session_id, turn, text)` | **Forced** — issue #34 |
+| `record_statement(entry_id, badge, text, provenance)` | **Forced** — issue #34 |
+| `revise_statement(entry_id, statement_badge, statement_text, badge, text, provenance)` | **Forced** — issue #34 |
+| `curation_flag()` | **Forced** — issue #34 |
+
+### What each refuses
+
+`record_decision` refuses an assistant-spoken turn and names `record_question`
+as where the item belongs (part 08 §13.1's "does not qualify"). Every write
+refuses a tree with uncommitted human modifications (the dirty-tree rule,
+§14.2) and names the files. `record_statement` and `revise_statement` apply
+the write matrix (part 06 §8.2) exactly as the core does for any caller: no
+unbadged text, provenance on every assertion badge, an author-spoken turn
+behind `[author]`, and provenance that terminates in original material only.
+Each refusal reaches the model as the core's own message.
+
+### The token is served in the same call
+
+`record_statement` and `revise_statement` serve the entry and write against
+that serve's token (ADR-0003) within one call, because a tool call has no
+earlier read to carry a token from. What the token still buys is the
+refusal of an edit committed between serve and write; the dirty-tree rule
+runs before either.
+
+### Naming a statement
+
+`revise_statement` names the existing statement by badge and words, matched
+with whitespace collapsed (`memoria.human_touched.statement_key`'s rule) and
+without its own `— <reference>` lines, so a reflowed paragraph still resolves
+and a miss lists what the entry does hold.
+
+### These tools write, and are not ledgered
+
+Every successful call is a commit attributed to the Curator, path-scoped to
+the file it appended to or revised - that commit is the record of the call,
+and `trace(ref)` reads it. Nothing is appended to `events.jsonl`: the ledger
+records what a session was *served*, and these calls serve nothing.
+
+---
+
 ## Audit tools — forced, issue #40
 
 ```

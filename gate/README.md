@@ -11,15 +11,16 @@ It is not part of the standing gate. `scripts/test.sh` — pytest plus vitest,
 no browser — is what runs every time, and `CLAUDE.md` keeps it that way on
 purpose. A gate walk is reached deliberately, by name.
 
-## Running the M3 walk
+## Running the walks
 
 ```bash
 scripts/gate-m3.sh                 # writes gate/last-run.md
 scripts/gate-m3.sh --keep          # and leaves the scratch repository behind
 scripts/gate-m3.sh --artifact /tmp/walk.md
+scripts/gate-m4.sh                 # the same flags; ~30s, most of it the ui build
 ```
 
-About four seconds, of which the walk itself is two. It needs `.venv` and
+The M3 walk is about four seconds, of which the walk itself is two. It needs `.venv` and
 `ui/node_modules` (run `scripts/run.sh` once), and a Chromium for Playwright
 (`cd ui && npx playwright install chromium`).
 
@@ -95,16 +96,28 @@ not a record.
 | `ui/playwright.config.ts` | the browser driver — `npm run gate`, never `npm test` |
 | `ui/gate/m3-gate-walk.spec.ts` | the seven steps |
 | `docs/gates/m3-gate-walk.md` | what the walk means, and the recorded Result |
+| `gate/m4/session.jsonl` | the M4 walk's staged session, four turns in Claude Code's JSONL shape |
+| `gate/m4/records.py` | the M4 walk's record-extractor acts, run in the core before and after the browser steps |
+| `scripts/gate-m4.sh` | prepare, acts, serve, walk, more acts, validate, record, tear down |
+| `ui/gate/m4-gate-walk.spec.ts` | the five browser steps, in two phases |
+| `docs/gates/m4-gate-walk.md` | what the M4 walk means, the recorded Result, and what is left to the author |
 
-## Writing the M4 walk
+## Writing the next walk
 
-Copy `scripts/gate-m3.sh` and `ui/gate/m3-gate-walk.spec.ts` and change what
-the walk does; do not generalise them first. Two walks are not yet a pattern
-worth abstracting, and the M3 script's preparation — seed, normalize, write
-the entry, commit, rebuild — is the part most likely to be *wrong* for M4,
-whose gate will want records the extractor has actually read.
+Copy the closest of the two scripts and change what the walk does; do not
+generalise them first. M4 copied M3 and changed the preparation (it wanted a
+manuscript section, a derived session and records the extractor had written)
+and split the walk into a core half and a browser half, because most of its
+gate is facts about files and commits and only one clause needs a viewport.
+Each script passes its own spec name to `npm run gate` - the Playwright
+config runs everything under `ui/gate/`, so an unfiltered run walks every
+milestone against one milestone's server. Two lessons from building it, both
+about the scratch repository rather than the app: never `git add -A` after the index exists (the dirty-tree rule will
+refuse every later write, correctly), and a manuscript file the author lays
+down by hand is checkpointed, not committed, or `validate` reads it as an
+unauthorized AI write.
 
-The corpus is the part to reuse. If M4 needs paragraphs a model has extracted
-from, add the memo rows the extraction would have written rather than a
-larger corpus: what makes this fast is the record count, and nothing about the
-walk gets more honest by growing it.
+The corpus is the part to reuse. If a walk needs paragraphs a model has
+extracted from, add the memo rows the extraction would have written rather
+than a larger corpus: what makes this fast is the record count, and nothing
+about the walk gets more honest by growing it.
