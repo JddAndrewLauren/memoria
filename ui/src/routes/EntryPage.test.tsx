@@ -202,15 +202,55 @@ describe("the entry view's body (part 06 §8.2)", () => {
     // Present, not hidden - a reviewer walking the gate must be able to see
     // what is not built yet (#26).
     expect(screen.getByRole("heading", { name: /^settlements$/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /^memoria notes$/i })).toBeInTheDocument();
     expect(screen.getByText(/settlements .* arrive at M4 \(#33\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/Memoria notes .* arrive at M4 \(#32\)/i)).toBeInTheDocument();
+    // Memoria notes are built (#32): the region is empty, and says so,
+    // rather than naming a milestone that has already landed.
+    expect(screen.getByRole("heading", { name: /^memoria notes$/i })).toBeInTheDocument();
+    expect(screen.getByText(/no memoria notes on this entry/i)).toBeInTheDocument();
+    expect(screen.queryByText(/not built yet\. memoria notes/i)).not.toBeInTheDocument();
     // Settlements are part *of* the audit-visible body (part 06 §8.2), so
     // they are nested inside it rather than made a sibling region.
     const body = screen
       .getByRole("heading", { name: /^audit-visible body$/i })
       .closest("section");
     expect(body?.textContent).toMatch(/settlements .* arrive at M4 \(#33\)/i);
+  });
+
+  it("renders a Memoria note in its own region, outside the body and apart from [open] lines", async () => {
+    const note = [
+      "> **Memoria note — 2026-10-18**",
+      ">",
+      "> Later research cuts against the interpretation above.",
+      "> See SRC-000190 ¶2.",
+      "> The author text has been left unchanged.",
+    ].join("\n");
+    stubApi({
+      entry: { statements: [...ENTRY.statements, { badge: "memoria-note", text: note }] },
+    });
+    renderAt(BOB);
+
+    const notes = (await screen.findByRole("heading", { name: /^memoria notes$/i })).closest(
+      "section",
+    );
+    expect(notes?.textContent).toContain("Memoria note — 2026-10-18");
+    expect(notes?.textContent).toContain("Later research cuts against the interpretation above.");
+    expect(notes?.textContent).toContain("The author text has been left unchanged.");
+    // Drawn as §19.6's card, not as the raw blockquote the file holds.
+    expect(notes?.textContent).not.toContain("> **");
+    expect(notes?.textContent).not.toMatch(/no memoria notes on this entry/i);
+
+    // Never in the audit-visible body (part 08 §14.2) - the same line
+    // `memoria.subjects.is_audit_visible` draws on the server.
+    const body = screen
+      .getByRole("heading", { name: /^audit-visible body$/i })
+      .closest("section");
+    expect(body?.textContent).not.toContain("Later research cuts against");
+    // And not filed under the [open] lines either, which keep their region.
+    const outside = screen
+      .getByRole("heading", { name: /outside the audit-visible body/i })
+      .closest("section");
+    expect(outside?.textContent).not.toContain("Later research cuts against");
+    expect(outside?.textContent).toContain("Did Bob receive the July 14 document?");
   });
 
   it("says the body is unwritten rather than stubbing a statement into it", async () => {

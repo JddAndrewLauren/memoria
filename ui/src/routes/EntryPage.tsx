@@ -91,7 +91,12 @@ export default function EntryPage() {
 
   const data = entry.data;
   const auditVisible = data.statements.filter(isAuditVisible);
-  const outsideBody = data.statements.filter((statement) => !isAuditVisible(statement));
+  // Both sit outside the audit-visible body, but they are different things:
+  // an `[open]` line is a question the record holds, a Memoria note is the
+  // Curator's word on a statement it may not rewrite - so each has its own
+  // region rather than sharing one heading.
+  const openLines = data.statements.filter((statement) => statement.badge === "open");
+  const notes = data.statements.filter((statement) => statement.badge === "memoria-note");
 
   return (
     <article className="max-w-[900px] p-8">
@@ -139,22 +144,30 @@ export default function EntryPage() {
         label="Outside the audit-visible body"
         note="Assembly never loads these and the audit never evaluates against them."
       >
-        {outsideBody.length === 0 ? (
+        {openLines.length === 0 ? (
           <p className="text-xs text-muted">No [open] lines on this entry.</p>
         ) : (
           <ul className="space-y-4">
-            {outsideBody.map((statement, index) => (
+            {openLines.map((statement, index) => (
               <StatementRow key={index} statement={statement} />
             ))}
           </ul>
         )}
       </Region>
 
-      <Region label="Memoria notes">
-        <NotYetBuilt>
-          Not built yet. Memoria notes — what the Curator appends when evidence conflicts with
-          a statement it may not rewrite — arrive at M4 (#32).
-        </NotYetBuilt>
+      <Region
+        label="Memoria notes"
+        note="What the Curator appends when evidence conflicts with a statement it may not rewrite — human-touched, or the author's own. The statement stands unchanged; the note waits here for the author, outside the audit-visible body."
+      >
+        {notes.length === 0 ? (
+          <p className="text-xs text-muted">No Memoria notes on this entry.</p>
+        ) : (
+          <ul className="space-y-4">
+            {notes.map((statement, index) => (
+              <MemoriaNoteCard key={index} statement={statement} />
+            ))}
+          </ul>
+        )}
       </Region>
 
       <MatchTerms
@@ -247,6 +260,31 @@ function StatementRow({ statement }: { statement: StatementOut }) {
         )}
       </div>
       <p className="text-body">{statement.text}</p>
+    </li>
+  );
+}
+
+// §19.6's amber card. The note is served verbatim as the blockquote
+// paragraph the Curator wrote (part 08 §14.2) - `> **Memoria note — <date>**`,
+// then its lines - so the card strips the quote markers and draws the heading
+// line as its label. Nothing is reworded: what the author reads here is what
+// `read(ref)` serves.
+function MemoriaNoteCard({ statement }: { statement: StatementOut }) {
+  const lines = statement.text
+    .split("\n")
+    .map((line) => line.replace(/^>\s?/, "").trim())
+    .filter((line) => line.length > 0);
+  const [heading, ...body] = lines;
+  return (
+    <li className="max-w-[640px] rounded border border-amber bg-amber-tint-soft px-3 py-2">
+      <p className="font-mono text-[11px] uppercase tracking-wide text-amber">
+        {(heading ?? "").replace(/\*\*/g, "")}
+      </p>
+      {body.map((line, index) => (
+        <p key={index} className="mt-1 text-sm text-body">
+          {line}
+        </p>
+      ))}
     </li>
   );
 }
