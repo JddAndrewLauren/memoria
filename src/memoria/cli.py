@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 from memoria import changes, health
@@ -154,6 +155,18 @@ def _report_health(report) -> None:
     )
 
 
+def _report_phases(phases) -> None:
+    """Print where a rebuild's time went, one line per phase (#172).
+
+    Follows the `completed in` total rather than replacing it: that line is
+    the one #21 asked for and the one the gate walk greps. The names come
+    from ``RebuildReport.phases`` plus the CLI's own `changes projection`,
+    which `index.rebuild` does not run.
+    """
+    for name, seconds in phases:
+        print(f"rebuild:   {name:<20} {seconds:.2f}s")
+
+
 def _report_appearances(report) -> None:
     """Print what the appearances pass produced (#19, part 06 §8.11).
 
@@ -183,7 +196,11 @@ def main(argv=None):
     )
     rebuild_parser = subparsers.add_parser(
         "rebuild",
-        help="Delete and regenerate all derived state from the normalized records",
+        help=(
+            "Delete and regenerate all derived state from the normalized "
+            "records; reports what it regenerated, how long it took, and how "
+            "long each phase took"
+        ),
     )
     rebuild_parser.add_argument(
         "--recurrence-threshold",
@@ -372,12 +389,17 @@ def main(argv=None):
         _report_derived(report.counts)
         _report_appearances(report.appearances)
         _report_staleness(report.staleness)
+        changes_started = time.monotonic()
         change_ids = changes.rebuild(repository)
+        changes_seconds = time.monotonic() - changes_started
         print(
             f"rebuild: wrote {len(change_ids)} change projection(s) to "
             f"{repository.root / changes.CHANGES_RELATIVE_PATH}"
         )
         print(f"rebuild: completed in {report.elapsed_seconds:.2f}s")
+        _report_phases(
+            (*report.phases, ("changes projection", changes_seconds))
+        )
         return 0
 
     if args.command == "derive-session":

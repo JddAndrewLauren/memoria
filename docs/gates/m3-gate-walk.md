@@ -45,7 +45,9 @@ The pattern the script follows — and the traps it is built against — is
 this repository. Small on purpose. No evidence corpus is chosen
 (`docs/open-problems.md` §2.4), and the four-custodian Enron slice — the
 honest stand-in — takes about **50 minutes to normalize** (4,426 records) and
-**over an hour to rebuild**, measured 2026-09-03. A check that costs two hours
+**over an hour to rebuild**, measured 2026-09-03 (`memoria rebuild` now prints
+a per-phase breakdown after its `completed in` line, #172, so the next such
+measurement says where the hour goes). A check that costs two hours
 is a check that runs once and then never again, which is the opposite of what
 a gate is for. The fixture corpus normalizes in 0.2s and rebuilds in about a
 second, so the walk can be run, failed, fixed and re-run inside a minute.
