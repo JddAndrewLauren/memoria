@@ -1542,9 +1542,10 @@ def compute_appearances(repository: Repository) -> AppearancesReport:
     keeps (§42).
     """
     # Imported here, not at module scope, for the same reason `rebuild` does
-    # it: `memoria.extraction` imports this module, so the reverse import
-    # must stay local to avoid a cycle.
-    from memoria.extraction import implicit_name_term
+    # it for `implicit_name_term`: `memoria.extraction` imports this module,
+    # and `memoria.scope` imports `memoria.extraction`, so the reverse
+    # import must stay local to avoid a cycle.
+    from memoria.scope import match_terms_for
 
     entries = load_all_entries(repository)
     con = connect(repository)
@@ -1560,10 +1561,7 @@ def compute_appearances(repository: Repository) -> AppearancesReport:
                 skipped_subjects.add(subject_id)
                 continue
 
-            terms = {implicit_name_term(entry_id)}
-            for term in entry.match_terms:
-                if classify_match_term(term) == "word":
-                    terms.add(term)
+            terms = set(match_terms_for(entry_id, entry))
 
             # Each anchor gets one note, from the first (alphabetically) term
             # that matched it - deterministic, and enough to say how it was

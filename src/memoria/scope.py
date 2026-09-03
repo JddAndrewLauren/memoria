@@ -76,13 +76,19 @@ class ScopeResolution:
     empty: bool
 
 
-def _terms_for(entry_id: str, entry: Entry) -> list[str]:
+def match_terms_for(entry_id: str, entry: Entry) -> list[str]:
     """The phrases this entry can be found by in free prose: its own
     implicit name, then its word-shaped match terms in declaration order.
     Entry- and relation-shaped terms (`classify_match_term`) name
     co-occurrence between placed entries, never a phrase a brief's author
     would type, so they take no part in this scan - the same split
-    `index.compute_appearances` already draws for the same reason."""
+    `index.compute_appearances` already draws for the same reason.
+
+    The one owner for this rule (#156): `index.compute_appearances` and
+    `extraction._licensing_terms` both call it rather than rebuilding it,
+    the same one-resolver principle `resolve_scope` itself exists for.
+    Local imports on their side keep the module cycle they already break
+    for `implicit_name_term` from reappearing here."""
     terms = [implicit_name_term(entry_id)]
     terms.extend(
         term for term in entry.match_terms if classify_match_term(term) == "word"
@@ -121,7 +127,7 @@ def resolve_scope(repository: Repository, brief: Brief) -> ScopeResolution:
     matched_by: dict[str, tuple[str, ...]] = {}
     for entry_id, entry in sorted(entries.items()):
         hits = tuple(
-            term for term in _terms_for(entry_id, entry)
+            term for term in match_terms_for(entry_id, entry)
             if contains_term(brief.text, term)
         )
         if hits:
