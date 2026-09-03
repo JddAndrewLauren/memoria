@@ -191,6 +191,36 @@ class EntryListResponse(BaseModel):
     items: list[EntrySummary]
 
 
+class StatementOut(BaseModel):
+    """One paragraph of an entry's body, with its badge if it has one.
+
+    Mirrors ``memoria.subjects.Statement`` field for field. ``badge`` is
+    ``None`` for author testimony - the absence of a badge *is* the
+    attribution (part 06 §9.5) - never re-derived by a consumer as "no
+    badge shown".
+    """
+
+    badge: str | None
+    text: str
+
+
+class EntryDetail(EntrySummary):
+    """One entry read in full - #64's third subject read (#148): frontmatter
+    plus its body, parsed into ``statements`` the same way ``SourceDetail``
+    parses a record into ``paragraphs`` rather than serving one raw blob.
+
+    Distinct from ``GET /api/read?ref=SUB-x/y`` (#25's ``CitationOut``),
+    which serves the entry's raw file verbatim, frontmatter included - the
+    MCP tool surface's "the entry, verbatim" contract
+    (``docs/tool-surface.md``), reached through a reference for the
+    slide-over citation panel's backlink navigation. This is the `SUBJECTS`
+    tree's own read, shaped like its ``SubjectSummary``/``EntrySummary``
+    siblings rather than conflated with that one.
+    """
+
+    statements: list[StatementOut]
+
+
 class SearchResultOut(BaseModel):
     """One search hit: the ``SRC-`` ID, the paragraph anchor, and a snippet.
 

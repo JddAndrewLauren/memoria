@@ -588,6 +588,79 @@ def test_list_entries_for_an_unknown_subject_is_a_404(tmp_path):
     assert "SUB-nonexistent" in response.json()["detail"]
 
 
+def test_read_entry_returns_id_match_terms_and_parsed_statements(tmp_path):
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    _write_entry(
+        tmp_path,
+        "people",
+        "bob",
+        match_terms=["Bob", "Robert"],
+        body="Bob kept a journal.\n\n[inferred] Bob likely wrote most nights.",
+    )
+    client = _client(repository)
+
+    body = client.get("/api/subjects/SUB-people/entries/bob").json()
+
+    assert body == {
+        "id": "SUB-people/bob",
+        "match_terms": ["Bob", "Robert"],
+        "statements": [
+            {"badge": None, "text": "Bob kept a journal."},
+            {"badge": "inferred", "text": "Bob likely wrote most nights."},
+        ],
+    }
+
+
+def test_read_entry_survives_a_renamed_entry_file(tmp_path):
+    """`load_entry` resolves by frontmatter `id`, not filename (issue #16) -
+    the same rename survival `find_entry_path` already gives every other
+    entry reader."""
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    _write_entry(tmp_path, "people", "renamed-file", id="SUB-people/bob")
+    client = _client(repository)
+
+    response = client.get("/api/subjects/SUB-people/entries/bob")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "SUB-people/bob"
+
+
+def test_read_entry_for_an_unknown_subject_is_a_404(tmp_path):
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    client = _client(repository)
+
+    response = client.get("/api/subjects/SUB-nonexistent/entries/bob")
+
+    assert response.status_code == 404
+    assert "SUB-nonexistent" in response.json()["detail"]
+
+
+def test_read_entry_for_an_unknown_entry_is_a_404(tmp_path):
+    repository = Repository(root=tmp_path)
+    write_builtin_subjects(repository)
+    client = _client(repository)
+
+    response = client.get("/api/subjects/SUB-people/entries/nonexistent")
+
+    assert response.status_code == 404
+    assert "SUB-people/nonexistent" in response.json()["detail"]
+
+
+def test_read_entry_over_an_unseeded_repository_is_a_404_not_a_crash(tmp_path):
+    """No `memoria seed-subjects` run yet, and no `subjects/` directory at
+    all - the honest-empty-state discipline #64 gives every other read,
+    landing here as a 404 rather than an unhandled exception."""
+    repository = Repository(root=tmp_path)
+    client = _client(repository)
+
+    response = client.get("/api/subjects/SUB-people/entries/bob")
+
+    assert response.status_code == 404
+
+
 # --- serving the built ui/ client -------------------------------------------
 
 

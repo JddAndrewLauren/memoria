@@ -202,6 +202,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/subjects/{subject_id}/entries/{entry_slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Entry
+         * @description Read one entry: #64's third subject read, built here for #148.
+         *
+         *     `GET /api/read?ref=SUB-x/y` (#25) already serves this same entry, but as
+         *     the raw file verbatim, frontmatter included - the MCP tool surface's "the
+         *     entry, verbatim" contract (`docs/tool-surface.md`), reached through a
+         *     reference for the slide-over citation panel's backlink navigation. That
+         *     is a different read from this one: the `SUBJECTS` tree needs an entry
+         *     shaped like its `list subjects`/`list a subject's entries` siblings -
+         *     parsed fields, not a raw blob - the same way `read_source` parses a
+         *     record into paragraphs rather than pointing callers at `raw_source`.
+         *     `load_entry` survives a renamed entry file the same way `find_entry_path`
+         *     does (issue #16); a missing subject or entry is `SubjectError`, mapped to
+         *     404 rather than the honest-empty-state `list_entries` gives a *known*
+         *     subject with no entries.
+         */
+        get: operations["read_entry_api_subjects__subject_id__entries__entry_slug__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/search": {
         parameters: {
             query?: never;
@@ -296,6 +329,28 @@ export interface components {
             linked_anchor: string;
             /** Text */
             text: string;
+        };
+        /**
+         * EntryDetail
+         * @description One entry read in full - #64's third subject read (#148): frontmatter
+         *     plus its body, parsed into ``statements`` the same way ``SourceDetail``
+         *     parses a record into ``paragraphs`` rather than serving one raw blob.
+         *
+         *     Distinct from ``GET /api/read?ref=SUB-x/y`` (#25's ``CitationOut``),
+         *     which serves the entry's raw file verbatim, frontmatter included - the
+         *     MCP tool surface's "the entry, verbatim" contract
+         *     (``docs/tool-surface.md``), reached through a reference for the
+         *     slide-over citation panel's backlink navigation. This is the `SUBJECTS`
+         *     tree's own read, shaped like its ``SubjectSummary``/``EntrySummary``
+         *     siblings rather than conflated with that one.
+         */
+        EntryDetail: {
+            /** Id */
+            id: string;
+            /** Match Terms */
+            match_terms: string[];
+            /** Statements */
+            statements: components["schemas"]["StatementOut"][];
         };
         /** EntryListResponse */
         EntryListResponse: {
@@ -497,6 +552,21 @@ export interface components {
             original_file: string;
             /** Original Locator */
             original_locator: string;
+        };
+        /**
+         * StatementOut
+         * @description One paragraph of an entry's body, with its badge if it has one.
+         *
+         *     Mirrors ``memoria.subjects.Statement`` field for field. ``badge`` is
+         *     ``None`` for author testimony - the absence of a badge *is* the
+         *     attribution (part 06 §9.5) - never re-derived by a consumer as "no
+         *     badge shown".
+         */
+        StatementOut: {
+            /** Badge */
+            badge: string | null;
+            /** Text */
+            text: string;
         };
         /** SubjectListResponse */
         SubjectListResponse: {
@@ -756,6 +826,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EntryListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_entry_api_subjects__subject_id__entries__entry_slug__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subject_id: string;
+                entry_slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntryDetail"];
                 };
             };
             /** @description Validation Error */
