@@ -163,6 +163,17 @@ PROVENANCE_PREFIX = "— "
 
 _DECISION_ID = re.compile(r"^DEC-(\d{4})$")
 _DECISION_ENTRY = re.compile(r'<a id="(?P<anchor>dec-\d{4})"></a>\n\n## (?P<id>DEC-\d{4})')
+# One whole block as `record_decision`/`record_question` write it, for the
+# list reads below: the text runs to the first blank line before a citation
+# line, so a decision whose own text carries blank lines is still one entry.
+_DECISION_BLOCK = re.compile(
+    r'<a id="dec-\d{4}"></a>\n\n## (?P<id>DEC-\d{4})\n\n'
+    r"\[author\] (?P<text>.*?)\n\n— (?P<citation>\S+)\n",
+    re.DOTALL,
+)
+_QUESTION_BLOCK = re.compile(
+    r"\[open\] (?P<text>.*?)\n\n— (?P<citation>\S+)\n", re.DOTALL
+)
 _RESEARCH_MEMO_ID = re.compile(r"^RES-(\d{8})-(\d{3})$")
 
 
@@ -356,6 +367,26 @@ def read_decision(repository: Repository, decision_id: str) -> str:
     raise RecordExtractorError(f"no such decision: {decision_id}")
 
 
+def list_decisions(repository: Repository) -> tuple[DecisionRecord, ...]:
+    """Every decision in ``decisions.md``, in file order - the read the
+    Section view (#43) composes its ``DECISIONS`` card from, by the session
+    each one cites, rather than from any section-held state. Parsed with
+    the same entry grammar ``read_decision`` uses, text unescaped the same
+    way; a block this module did not write (no ``[author]`` line, no
+    citation) is not a decision and is skipped rather than half-read."""
+    path = repository.root / DECISIONS_FILENAME
+    if not path.is_file():
+        return ()
+    return tuple(
+        DecisionRecord(
+            id=match.group("id"),
+            citation=match.group("citation"),
+            text=html.unescape(match.group("text")),
+        )
+        for match in _DECISION_BLOCK.finditer(path.read_text(encoding="utf-8"))
+    )
+
+
 # --- questions (the queue) -----------------------------------------------------
 
 
@@ -388,6 +419,21 @@ def record_question(
     block = f"[open] {text}\n\n— {citation}\n\n"
     _append(repository, QUESTIONS_FILENAME, block, actor)
     return QuestionRecord(citation=citation, text=text)
+
+
+def list_questions(repository: Repository) -> tuple[QuestionRecord, ...]:
+    """Every open item in ``questions.md``, in file order - the Section
+    view's ``OPEN QUESTION`` card (#43) reads these by the session each one
+    cites, the same way ``list_decisions`` serves the decisions."""
+    path = repository.root / QUESTIONS_FILENAME
+    if not path.is_file():
+        return ()
+    return tuple(
+        QuestionRecord(
+            citation=match.group("citation"), text=html.unescape(match.group("text"))
+        )
+        for match in _QUESTION_BLOCK.finditer(path.read_text(encoding="utf-8"))
+    )
 
 
 # --- badged statements into entry bodies (the write matrix) -------------------

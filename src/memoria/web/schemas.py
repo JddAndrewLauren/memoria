@@ -456,3 +456,172 @@ class SearchResponse(BaseModel):
 
     results: list[SearchResultOut]
     is_built: bool
+
+
+# --- the manuscript: outline, Section, Review (#43) ---------------------------
+
+
+class OutlineSectionOut(BaseModel):
+    """One section row of the `MANUSCRIPT` tree. ``excerpt`` is the first
+    line of the brief, shortened - a brief has no title field (part 04
+    §2.1), so the tree shows its prose rather than inventing a name.
+    ``has_draft`` tells a planned section (brief written, draft empty -
+    CONTEXT.md's "Outline") from one with prose."""
+
+    id: str
+    number: int
+    excerpt: str
+    has_draft: bool
+
+
+class OutlineChapterOut(BaseModel):
+    id: str
+    number: int
+    excerpt: str
+    sections: list[OutlineSectionOut]
+
+
+class ManuscriptOutline(BaseModel):
+    """The `MANUSCRIPT` tree: the ordered tree of chapters and sections,
+    which *is* the outline - there is no outline file (part 04 §2.1).
+    ``is_built`` is whether ``chapters/`` exists at all, the same
+    "which empty is this" flag the other three trees carry (#157)."""
+
+    chapters: list[OutlineChapterOut]
+    is_built: bool
+
+
+class NotCurrentOut(BaseModel):
+    """One not-current judgement against a paragraph: the entry it was
+    checked against, the judgement kind (``engagement`` or
+    ``audit_verdict``), and the cause - one of ``memoria.audit``'s
+    ``STALENESS_CAUSES``, rendered as it is rather than mapped."""
+
+    entry_id: str
+    kind: str
+    cause: str
+
+
+class SectionParagraphOut(BaseModel):
+    """One draft paragraph, positionally numbered for this read only (part
+    04 §4.1: no durable identity), with every not-current judgement the
+    staleness map holds against it - what the surface tints, and why."""
+
+    index: int
+    text: str
+    not_current: list[NotCurrentOut]
+
+
+class ScopeEntryOut(BaseModel):
+    """One entry the brief's declared scope resolved to, and which of its
+    match terms (or its own name) the brief text contains - the "how" half
+    of ``memoria.scope.ScopeResolution``'s report."""
+
+    entry_id: str
+    matched_by: list[str]
+
+
+class DecisionOut(BaseModel):
+    id: str
+    text: str
+    citation: str
+
+
+class QuestionOut(BaseModel):
+    text: str
+    citation: str
+
+
+class SectionView(BaseModel):
+    """The Section surface (part 19 §19.5 as amended by §19.11): the brief
+    (``PURPOSE`` - the one card that reads a file), the draft with its
+    not-current tint, the entries in scope, and the decisions and open
+    questions composed from the sessions that touched this section.
+
+    No ``checkpoint``, no ``next``, no ``impacts`` field, and never will be:
+    those are withdrawn state (part 12 §39), not empty state.
+    ``sessions`` names the session records the decisions and questions
+    were composed from, so the composition is legible on the surface.
+    """
+
+    id: str
+    chapter_id: str
+    chapter_number: int
+    section_number: int
+    brief: str
+    unconfirmed: bool
+    has_draft: bool
+    paragraphs: list[SectionParagraphOut]
+    scope: list[ScopeEntryOut]
+    scope_empty: bool
+    sessions: list[str]
+    decisions: list[DecisionOut]
+    questions: list[QuestionOut]
+
+
+class DisagreementMemberOut(BaseModel):
+    """One member of a finding's disagreement set - ``kind`` is one of
+    ``passage``, ``entry``, ``source``, ``decision``, ``brief``; ``ref`` is
+    that kind's own reference form (``memoria.audit.DisagreementMember``)."""
+
+    kind: str
+    ref: str
+
+
+class FindingOut(BaseModel):
+    """One finding, as the audit recorded it (part 06 §8.10): a disagreement
+    set, prose stating how they disagree, a confidence, the subject that
+    raised it, and an optional proposed rewrite. ``resolutions`` is read off
+    the set's shape by ``Finding.available_resolutions`` - never stored,
+    never a category. ``paragraph_index``/``paragraph_text`` locate it for
+    this read only."""
+
+    paragraph_index: int
+    paragraph_text: str
+    entry_id: str
+    subject_id: str
+    confidence: str
+    statement: str
+    disagreement_set: list[DisagreementMemberOut]
+    resolutions: list[str]
+    patch: str | None = None
+
+
+class ReviewOut(BaseModel):
+    """The Review surface: the results of an audit the author ran on one
+    section, and nothing else (part 19 §19.11's amendment of §19.3).
+
+    ``findings`` is ordered by confidence. ``verdicts_current`` and
+    ``verdicts_not_current`` count the section's (paragraph, entry) audit
+    verdicts on each side of the staleness map: zero current is a section
+    no audit has been run over, which the surface tells apart from an audit
+    that found nothing. ``token`` is the draft's staleness token for
+    ``PUT .../paragraphs/{index}`` to present back; ``None`` when the
+    section has no draft.
+    """
+
+    section_id: str
+    chapter_number: int
+    section_number: int
+    findings: list[FindingOut]
+    verdicts_current: int
+    verdicts_not_current: int
+    token: str | None = None
+
+
+class RewriteUpdate(BaseModel):
+    """The author applying a proposed rewrite to one paragraph - the
+    interface act part 10 §19.3 names as authorization (``Apply``). ``token``
+    is what ``ReviewOut`` served, presented back unread (ADR-0003)."""
+
+    token: str
+    text: str
+
+
+class RewriteResponse(BaseModel):
+    """What an accepted rewrite wrote, and a fresh token for the draft the
+    write has just changed."""
+
+    paragraph_index: int
+    text: str
+    token: str

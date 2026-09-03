@@ -37,7 +37,10 @@ from memoria.records import read as read_ref
 from memoria.records import read_raw_source as read_raw_source_core
 from memoria.records import real_paragraphs
 from memoria.records import reveal_original_source as reveal_original_source_core
+from memoria.manuscript import ManuscriptError
 from memoria.repository import NoEvidenceRoot, Repository
+from memoria.review import ReviewError, apply_rewrite, review_section
+from memoria.section import compose_section, outline as manuscript_outline
 from memoria.subjects import (
     Entry,
     OverlayAct,
@@ -55,21 +58,35 @@ from memoria.web.schemas import (
     AppearanceOut,
     AppearancesResponse,
     CitationOut,
+    DecisionOut,
+    DisagreementMemberOut,
     EntryDetail,
     EntryListResponse,
     EntrySummary,
+    FindingOut,
     GatheredSetResponse,
     GatheredSourceOut,
     LocalityOut,
+    ManuscriptOutline,
     MatchTermsResponse,
     MatchTermsUpdate,
+    NotCurrentOut,
+    OutlineChapterOut,
+    OutlineSectionOut,
     OverlayActOut,
     Paragraph,
+    QuestionOut,
     RawSourceResponse,
     ReadOverlayOut,
     RevealSourceResponse,
+    ReviewOut,
+    RewriteResponse,
+    RewriteUpdate,
+    ScopeEntryOut,
     SearchResponse,
     SearchResultOut,
+    SectionParagraphOut,
+    SectionView,
     SourceDetail,
     SourceListResponse,
     SourceSummary,
@@ -583,4 +600,180 @@ def search(
             for result in results
         ],
         is_built=index_is_built(repository),
+    )
+
+
+# --- the manuscript: outline, Section, Review (#43) ---------------------------
+#
+# Reads plus explicit acts, and no model driver (#43): every route below
+# calls ``memoria.section`` or ``memoria.review`` and shapes the value. The
+# one write, ``apply_rewrite``, is the author's own act through the single
+# write path (ADR-0003), exactly the shape ``update_match_terms`` already
+# has. Nothing here can run an audit or record one - ``test_audit.py``'s
+# sweep refuses a call to the recording functions from this file.
+
+
+@router.get("/manuscript")
+def read_manuscript(repository: Repository = Depends(get_repository)) -> ManuscriptOutline:
+    """The `MANUSCRIPT` tree: chapters and sections in outline order, each
+    labelled by its brief's first line. Honest about an empty repository
+    through ``is_built`` (#157's convention), the way the other trees are.
+    """
+    result = manuscript_outline(repository)
+    return ManuscriptOutline(
+        chapters=[
+            OutlineChapterOut(
+                id=chapter.id,
+                number=chapter.number,
+                excerpt=chapter.excerpt,
+                sections=[
+                    OutlineSectionOut(
+                        id=section.id,
+                        number=section.number,
+                        excerpt=section.excerpt,
+                        has_draft=section.has_draft,
+                    )
+                    for section in chapter.sections
+                ],
+            )
+            for chapter in result.chapters
+        ],
+        is_built=result.is_built,
+    )
+
+
+@router.get("/sections/{section_id}")
+def read_section(
+    section_id: str, repository: Repository = Depends(get_repository)
+) -> SectionView:
+    """The Section surface, composed at this call (part 19 §19.5 / §19.11):
+    the brief, the draft with each paragraph's not-current judgements, the
+    entries in scope, and the decisions and questions from the sessions
+    that touched it. Nothing here is stored section state - see
+    ``memoria.section``."""
+    try:
+        view = compose_section(repository, section_id)
+    except ManuscriptError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return SectionView(
+        id=view.id,
+        chapter_id=view.chapter_id,
+        chapter_number=view.chapter_number,
+        section_number=view.section_number,
+        brief=view.brief,
+        unconfirmed=view.unconfirmed,
+        has_draft=view.has_draft,
+        paragraphs=[
+            SectionParagraphOut(
+                index=paragraph.index,
+                text=paragraph.text,
+                not_current=[
+                    NotCurrentOut(entry_id=item.entry_id, kind=item.kind, cause=item.cause)
+                    for item in paragraph.not_current
+                ],
+            )
+            for paragraph in view.paragraphs
+        ],
+        scope=[
+            ScopeEntryOut(entry_id=entry.entry_id, matched_by=list(entry.matched_by))
+            for entry in view.scope
+        ],
+        scope_empty=view.scope_empty,
+        sessions=list(view.sessions),
+        decisions=[
+            DecisionOut(id=decision.id, text=decision.text, citation=decision.citation)
+            for decision in view.decisions
+        ],
+        questions=[
+            QuestionOut(text=question.text, citation=question.citation)
+            for question in view.questions
+        ],
+    )
+
+
+@router.get("/sections/{section_id}/review")
+def read_review(
+    section_id: str, repository: Repository = Depends(get_repository)
+) -> ReviewOut:
+    """The Review surface: the results of the audit the author ran on this
+    section - a read over the verdicts a session recorded, and nothing
+    else. Findings arrive as disagreement sets with the resolutions their
+    shape admits; the resolution list is read off the set, never a stored
+    label (part 06 §8.10)."""
+    try:
+        review = review_section(repository, section_id)
+    except ManuscriptError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ReviewOut(
+        section_id=review.section_id,
+        chapter_number=review.chapter_number,
+        section_number=review.section_number,
+        findings=[
+            FindingOut(
+                paragraph_index=item.paragraph_index,
+                paragraph_text=item.paragraph_text,
+                entry_id=item.entry_id,
+                subject_id=item.finding.subject_id,
+                confidence=item.finding.confidence,
+                statement=item.finding.statement,
+                disagreement_set=[
+                    DisagreementMemberOut(kind=member.kind, ref=member.ref)
+                    for member in item.finding.disagreement_set
+                ],
+                resolutions=list(item.finding.available_resolutions),
+                patch=item.finding.patch,
+            )
+            for item in review.findings
+        ],
+        verdicts_current=review.verdicts_current,
+        verdicts_not_current=review.verdicts_not_current,
+        token=review.token,
+    )
+
+
+@router.put("/sections/{section_id}/paragraphs/{paragraph_index}")
+def rewrite_paragraph(
+    section_id: str,
+    paragraph_index: int,
+    update: RewriteUpdate,
+    repository: Repository = Depends(get_repository),
+) -> RewriteResponse:
+    """Apply a proposed rewrite to one paragraph of a section's draft - the
+    author's explicit act from Review, and the surface's one write.
+
+    Through the single write path (ADR-0003), the same three outcomes
+    ``update_match_terms`` has: **409** for a draft changed since Review
+    read it (nothing written, nothing merged; the client re-reads for the
+    current draft and a fresh token), **400** for a paragraph the draft
+    does not have or an empty rewrite, **500** for a write that cannot be
+    attempted. Commits as the author - ``repository_actor``, never a name
+    in the payload (ADR-0002) - because the click is the authorization
+    (part 10 §19.3) and the applied prose is now the author's, the same
+    class of thing as an edit made in Obsidian. The only file this can
+    reach is ``draft.md``; no route edits a brief.
+    """
+    try:
+        actor = repository_actor(repository)
+        result = apply_rewrite(
+            repository, section_id, paragraph_index, update.token, update.text, actor
+        )
+    except ManuscriptError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ReviewError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except WriteError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if isinstance(result, Rejected):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{result.path} changed since it was read - nothing was "
+                "written. Re-read the review and try again."
+            ),
+        )
+    review = review_section(repository, section_id)
+    return RewriteResponse(
+        paragraph_index=paragraph_index,
+        text=update.text.strip(),
+        token=review.token or "",
     )

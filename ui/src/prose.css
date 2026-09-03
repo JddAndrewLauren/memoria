@@ -55,3 +55,15 @@
   padding-bottom: 0.4em;
   opacity: 1;
 }
+
+/* A not-current paragraph in the Section view (#43, part 06 §8.12): a
+   quiet tint, identical whichever of the five causes applies - the cause
+   is carried in the row beneath, not in the colour. Same inset-rule shape
+   as `.cited`, in the amber the design gives "needs attention". */
+.prose p.not-current {
+  border-radius: 4px;
+  background: var(--color-amber-tint-soft);
+  box-shadow: inset 3px 0 0 var(--color-amber);
+  padding-top: 0.4em;
+  padding-bottom: 0.4em;
+}
