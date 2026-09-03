@@ -14,6 +14,8 @@ export type LocalityOut = components["schemas"]["LocalityOut"];
 export type RevealSourceResponse = components["schemas"]["RevealSourceResponse"];
 export type SubjectSummary = components["schemas"]["SubjectSummary"];
 export type EntrySummary = components["schemas"]["EntrySummary"];
+export type EntryDetail = components["schemas"]["EntryDetail"];
+export type StatementOut = components["schemas"]["StatementOut"];
 export type SearchResultOut = components["schemas"]["SearchResultOut"];
 export type EditorialRecordOut = components["schemas"]["EditorialRecordOut"];
 export type ReadOverlayOut = components["schemas"]["ReadOverlayOut"];
@@ -93,6 +95,14 @@ export function listSubjects(): Promise<{ items: SubjectSummary[] }> {
 
 export function listEntries(subjectId: string): Promise<{ items: EntrySummary[] }> {
   return get(`/api/subjects/${encodeURIComponent(subjectId)}/entries`);
+}
+
+// The `SUBJECTS` tree's own entry read (#148) - parsed statements, not the
+// raw file `readRef` serves for the citation panel's SUB-x/y backlinks.
+export function readEntry(subjectId: string, entrySlug: string): Promise<EntryDetail> {
+  return get(
+    `/api/subjects/${encodeURIComponent(subjectId)}/entries/${encodeURIComponent(entrySlug)}`,
+  );
 }
 
 export function search(query: string): Promise<{ results: SearchResultOut[] }> {

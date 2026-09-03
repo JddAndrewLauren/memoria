@@ -1,6 +1,7 @@
-"""The HTTP surface #64, #24, #25 and #65 build: list sources, read one source,
-raw source, resolve a reference to a citation, search, list subjects, list one
-subject's entries - plus one connection fact (locality) and one action (reveal).
+"""The HTTP surface #64, #24, #25, #65 and #148 build: list sources, read one
+source, raw source, resolve a reference to a citation, search, list subjects,
+list one subject's entries, read one entry - plus one connection fact
+(locality) and one action (reveal).
 
 Each route calls ``memoria.*`` and shapes the result into a typed response
 model - it holds no rule the CLI or the MCP server does not, opens no
@@ -25,10 +26,17 @@ from memoria.records import read_raw_source as read_raw_source_core
 from memoria.records import real_paragraphs
 from memoria.records import reveal_original_source as reveal_original_source_core
 from memoria.repository import NoEvidenceRoot, Repository
-from memoria.subjects import load_all_entries, load_all_subjects
+from memoria.subjects import (
+    SubjectError,
+    load_all_entries,
+    load_all_subjects,
+    load_entry,
+    parse_statements,
+)
 from memoria.web.dependencies import get_repository
 from memoria.web.schemas import (
     CitationOut,
+    EntryDetail,
     EntryListResponse,
     EntrySummary,
     LocalityOut,
@@ -41,6 +49,7 @@ from memoria.web.schemas import (
     SourceDetail,
     SourceListResponse,
     SourceSummary,
+    StatementOut,
     SubjectListResponse,
     SubjectSummary,
 )
@@ -293,6 +302,39 @@ def list_entries(
         if entry_id.split("/", 1)[0] == subject_id
     ]
     return EntryListResponse(items=items)
+
+
+@router.get("/subjects/{subject_id}/entries/{entry_slug}")
+def read_entry(
+    subject_id: str, entry_slug: str, repository: Repository = Depends(get_repository)
+) -> EntryDetail:
+    """Read one entry: #64's third subject read, built here for #148.
+
+    `GET /api/read?ref=SUB-x/y` (#25) already serves this same entry, but as
+    the raw file verbatim, frontmatter included - the MCP tool surface's "the
+    entry, verbatim" contract (`docs/tool-surface.md`), reached through a
+    reference for the slide-over citation panel's backlink navigation. That
+    is a different read from this one: the `SUBJECTS` tree needs an entry
+    shaped like its `list subjects`/`list a subject's entries` siblings -
+    parsed fields, not a raw blob - the same way `read_source` parses a
+    record into paragraphs rather than pointing callers at `raw_source`.
+    `load_entry` survives a renamed entry file the same way `find_entry_path`
+    does (issue #16); a missing subject or entry is `SubjectError`, mapped to
+    404 rather than the honest-empty-state `list_entries` gives a *known*
+    subject with no entries.
+    """
+    try:
+        entry = load_entry(repository, subject_id, entry_slug)
+    except SubjectError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return EntryDetail(
+        id=entry.id,
+        match_terms=entry.match_terms,
+        statements=[
+            StatementOut(badge=statement.badge, text=statement.text)
+            for statement in parse_statements(entry.body)
+        ],
+    )
 
 
 @router.get("/search")
