@@ -86,15 +86,17 @@ It needs no evidence corpus and no environment variables.
 ```
 scripts/gate-m3.sh
 scripts/gate-m4.sh
+scripts/gate-m5.sh
 ```
 
 Separate from the standing suites above, and run by name rather than every
 time. Each drives its milestone's gate (`docs/gates/m3-gate-walk.md`,
-`docs/gates/m4-gate-walk.md`) over a throwaway repository built from
-`gate/corpus/` - the M3 walk in a real browser, the M4 walk half in the core
-and half in a browser - and writes what it observed to `gate/last-run.md`.
-About four seconds and about thirty. They need a Chromium for Playwright
-once: `cd ui && npx playwright install chromium`.
+`docs/gates/m4-gate-walk.md`, `docs/gates/m5-gate-walk.md`) over a throwaway
+repository built from `gate/corpus/` - the M3 walk in a real browser, the M4
+and M5 walks in the core with the browser looking between the acts - and
+writes what it observed to `gate/last-run.md`. About four seconds, about
+thirty, and about a minute. They need a Chromium for Playwright once:
+`cd ui && npx playwright install chromium`.
 
 `CLAUDE.md` keeps browsers out of routine work; `gate/README.md` explains the
 pattern and why the walk exists beside the vitest suite rather than inside it.

@@ -576,7 +576,10 @@ class FindingOut(BaseModel):
     raised it, and an optional proposed rewrite. ``resolutions`` is read off
     the set's shape by ``Finding.available_resolutions`` - never stored,
     never a category. ``paragraph_index``/``paragraph_text`` locate it for
-    this read only."""
+    this read only. ``entry_token`` is the staleness token of the entry the
+    finding names, minted at this read for ``POST .../settlements`` to
+    present back (ADR-0003): a settlement lands on the entry, not the
+    draft."""
 
     paragraph_index: int
     paragraph_text: str
@@ -587,6 +590,7 @@ class FindingOut(BaseModel):
     disagreement_set: list[DisagreementMemberOut]
     resolutions: list[str]
     patch: str | None = None
+    entry_token: str | None = None
 
 
 class ReviewOut(BaseModel):
@@ -599,7 +603,9 @@ class ReviewOut(BaseModel):
     no audit has been run over, which the surface tells apart from an audit
     that found nothing. ``token`` is the draft's staleness token for
     ``PUT .../paragraphs/{index}`` to present back; ``None`` when the
-    section has no draft.
+    section has no draft. ``sessions`` is every session whose ledger served
+    a read of this section - the provenance a settlement names (#33: the
+    session it happened in, a bare ``SES-`` id, never a turn).
     """
 
     section_id: str
@@ -609,6 +615,7 @@ class ReviewOut(BaseModel):
     verdicts_current: int
     verdicts_not_current: int
     token: str | None = None
+    sessions: list[str] = []
 
 
 class RewriteUpdate(BaseModel):
@@ -618,6 +625,33 @@ class RewriteUpdate(BaseModel):
 
     token: str
     text: str
+
+
+class SettleRequest(BaseModel):
+    """The author settling one finding from Review - the interface act part
+    06 §8.7 names as click-authorized (``Settle``). ``disagreement_set`` is
+    the finding's own, sent back as served; ``side`` is the member kind
+    chosen (``entry``, ``source`` or ``passage``); ``session_id`` is the
+    session the act happened in; ``entry_token`` is what ``FindingOut``
+    served for the entry, presented back unread (ADR-0003)."""
+
+    entry_id: str
+    disagreement_set: list[DisagreementMemberOut]
+    side: str
+    proposition: str
+    reason: str
+    session_id: str
+    entry_token: str
+
+
+class SettlementOut(BaseModel):
+    """What a settlement wrote: the entry it landed on, the ``[settled]``
+    line as rendered into the audit-visible body, and the claim it accreted
+    into."""
+
+    entry_id: str
+    settled_line: str
+    claim_id: str
 
 
 class RewriteResponse(BaseModel):

@@ -898,7 +898,10 @@ and Memoria does not invent why (part 07 §40). An AI commit's `authorized-by:`
 trailer names the session turn; the turn's text is quoted **verbatim** once the
 session is derived (`derive-session`), and reported as not yet derived before;
 `assembled from` is the session's context manifest (#29) — entries resolved,
-then records loaded — built live from `events.jsonl`. Lines with no commit yet
+then records loaded, each taking in what the session read *and* what assembly
+(#38) resolved for it, since a draft authorized from the working context was
+written from the entries and sources the `assemble` line names whether or not
+the session went on to read them — built live from `events.jsonl`. Lines with no commit yet
 are counted as uncommitted, not traced. A commit with neither trailer is named
 as such: `memoria validate` fails it.
 
