@@ -263,8 +263,8 @@ def _to_citation(ref: str, result: Read) -> CitationOut:
 
 def _is_citable(reference: references.Reference) -> bool:
     """Whether ``reference`` is one of the two shapes the citation panel
-    actually cites - a ``SRC-`` record or paragraph, or a ``SUB-x/y`` entry -
-    rather than the wider set ``memoria.records.read`` resolves for the MCP
+    actually cites - a ``SRC-`` record or paragraph, a ``SUB-x/y`` entry, or
+    (#34) one ``SES-...#T`` transcript turn - rather than the wider set ``memoria.records.read`` resolves for the MCP
     tool surface (chapters, sections, changes, sessions, decisions, research
     memos, a bare ``SUB-`` subject, or a repository path). #145: that wider
     contract was never something the panel needed, and left standing it is
@@ -273,10 +273,13 @@ def _is_citable(reference: references.Reference) -> bool:
     """
     if isinstance(reference, references.SourceReference):
         return True
-    return (
-        isinstance(reference, references.SubjectReference)
-        and reference.entry_slug is not None
-    )
+    if isinstance(reference, references.SubjectReference):
+        return reference.entry_slug is not None
+    # #34: a decision or question cites `SES-...#T017`, and the Section
+    # view's "see the exact turn" is this panel opening on that turn. A
+    # *bare* session stays refused - the panel cites what was said in one
+    # turn, never a whole transcript with its manifest.
+    return isinstance(reference, references.SessionReference) and reference.turn is not None
 
 
 @router.get("/read")
@@ -306,7 +309,7 @@ def read(ref: str, repository: Repository = Depends(get_repository)) -> Citation
         raise HTTPException(
             status_code=404,
             detail=f"{ref!r} is not a citable reference: /api/read serves "
-            "SRC- records and paragraphs, and SUB-x/y entries, only",
+            "SRC- records and paragraphs, SUB-x/y entries, and SES-...#T turns, only",
         )
     try:
         result = read_ref(repository, ref)

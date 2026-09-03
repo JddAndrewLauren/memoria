@@ -11,6 +11,7 @@ import {
   type SectionParagraphOut,
 } from "../api/client";
 import { Badge } from "../components/Badge";
+import { useCitationPanel } from "../lib/citationPanel";
 
 // The five staleness causes `memoria.audit.STALENESS_CAUSES` names (part 06
 // §8.12), worded for the margin. Anything the server sends that is not one
@@ -224,12 +225,32 @@ function Card({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+/**
+ * "See the exact turn" (part 19 §19.5/§19.6, #34): the citation is a chip
+ * that opens the slide-over on that transcript turn, carrying the record's
+ * own words so the panel lands on the sentence they were said in. Opening
+ * the panel never navigates, so the section underneath keeps its place.
+ */
+function TurnChip({ citation, highlight }: { citation: string; highlight: string }) {
+  const { open: openCitation } = useCitationPanel();
+  return (
+    <button
+      type="button"
+      onClick={() => openCitation(citation, { highlight })}
+      className="rounded-chip border border-border px-2 py-0.5 font-mono text-[11px] text-secondary hover:bg-hover"
+    >
+      {citation}
+    </button>
+  );
+}
+
 function DecisionRow({ decision }: { decision: DecisionOut }) {
   return (
     <li className="text-sm text-body">
       <p>{decision.text}</p>
-      <p className="mt-1 font-mono text-[11px] text-muted">
-        {decision.id} · {decision.citation}
+      <p className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[11px] text-muted">
+        <span>{decision.id}</span>
+        <TurnChip citation={decision.citation} highlight={decision.text} />
       </p>
     </li>
   );
@@ -239,7 +260,9 @@ function QuestionRow({ question }: { question: QuestionOut }) {
   return (
     <li className="text-sm text-body">
       <p>{question.text}</p>
-      <p className="mt-1 font-mono text-[11px] text-muted">{question.citation}</p>
+      <p className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[11px] text-muted">
+        <TurnChip citation={question.citation} highlight={question.text} />
+      </p>
     </li>
   );
 }

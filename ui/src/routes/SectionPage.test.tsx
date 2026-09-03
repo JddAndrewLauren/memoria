@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import SectionPage from "./SectionPage";
+import { CitationPanelProvider } from "../components/CitationPanel";
 
 const SECTION = {
   id: "SEC-0003",
@@ -43,6 +44,19 @@ const SECTION = {
   ],
 };
 
+// What `/api/read?ref=SES-...#T017` serves (#34): the turn, and nothing
+// else. The decision's sentence sits in the middle so "lands on the
+// sentence" is a real question and not "the turn is the sentence".
+const TURN_017 = {
+  ref: "SES-20260912-1432-abcdef#T017",
+  citation: "SES-20260912-1432-abcdef#T017",
+  text: "I have been going back and forth on this. Do not reveal Alice's later account until §8.5. The reader needs to sit with Bob's version first.",
+  record: null,
+  paragraph: null,
+  anchor: null,
+  overlay: null,
+};
+
 function stubApi(section: Record<string, unknown> = SECTION) {
   vi.stubGlobal(
     "fetch",
@@ -50,6 +64,9 @@ function stubApi(section: Record<string, unknown> = SECTION) {
       const url = String(input);
       if (url.includes("/api/sections/")) {
         return new Response(JSON.stringify(section), { status: 200 });
+      }
+      if (url.includes("/api/read?ref=SES-20260912-1432-abcdef%23T017")) {
+        return new Response(JSON.stringify(TURN_017), { status: 200 });
       }
       return new Response(JSON.stringify({ detail: `unexpected ${url}` }), { status: 404 });
     }),
@@ -61,9 +78,12 @@ function renderSection() {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/sections/SEC-0003"]}>
-        <Routes>
-          <Route path="/sections/:sectionId" element={<SectionPage />} />
-        </Routes>
+        <CitationPanelProvider>
+          <Routes>
+            <Route path="/sections/:sectionId" element={<SectionPage />} />
+            <Route path="*" element={<p>navigated away</p>} />
+          </Routes>
+        </CitationPanelProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -107,9 +127,33 @@ describe("the Section view", () => {
     renderSection();
 
     expect(await screen.findByText(/Do not reveal Alice's later account/)).toBeInTheDocument();
-    expect(screen.getByText(/DEC-0088 · SES-20260912-1432-abcdef#T017/)).toBeInTheDocument();
+    expect(screen.getByText("DEC-0088")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "SES-20260912-1432-abcdef#T017" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Did Bob receive the July 14 document?")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "SES-20260912-1432-abcdef#T019" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("SES-20260912-1432-abcdef")).toBeInTheDocument();
+  });
+
+  it("opens a decision's citation in the slide-over on the sentence it was decided in, without navigating (#34)", async () => {
+    renderSection();
+    await screen.findByText(/Do not reveal Alice's later account/);
+
+    fireEvent.click(screen.getByRole("button", { name: "SES-20260912-1432-abcdef#T017" }));
+
+    const panel = await screen.findByRole("dialog", { name: "Citation" });
+    expect(await within(panel).findByText(/going back and forth/)).toBeInTheDocument();
+    const cited = within(panel).getByTestId("cited-sentence");
+    expect(cited.textContent?.trim()).toBe("Do not reveal Alice's later account until §8.5.");
+    expect(within(panel).getAllByTestId("cited-sentence")).toHaveLength(1);
+    // The mechanism behind "keeps my place": the section is still mounted
+    // underneath, and no route changed. Whether the reader's scroll offset
+    // survived is the browser walk's question (docs/gates/m4-gate-walk.md).
+    expect(screen.queryByText("navigated away")).not.toBeInTheDocument();
+    expect(screen.getByText(/first point at which the narrator/)).toBeInTheDocument();
   });
 
   it("displays no checkpoint and no unresolved-impacts state", async () => {
