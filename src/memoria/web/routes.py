@@ -1112,12 +1112,9 @@ def _model(repository: Repository) -> ModelFn:
 
 
 def _spend(spend: drivers.Spend) -> SpendOut:
-    return SpendOut(
-        calls=spend.calls,
-        input_tokens=spend.input_tokens,
-        output_tokens=spend.output_tokens,
-        model=spend.model,
-    )
+    # Calls and model only: part 14 §40 keeps the other figure off this
+    # surface (see ``SpendOut``); the ledger holds it.
+    return SpendOut(calls=spend.calls, model=spend.model)
 
 
 def _rejections(rejected: tuple[drivers.Rejection, ...]) -> list[RejectionOut]:

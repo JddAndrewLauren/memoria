@@ -843,14 +843,15 @@ class RejectionOut(BaseModel):
 
 
 class SpendOut(BaseModel):
-    """What one call cost - the metered calls made and the tokens they used,
-    on the model that answered. Part 13 §24.5's "the author should be able
-    to tell whether a task is using subscription capacity or metered API
-    usage", on the surface that started the task."""
+    """What one call cost, in the units this surface may show: the metered
+    calls made, on the model that answered. Part 13 §24.5's "the author
+    should be able to tell whether a task is using subscription capacity or
+    metered API usage", on the surface that started the task - and no
+    further: part 14 §40 (as amended by ADR-0001) bans the other figure from
+    every author-facing view, so what each call cost the model stays in the
+    ledger's ``model_call`` lines and on the model-facing MCP surface."""
 
     calls: int
-    input_tokens: int
-    output_tokens: int
     model: str
 
 

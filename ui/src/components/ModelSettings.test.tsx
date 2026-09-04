@@ -50,7 +50,7 @@ function step(overrides: Partial<ExtractionRunOut>): ExtractionRunOut {
     finished: false,
     promotions: [],
     rejected: [],
-    spend: { calls: 20, input_tokens: 2000, output_tokens: 400, model: "claude-opus-5" },
+    spend: { calls: 20, model: "claude-opus-5" },
     ...overrides,
   };
 }
@@ -189,7 +189,7 @@ describe("Settings > Model", () => {
       runs: [
         step({ paragraphs_remaining: 3 }),
         step({ phase: "summaries", paragraphs_read: 0, summaries_written: 2, finished: true, promotions: ["SUB-people/bob"] }),
-        step({ phase: "done", paragraphs_read: 0, spend: { calls: 0, input_tokens: 0, output_tokens: 0, model: "" } }),
+        step({ phase: "done", paragraphs_read: 0, spend: { calls: 0, model: "" } }),
       ],
     });
     renderPanel();

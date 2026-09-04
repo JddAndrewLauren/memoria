@@ -85,7 +85,7 @@ function stubApi(
           findings: 0,
           remaining: 0,
           rejected: [],
-          spend: { calls: 3, input_tokens: 30, output_tokens: 9, model: "claude-opus-5" },
+          spend: { calls: 3, model: "claude-opus-5" },
         };
         return new Response(JSON.stringify(body), { status: 200 });
       }

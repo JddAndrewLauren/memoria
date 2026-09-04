@@ -95,7 +95,7 @@ function stubFetch(stub: Stub) {
           JSON.stringify({
             accepted: 1,
             rejected: [],
-            spend: { calls: 1, input_tokens: 400, output_tokens: 80, model: "claude-opus-5" },
+            spend: { calls: 1, model: "claude-opus-5" },
             style: stub.current,
           }),
           { status: 200 },

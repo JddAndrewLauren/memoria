@@ -66,7 +66,7 @@ const AUDIT_DONE = {
   findings: 1,
   remaining: 0,
   rejected: [],
-  spend: { calls: 2, input_tokens: 20, output_tokens: 6, model: "claude-opus-5" },
+  spend: { calls: 2, model: "claude-opus-5" },
 };
 
 const CITATION = {

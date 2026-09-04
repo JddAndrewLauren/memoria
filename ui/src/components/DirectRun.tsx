@@ -32,9 +32,11 @@ export function useModelReadiness(): { ready: boolean; settings: ModelSettingsOu
   return { ready: Boolean(query.data?.ready), settings: query.data };
 }
 
+// Calls and the model only - never a token figure, which part 14 §40 keeps
+// off every author-facing surface; the ledger holds those.
 export function describeSpend(spend: SpendOut): string {
   if (spend.calls === 0) return "no metered calls";
-  return `${spend.calls} metered ${spend.calls === 1 ? "call" : "calls"}, ${spend.input_tokens} tokens in / ${spend.output_tokens} out on ${spend.model}`;
+  return `${spend.calls} metered ${spend.calls === 1 ? "call" : "calls"} on ${spend.model}`;
 }
 
 export interface Step {

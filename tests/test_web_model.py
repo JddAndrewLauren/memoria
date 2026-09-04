@@ -200,6 +200,16 @@ def test_every_run_route_is_a_409_naming_settings_while_off(tmp_path, method, pa
     assert model.REASON_OFF in response.json()["detail"]
 
 
+def test_spend_on_this_surface_is_calls_and_model_never_a_token_figure():
+    """Part 14 §40 (ADR-0001) keeps token figures off every author-facing
+    view; the ledger's `model_call` lines hold them. `SpendOut` is the one
+    place spend reaches this surface, so it is pinned here as well as by
+    `test_context_manifest.py`'s scan of the whole package."""
+    from memoria.web.schemas import SpendOut
+
+    assert set(SpendOut.model_fields) == {"calls", "model"}
+
+
 def test_the_extraction_status_is_a_read(tmp_path):
     client = _client(_repo(tmp_path))
     body = client.get("/api/extraction").json()
@@ -222,7 +232,7 @@ def test_the_extraction_runs_in_steps_and_ledgers_under_the_servers_session(tmp_
     body = first.json()
     assert body["phase"] == "paragraphs"
     assert (body["paragraphs_read"], body["paragraphs_accepted"], body["paragraphs_remaining"]) == (1, 1, 1)
-    assert body["spend"] == {"calls": 1, "input_tokens": 7, "output_tokens": 3, "model": "fake-model"}
+    assert body["spend"] == {"calls": 1, "model": "fake-model"}
     assert body["rejected"] == []
 
     while (body := client.post("/api/extraction/run", json={"limit": 10}).json())["phase"] != "done":
