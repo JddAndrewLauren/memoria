@@ -236,7 +236,7 @@ function NewSectionForm({ onClose }: { onClose: () => void }) {
               className="w-full rounded border border-border bg-card px-2 py-1.5 font-serif text-sm text-body"
             />
           </Region>
-          <Region label="Prose" note="The section itself. Committed as yours, in one commit, when you press Write.">
+          <Region label="Prose" note="The section itself. Committed as yours, the brief and the prose each in their own commit, when you press Write.">
             <textarea
               value={draft}
               onChange={(event) => setDraft(event.target.value)}

@@ -866,6 +866,8 @@ def run_grill(
             fields[name] = text.strip()
         if done and not fields["draft"]:
             raise _Rejected("the interviewer said it was done and drafted nothing")
+        if done and not fields["brief"]:
+            raise _Rejected("the interviewer said it was done and wrote no brief")
         if not done and not fields["question"]:
             raise _Rejected("the interviewer asked nothing")
     except _Rejected as exc:

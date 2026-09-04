@@ -328,6 +328,7 @@ def test_the_transcript_is_the_clients_and_goes_back_whole(tmp_path):
             "refused",
         ),
         ({"done": True, "question": "", "recommended_answer": "", "brief": "b", "draft": ""}, "drafted nothing"),
+        ({"done": True, "question": "", "recommended_answer": "", "brief": "", "draft": "d"}, "wrote no brief"),
         ({"done": False, "question": "", "recommended_answer": "", "brief": "", "draft": ""}, "asked nothing"),
         ({"done": "yes", "question": "q", "recommended_answer": "", "brief": "", "draft": ""}, "not a boolean"),
     ],
