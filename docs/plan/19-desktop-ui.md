@@ -365,7 +365,9 @@ commit d41f2a9            the git commit for an author edit
   `Resume →` becomes "open a session on this section"; *"Last worked October 18"*
   survives because it is a git fact. Of §19.5's six right-rail cards, only `PURPOSE`
   reads a file — it reads the brief — and the other five compose live.
-- `Settings` and `Feedback`.
+- `Settings` and `Feedback`. **Settings adopted 2026-09-04** (ADR-0009): the
+  footer's `⚙ Settings` opens a dialog whose one setting is the writing style, a
+  durable file the dialog edits through the write path. `Feedback` stays unresolved.
 
 **Runs ahead of decisions that are still open. Recorded, not resolved.**
 

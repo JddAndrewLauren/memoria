@@ -73,6 +73,10 @@ ALLOWED_IMPORTS = {
     # #61: the supplied-context surface, a projection of the session
     # ledgers composed in the core; the adapter shapes it and nothing else.
     "memoria.supplied_context",
+    # ADR-0009: the Settings surface over the writing style - a read, an
+    # author write through the same path as match terms, and the confirm/
+    # discard acts on proposed observations. The adapter shapes outcomes.
+    "memoria.style",
     # The ingestion surface (ADR-0009): a derived, model-free status the
     # core computes and two local-only runs the adapter forwards to it. The
     # adapter shapes the status and maps the runs' outcomes - a held lock
@@ -1317,6 +1321,12 @@ def test_nothing_but_the_match_terms_route_writes(tmp_path):
         # the entry, through the same write path, with the entry's token.
         "/sections/{section_id}/settlements",
         "/sources/{record_id}/reveal",
+        # ADR-0009: the writing style - replaced whole by the author, one
+        # proposed observation confirmed or discarded, one sample uploaded.
+        # All three through the same write path, committed as the author.
+        "/style",
+        "/style/observations/{observation_id}",
+        "/style/samples",
         "/subjects/{subject_id}/entries/{entry_slug}/match-terms",
     ]
 
@@ -1851,3 +1861,171 @@ def test_applying_a_rewrite_to_an_unknown_section_is_a_404(tmp_path):
     )
 
     assert response.status_code == 404
+
+
+# --- the writing style (ADR-0009) -------------------------------------------
+
+
+def _style_repo(tmp_path):
+    record = _record(
+        id="SRC-000184",
+        paragraphs=["The deck went up unchanged.", "Nobody dared touch it."],
+    )
+    return _entry_repo(tmp_path, records=[record])
+
+
+def _style_body(**overrides):
+    body = {
+        "token": None,
+        "direction": "Stay in the moment.",
+        "observations": ["Keep sentences short."],
+        "sample_sources": ["SRC-000184"],
+    }
+    body.update(overrides)
+    return body
+
+
+def test_reading_the_style_before_one_exists_is_an_honest_empty_state(tmp_path):
+    client = _client(_style_repo(tmp_path))
+
+    body = client.get("/api/style").json()
+
+    assert body == {
+        "exists": False,
+        "direction": "",
+        "observations": [],
+        "sample_sources": [],
+        "samples": [],
+        "token": None,
+        "pending": [],
+        "confirmed_count": 0,
+        "discarded_count": 0,
+    }
+
+
+def test_the_first_write_creates_the_style_and_the_second_needs_its_token(tmp_path):
+    repository = _style_repo(tmp_path)
+    client = _client(repository)
+
+    created = client.put("/api/style", json=_style_body())
+    assert created.status_code == 200, created.text
+    assert created.json()["exists"] is True
+    assert created.json()["observations"] == ["Keep sentences short."]
+    token = created.json()["token"]
+    assert token
+
+    # No token where a file now exists, or a wrong one: 409, nothing written.
+    assert client.put("/api/style", json=_style_body(direction="x")).status_code == 409
+    stale = client.put("/api/style", json=_style_body(token="stale", direction="x"))
+    assert stale.status_code == 409
+    assert "changed since it was read" in stale.json()["detail"]
+    assert client.get("/api/style").json()["direction"] == "Stay in the moment."
+
+    fresh = client.put("/api/style", json=_style_body(token=token, direction="x"))
+    assert fresh.status_code == 200
+    assert fresh.json()["direction"] == "x"
+    assert fresh.json()["token"] != token
+    # Committed as the author, path-scoped (ADR-0003).
+    log = subprocess.run(
+        ["git", "log", "--format=%an", "--", "style/writing-style.md"],
+        cwd=tmp_path, check=True, capture_output=True, text=True,
+    ).stdout.splitlines()
+    assert log == ["Local Author", "Local Author"]
+
+
+def test_a_sample_source_that_names_no_record_is_a_400(tmp_path):
+    client = _client(_style_repo(tmp_path))
+    response = client.put("/api/style", json=_style_body(sample_sources=["SRC-999999"]))
+    assert response.status_code == 400
+    assert "SRC-999999" in response.json()["detail"]
+    assert client.get("/api/style").json()["exists"] is False
+
+
+def _propose(repository, *observations):
+    from memoria.style import RecordedObservation, brief, record_observations
+
+    record_observations(
+        repository,
+        [RecordedObservation("rhythm", text, "Nobody dared touch it.") for text in observations],
+        brief(repository).analysis_key,
+    )
+
+
+def test_confirming_an_observation_as_changed_lands_in_the_file(tmp_path):
+    repository = _style_repo(tmp_path)
+    client = _client(repository)
+    client.put("/api/style", json=_style_body(observations=[]))
+    _propose(repository, "As proposed.", "Another.")
+    body = client.get("/api/style").json()
+    assert [o["observation"] for o in body["pending"]] == ["As proposed.", "Another."]
+    assert body["pending"][0]["example"] == "Nobody dared touch it."
+    first = body["pending"][0]["id"]
+
+    stale = client.post(
+        f"/api/style/observations/{first}",
+        json={"action": "confirm", "token": "stale", "text": "As changed."},
+    )
+    assert stale.status_code == 409
+    assert len(client.get("/api/style").json()["pending"]) == 2
+
+    confirmed = client.post(
+        f"/api/style/observations/{first}",
+        json={"action": "confirm", "token": body["token"], "text": "As changed."},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["observations"] == ["As changed."]
+    assert [o["observation"] for o in confirmed.json()["pending"]] == ["Another."]
+    assert confirmed.json()["confirmed_count"] == 1
+    assert "- As changed." in (tmp_path / "style" / "writing-style.md").read_text()
+
+    again = client.post(
+        f"/api/style/observations/{first}",
+        json={"action": "confirm", "token": confirmed.json()["token"]},
+    )
+    assert again.status_code == 404
+
+
+def test_discarding_an_observation_writes_nothing_durable(tmp_path):
+    repository = _style_repo(tmp_path)
+    client = _client(repository)
+    client.put("/api/style", json=_style_body(observations=[]))
+    _propose(repository, "Unwanted.")
+    (pending,) = client.get("/api/style").json()["pending"]
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True, capture_output=True, text=True
+    ).stdout
+
+    response = client.post(f"/api/style/observations/{pending['id']}", json={"action": "discard"})
+
+    assert response.status_code == 200
+    assert response.json()["pending"] == []
+    assert response.json()["discarded_count"] == 1
+    assert response.json()["observations"] == []
+    assert subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True, capture_output=True, text=True
+    ).stdout == head
+    assert client.post("/api/style/observations/999", json={"action": "discard"}).status_code == 404
+    assert client.post(
+        f"/api/style/observations/{pending['id']}", json={"action": "shrug"}
+    ).status_code == 422
+
+
+def test_uploading_a_sample_writes_it_under_style_and_refuses_a_clash(tmp_path):
+    import base64
+
+    client = _client(_style_repo(tmp_path))
+    content = base64.b64encode(b"Dear Bob,\n\nNo.\n").decode("ascii")
+
+    uploaded = client.post("/api/style/samples", json={"filename": "Letter to Bob.txt", "content": content})
+
+    assert uploaded.status_code == 200, uploaded.text
+    assert uploaded.json()["samples"] == [
+        {"path": "style/samples/letter-to-bob.md", "title": "Letter to Bob", "original_file": "Letter to Bob.txt"}
+    ]
+    assert (tmp_path / "style" / "samples" / "letter-to-bob.md").is_file()
+
+    clash = client.post("/api/style/samples", json={"filename": "letter-to-bob.txt", "content": content})
+    assert clash.status_code == 409
+    unsupported = client.post("/api/style/samples", json={"filename": "notes.rtf", "content": content})
+    assert unsupported.status_code == 400
+    assert "supported" in unsupported.json()["detail"]

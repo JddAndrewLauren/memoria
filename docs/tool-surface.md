@@ -41,6 +41,7 @@ write, and they exist because there is nowhere else to put them.
 | `extraction_cluster(cluster_id)` | **Forced** — issue #17 |
 | `extraction_promote_candidate(candidate_id, entry_slug)` | **Forced** — issue #17 |
 | `extraction_promote_cluster(cluster_id, subject_id, entry_slug)` | **Forced** — issue #17 |
+| `writing_style()`, `style_status()`, `style_brief()`, `style_record(observations)` | **Forced** — ADR-0009, below |
 
 The last five are the author's side of the pass rather than the pass itself.
 #17 keeps rejected candidates and unplaced forms *enumerable* and offers
@@ -262,6 +263,70 @@ something this adapter (or `memoria.audit`) can check mechanically — so every
 audit-verdict task carries `memoria.audit.AUTHOR_TESTIMONY_POLICY` verbatim,
 the same way `extraction_brief` serves its prompt verbatim rather than
 paraphrasing it.
+
+---
+
+## Writing-style tools — forced, ADR-0009
+
+```
+writing_style() -> str
+style_status() -> str
+style_brief() -> str
+style_record(observations: list[RecordedObservation]) -> str
+```
+
+A fourth class on the same server, in two halves. `writing_style` is what a
+*writing* session reaches for: the author's writing style
+(`style/writing-style.md`, CONTEXT.md's "Writing style") rendered as direction
+for a writer, verbatim, or a plain statement that none is set. The server's
+instructions tell a session to call it before drafting or rewriting any
+manuscript prose. The rendering is `memoria.style.writing_style_prompt`, the
+same string `assemble` loads as Tier 1 voice guidance and `audit_pending`
+prints above a batch — one rendering, three servers, nothing to drift.
+
+The `style_*` three are the analysis, and they have the extraction's shape
+for the extraction's reason (no model-driving service, `poc-plan.md` §3):
+`style_brief` *serves* the analysis prompt with every chosen source's
+paragraphs and every uploaded sample, `style_record` *records* what the model
+produced, and `style_status` is local computation. There is no `generate_`
+anything. The `writing-style` skill drives them.
+
+### What the model sends back
+
+`style_record` takes a list of `RecordedObservation` - each an `aspect`, an
+`observation` phrased as a directive, and an `example` - and the analysis
+`key` the brief served. The key binds the batch to the samples the model read:
+if the author changed the sources or uploads in between, the served key no
+longer matches and the whole batch is refused, the way `extraction_record_summary`
+refuses a re-clustered membership. With the key confirmed, the core refuses any
+element whose example does not occur verbatim (whitespace-normalized) within a
+single served sample - not merely somewhere across them concatenated, which
+would let a quote straddle two samples: an observation that cannot point at the
+author's own words is not one the author should be asked to confirm. Batch in,
+per-element out, as `extraction_record`.
+
+### What it records, and what it does not
+
+Nothing durable. Accepted observations are rows in the index
+(`style_observations`, a preserved table that survives `memoria rebuild`),
+proposed under a key naming the prompt and the samples; a second batch under
+the same key replaces the still-proposed rows. The author confirms, changes or
+discards each one under Settings > Writing style in the app, and only a
+confirmation writes `style/writing-style.md` — through the one write path, as
+the author's own act. No tool on this server writes the style.
+
+### The prompt is a package constant
+
+`memoria.style.STYLE_ANALYSIS_PROMPT`, served verbatim by `style_brief`; the
+skill holds no copy, for the reason given under the extraction above.
+
+### What is ledgered
+
+- `writing_style` — the file reached a context verbatim, the same category as
+  `read("style/writing-style.md")`; a call that found no style ledgers nothing.
+- `style_brief` — every `SRC-` id and sample path served: the author's own
+  words entering a model's context.
+- `style_status` and `style_record` — nothing; neither serves evidence.
 
 ---
 

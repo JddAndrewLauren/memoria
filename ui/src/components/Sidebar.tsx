@@ -4,14 +4,16 @@ import { SourcesTree } from "./SourcesTree";
 
 interface SidebarProps {
   onOpenSearch: () => void;
+  onOpenSettings: () => void;
 }
 
 /**
- * The persistent shell (§19.1): identity, the search glyph, and the three
- * trees - MANUSCRIPT, SUBJECTS, SOURCES. "Ask Memoria" and "Review" are not
- * here: both need the model driver #24 explicitly does not build.
+ * The persistent shell (§19.1): identity, the search glyph, the three
+ * trees - MANUSCRIPT, SUBJECTS, SOURCES - and the footer's settings gear.
+ * "Ask Memoria" and "Review" are not here: both need the model driver #24
+ * explicitly does not build.
  */
-export function Sidebar({ onOpenSearch }: SidebarProps) {
+export function Sidebar({ onOpenSearch, onOpenSettings }: SidebarProps) {
   return (
     <aside className="flex w-[232px] shrink-0 flex-col border-r border-border bg-rail">
       <div className="flex items-center justify-between border-b border-border px-3 py-4">
@@ -35,6 +37,19 @@ export function Sidebar({ onOpenSearch }: SidebarProps) {
         <SubjectsTree />
         <SourcesTree />
       </nav>
+      <div className="border-t border-border px-3 py-2">
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          aria-label="Settings"
+          className="flex w-full items-center gap-2 rounded px-2 py-1 text-sm text-secondary hover:bg-hover hover:text-ink"
+        >
+          <span className="text-lg" aria-hidden="true">
+            {"⚙"}
+          </span>
+          Settings
+        </button>
+      </div>
     </aside>
   );
 }

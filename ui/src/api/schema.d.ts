@@ -615,6 +615,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/style": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Style
+         * @description The writing style, its samples, and the observations awaiting the
+         *     author - the Settings surface's one read. A repository with no style
+         *     yet is an honest empty state with ``exists=False`` and no token.
+         */
+        get: operations["read_style_api_style_get"];
+        /**
+         * Update Style
+         * @description Replace the writing style - an author act through the single write
+         *     path, committed as the author (``repository_actor``, never a name in
+         *     the payload; ADR-0002). The same outcomes as ``update_match_terms``:
+         *     **409** for a style changed since it was read (or one that appeared
+         *     where the client thought there was none), **400** for a sample source
+         *     that names no record, **500** for a write that cannot be attempted.
+         */
+        put: operations["update_style_api_style_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/style/observations/{observation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve Style Observation
+         * @description The author acting on one proposed observation. ``confirm`` appends
+         *     it - as proposed, or as ``text`` where they changed it - to the style
+         *     through the write path first, and only a committed write marks the
+         *     row confirmed; **409** leaves both untouched. ``discard`` marks the
+         *     row and writes nothing durable. An observation that is not proposed,
+         *     or does not exist, is a **404**.
+         */
+        post: operations["resolve_style_observation_api_style_observations__observation_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/style/samples": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Style Sample
+         * @description Add one uploaded document as a style sample, written under
+         *     ``style/samples/`` and committed as the author. **409** for a name
+         *     already taken (nothing overwritten), **400** for an unsupported type,
+         *     a document with no text, or a converter this install lacks.
+         */
+        post: operations["upload_style_sample_api_style_samples_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1055,6 +1134,21 @@ export interface components {
             /** Cause */
             cause: string;
         };
+        /**
+         * ObservationResolution
+         * @description The author acting on one proposed observation: ``confirm`` (as
+         *     proposed, or as ``text`` where they changed it) appends it to the style
+         *     through the write path and needs the style's ``token``; ``discard``
+         *     writes nothing durable.
+         */
+        ObservationResolution: {
+            /** Action */
+            action: string;
+            /** Token */
+            token?: string | null;
+            /** Text */
+            text?: string | null;
+        };
         /** OutlineChapterOut */
         OutlineChapterOut: {
             /** Id */
@@ -1236,6 +1330,23 @@ export interface components {
             token: string;
             /** Text */
             text: string;
+        };
+        /**
+         * SampleUpload
+         * @description One document uploaded as a style sample. ``content`` is the file's
+         *     bytes, base64 in transit (a JSON body rather than multipart, so the
+         *     client needs no form encoding and the server no extra dependency);
+         *     capped so a stray upload is refused at the boundary rather than held
+         *     in memory.
+         */
+        SampleUpload: {
+            /** Filename */
+            filename: string;
+            /**
+             * Content
+             * Format: base64
+             */
+            content: string;
         };
         /**
          * ScopeEntryOut
@@ -1541,6 +1652,77 @@ export interface components {
             badge?: string | null;
             /** Text */
             text: string;
+        };
+        /**
+         * StyleObservationOut
+         * @description One observation a style analysis proposed and the author has not yet
+         *     acted on. Derived, asserting nothing until confirmed.
+         */
+        StyleObservationOut: {
+            /** Id */
+            id: number;
+            /** Aspect */
+            aspect: string;
+            /** Observation */
+            observation: string;
+            /** Example */
+            example: string;
+        };
+        /**
+         * StyleOut
+         * @description The writing style as Settings shows it: the file's contents and the
+         *     token a write must present back (ADR-0003) - ``None`` while no file
+         *     exists and the first write creates it - the uploaded samples, and the
+         *     proposed observations awaiting the author, oldest first.
+         */
+        StyleOut: {
+            /** Exists */
+            exists: boolean;
+            /** Direction */
+            direction: string;
+            /** Observations */
+            observations: string[];
+            /** Sample Sources */
+            sample_sources: string[];
+            /** Samples */
+            samples: components["schemas"]["StyleSampleOut"][];
+            /** Token */
+            token: string | null;
+            /** Pending */
+            pending: components["schemas"]["StyleObservationOut"][];
+            /** Confirmed Count */
+            confirmed_count: number;
+            /** Discarded Count */
+            discarded_count: number;
+        };
+        /**
+         * StyleSampleOut
+         * @description One document the author uploaded for its style alone - a path under
+         *     ``style/samples/``, never a ``SRC-`` id: it is not evidence.
+         */
+        StyleSampleOut: {
+            /** Path */
+            path: string;
+            /** Title */
+            title: string;
+            /** Original File */
+            original_file: string;
+        };
+        /**
+         * StyleUpdate
+         * @description The author replacing the writing style. ``token`` is what
+         *     ``StyleOut`` served, presented back unread; ``None`` only while no
+         *     style file exists yet.
+         */
+        StyleUpdate: {
+            /** Token */
+            token?: string | null;
+            /** Direction */
+            direction: string;
+            /** Observations */
+            observations: string[];
+            /** Sample Sources */
+            sample_sources: string[];
         };
         /**
          * SubjectListResponse
@@ -2265,6 +2447,127 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RewriteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_style_api_style_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StyleOut"];
+                };
+            };
+        };
+    };
+    update_style_api_style_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StyleUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StyleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_style_observation_api_style_observations__observation_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                observation_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ObservationResolution"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StyleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_style_sample_api_style_samples_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SampleUpload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StyleOut"];
                 };
             };
             /** @description Validation Error */
