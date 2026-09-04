@@ -12,6 +12,7 @@ import {
   type SettlementOut,
 } from "../api/client";
 import { Badge, type Tone } from "../components/Badge";
+import { RunAuditButton } from "../components/DirectRun";
 import { useCitationPanel } from "../lib/citationPanel";
 import { wordDiff } from "../lib/wordDiff";
 
@@ -84,6 +85,13 @@ export default function ReviewPage() {
       </header>
 
       <SummaryBar data={data} audited={audited} />
+
+      {/* The audit's button (ADR-0010): rendered only when the author
+          switched direct runs on under Settings > Model; otherwise the
+          audit is asked for from a session, as the text below says. */}
+      <div className="mt-3">
+        <RunAuditButton sectionId={data.section_id} />
+      </div>
 
       {settled.length > 0 && (
         <ul className="mt-3 space-y-1" aria-label="Settled this visit">

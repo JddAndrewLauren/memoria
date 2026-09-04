@@ -26,6 +26,8 @@ const TOOL_LABEL: Record<string, string> = {
   extraction_brief: "extraction brief",
   extraction_next_paragraphs: "extraction batch",
   extraction_next_summary: "extraction summary task",
+  style_brief: "style brief",
+  model_call: "model call",
 };
 
 function plural(count: number, one: string, many = `${one}s`): string {

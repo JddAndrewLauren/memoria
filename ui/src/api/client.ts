@@ -55,6 +55,14 @@ export type StyleObservationOut = components["schemas"]["StyleObservationOut"];
 export type StyleUpdate = components["schemas"]["StyleUpdate"];
 export type ObservationResolution = components["schemas"]["ObservationResolution"];
 export type SampleUpload = components["schemas"]["SampleUpload"];
+export type ModelSettingsOut = components["schemas"]["ModelSettingsOut"];
+export type ModelSettingsUpdate = components["schemas"]["ModelSettingsUpdate"];
+export type ExtractionStatusOut = components["schemas"]["ExtractionStatusOut"];
+export type ExtractionRunOut = components["schemas"]["ExtractionRunOut"];
+export type AuditRunOut = components["schemas"]["AuditRunOut"];
+export type StyleRunOut = components["schemas"]["StyleRunOut"];
+export type SpendOut = components["schemas"]["SpendOut"];
+export type RejectionOut = components["schemas"]["RejectionOut"];
 
 class ApiError extends Error {
   constructor(
@@ -273,6 +281,41 @@ export function resolveObservation(
 
 export function uploadStyleSample(upload: SampleUpload): Promise<StyleOut> {
   return post(`/api/style/samples`, upload);
+}
+
+// Direct runs (ADR-0010). Settings > Model's one read and one write - the
+// key travels in only, never back - and the three runs: each POST is one
+// bounded step the caller loops over, and a 409 while direct runs are off.
+// `MODEL_KEY` is shared so every surface that gates a button on readiness
+// reads the same cached answer.
+export const MODEL_KEY = ["model"] as const;
+export const EXTRACTION_KEY = ["extraction"] as const;
+
+export function readModelSettings(): Promise<ModelSettingsOut> {
+  return get(`/api/model`);
+}
+
+export function updateModelSettings(update: ModelSettingsUpdate): Promise<ModelSettingsOut> {
+  return put(`/api/model`, update);
+}
+
+export function readExtractionStatus(): Promise<ExtractionStatusOut> {
+  return get(`/api/extraction`);
+}
+
+export function runExtraction(limit = 20): Promise<ExtractionRunOut> {
+  return post(`/api/extraction/run`, { limit });
+}
+
+export function runAudit(
+  sectionId: string,
+  request: { limit?: number; paragraph_index?: number | null } = {},
+): Promise<AuditRunOut> {
+  return post(`/api/sections/${encodeURIComponent(sectionId)}/audit`, request);
+}
+
+export function runStyleAnalysis(): Promise<StyleRunOut> {
+  return post(`/api/style/analyse`);
 }
 
 export { ApiError };

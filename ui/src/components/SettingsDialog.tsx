@@ -1,15 +1,20 @@
 import { useState } from "react";
 import { Dialog } from "./Dialog";
 import { WritingStyleSettings } from "./WritingStyleSettings";
+import { ModelSettings } from "./ModelSettings";
 
 interface SettingsDialogProps {
   open: boolean;
   onClose: () => void;
 }
 
-// One entry per setting. There is one today; the rail exists so the next
-// one is a row here, not a second dialog.
-const SECTIONS = [{ id: "writing-style", label: "Writing style" }] as const;
+// One entry per setting. The rail exists so the next one is a row here,
+// not a second dialog.
+const SECTIONS = [
+  { id: "writing-style", label: "Writing style" },
+  // ADR-0010: the switch for direct runs, the model and the key.
+  { id: "model", label: "Model" },
+] as const;
 
 type SectionId = (typeof SECTIONS)[number]["id"];
 
@@ -55,6 +60,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         </nav>
         <div className="flex-1 overflow-y-auto p-5">
           {section === "writing-style" && open && <WritingStyleSettings />}
+          {section === "model" && open && <ModelSettings />}
         </div>
       </div>
     </Dialog>
