@@ -8,6 +8,7 @@ import {
   readModelSettings,
   runExtraction,
   updateModelSettings,
+  type EffortLevel,
   type ExtractionRunOut,
   type ModelSettingsOut,
 } from "../api/client";
@@ -51,10 +52,13 @@ export function ModelSettings() {
   );
 }
 
+const EFFORT_LEVELS: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
+
 function ModelForm({ settings }: { settings: ModelSettingsOut }) {
   const queryClient = useQueryClient();
   const [enabled, setEnabled] = useState(settings.enabled);
   const [model, setModel] = useState(settings.model);
+  const [effort, setEffort] = useState<EffortLevel | null>(settings.effort);
   // Write-only: the field starts empty on every read and is sent only
   // when the author typed into it. Clearing is its own explicit act.
   const [apiKey, setApiKey] = useState("");
@@ -63,6 +67,7 @@ function ModelForm({ settings }: { settings: ModelSettingsOut }) {
   useEffect(() => {
     setEnabled(settings.enabled);
     setModel(settings.model);
+    setEffort(settings.effort);
     setApiKey("");
     setClearKey(false);
   }, [settings]);
@@ -72,6 +77,7 @@ function ModelForm({ settings }: { settings: ModelSettingsOut }) {
       updateModelSettings({
         enabled,
         model: model.trim(),
+        effort,
         api_key: clearKey ? "" : apiKey.trim() ? apiKey.trim() : null,
       }),
     onSuccess: (result) => {
@@ -82,6 +88,7 @@ function ModelForm({ settings }: { settings: ModelSettingsOut }) {
   const dirty =
     enabled !== settings.enabled ||
     model.trim() !== settings.model ||
+    effort !== settings.effort ||
     apiKey.trim() !== "" ||
     clearKey;
 
@@ -115,6 +122,27 @@ function ModelForm({ settings }: { settings: ModelSettingsOut }) {
           aria-label="Model"
           className="w-full max-w-[360px] rounded border border-border bg-card px-2 py-1 font-mono text-sm text-body"
         />
+      </Region>
+
+      <Region
+        label="Effort"
+        note="How much reasoning each call spends. A high-volume pass such as the extraction reads every paragraph once; a lower level cuts its cost, the provider's default is the most thorough."
+      >
+        <select
+          value={effort ?? ""}
+          onChange={(event) =>
+            setEffort(event.target.value === "" ? null : (event.target.value as EffortLevel))
+          }
+          aria-label="Effort"
+          className="rounded border border-border bg-card px-2 py-1 font-mono text-sm text-body"
+        >
+          <option value="">provider default</option>
+          {EFFORT_LEVELS.map((level) => (
+            <option key={level} value={level}>
+              {level}
+            </option>
+          ))}
+        </select>
       </Region>
 
       <Region
@@ -167,7 +195,7 @@ function ModelForm({ settings }: { settings: ModelSettingsOut }) {
         </button>
         <p role="status" className="text-xs text-secondary">
           {settings.ready
-            ? `Ready: direct runs call ${settings.model}, key from the ${settings.api_key_source}.`
+            ? `Ready: direct runs call ${settings.model} at ${settings.effort ?? "default"} effort, key from the ${settings.api_key_source}.`
             : `Not ready: ${settings.reason}.`}
         </p>
         {save.isError && (

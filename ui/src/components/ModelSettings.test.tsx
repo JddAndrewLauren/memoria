@@ -9,6 +9,7 @@ function settings(overrides: Partial<ModelSettingsOut> = {}): ModelSettingsOut {
     enabled: false,
     provider: "anthropic",
     model: "claude-opus-5",
+    effort: null,
     api_key_set: false,
     api_key_source: null,
     ready: false,
@@ -80,6 +81,7 @@ function stubFetch(stub: Stub) {
           ...stub.current,
           enabled: body.enabled,
           model: body.model,
+          effort: body.effort,
           api_key_set: key,
           api_key_source: key ? "settings" : null,
           ready: body.enabled && key,
@@ -116,12 +118,34 @@ function renderPanel() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Settings > Model", () => {
+  it("saves a chosen effort level and reports it as ready", async () => {
+    const calls = stubFetch({ current: READY });
+    renderPanel();
+    await screen.findByLabelText("Effort");
+
+    fireEvent.change(screen.getByLabelText("Effort"), { target: { value: "low" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByText(
+        "Ready: direct runs call claude-opus-5 at low effort, key from the settings.",
+      ),
+    ).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "PUT")?.body).toEqual({
+      enabled: true,
+      model: "claude-opus-5",
+      effort: "low",
+      api_key: null,
+    });
+  });
+
   it("is off by default and says why a run is not ready", async () => {
     stubFetch({ current: settings() });
     renderPanel();
 
     expect(await screen.findByLabelText("Let Memoria call the model directly")).not.toBeChecked();
     expect(screen.getByLabelText("Model")).toHaveValue("claude-opus-5");
+    expect(screen.getByLabelText("Effort")).toHaveValue("");
     expect(screen.getByLabelText("API key")).toHaveValue("");
     expect(screen.getByText(/^Not set\./)).toBeInTheDocument();
     expect(screen.getByText("Not ready: direct runs are off.")).toBeInTheDocument();
@@ -138,10 +162,17 @@ describe("Settings > Model", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(
-      await screen.findByText("Ready: direct runs call claude-opus-5, key from the settings."),
+      await screen.findByText(
+        "Ready: direct runs call claude-opus-5 at default effort, key from the settings.",
+      ),
     ).toBeInTheDocument();
     const put = calls.find((c) => c.method === "PUT");
-    expect(put?.body).toEqual({ enabled: true, model: "claude-opus-5", api_key: "sk-ant-secret" });
+    expect(put?.body).toEqual({
+      enabled: true,
+      model: "claude-opus-5",
+      effort: null,
+      api_key: "sk-ant-secret",
+    });
     expect(screen.getByLabelText("API key")).toHaveValue("");
     expect(screen.getByText(/Set, stored on this machine/)).toBeInTheDocument();
     expect(document.body.textContent).not.toContain("sk-ant-secret");
@@ -158,6 +189,7 @@ describe("Settings > Model", () => {
     expect(calls.find((c) => c.method === "PUT")?.body).toEqual({
       enabled: true,
       model: "claude-sonnet-5",
+      effort: null,
       api_key: null,
     });
 

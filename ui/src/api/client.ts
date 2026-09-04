@@ -56,6 +56,7 @@ export type StyleUpdate = components["schemas"]["StyleUpdate"];
 export type ObservationResolution = components["schemas"]["ObservationResolution"];
 export type SampleUpload = components["schemas"]["SampleUpload"];
 export type ModelSettingsOut = components["schemas"]["ModelSettingsOut"];
+export type EffortLevel = NonNullable<ModelSettingsOut["effort"]>;
 export type ModelSettingsUpdate = components["schemas"]["ModelSettingsUpdate"];
 export type ExtractionStatusOut = components["schemas"]["ExtractionStatusOut"];
 export type ExtractionRunOut = components["schemas"]["ExtractionRunOut"];

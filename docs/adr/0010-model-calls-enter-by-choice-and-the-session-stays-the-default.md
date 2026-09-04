@@ -45,8 +45,8 @@ skill-driven pass is a **session run**, and it stays the default.
   hierarchy: a second provider is one more function. The AST sweep in
   `tests/test_extraction.py` exempts exactly this module and holds it to that shape.
 - **The settings are machine-local.** `.memoria/model.json`, beside `index.db` under
-  the gitignored index directory, holds the switch, the model id and the stored key;
-  written with mode 0600 directly, not through `memoria.write` - ADR-0003 governs
+  the gitignored index directory, holds the switch, the model id, the effort level and
+  the stored key; written with mode 0600 directly, not through `memoria.write` - ADR-0003 governs
   durable files a commit closes, and a credential must never be one. `ANTHROPIC_API_KEY`
   in the server's environment overrides the stored key and never touches disk. No
   surface ever returns the key; `Readiness` says whether one is set and where from.

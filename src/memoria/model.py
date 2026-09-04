@@ -50,6 +50,11 @@ API_KEY_ENV_VAR = "ANTHROPIC_API_KEY"
 DEFAULT_PROVIDER = "anthropic"
 # The one model a fresh switch-on uses; the author changes it in Settings.
 DEFAULT_MODEL = "claude-opus-5"
+# The effort levels the Messages API accepts under ``output_config``. Unset
+# means the provider's own default for the model; the author picks a lower
+# one in Settings when a pass is high-volume and the extra reasoning is
+# spent on thinking tokens nobody reads.
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 
 # Where the author switches direct runs on. Named in every refusal so the
 # message says what to do, not only what went wrong.
@@ -77,6 +82,8 @@ class ModelSettings:
     provider: str = DEFAULT_PROVIDER
     model: str = DEFAULT_MODEL
     api_key: str | None = None
+    # One of ``EFFORT_LEVELS``, or ``None`` for the provider's default.
+    effort: str | None = None
 
 
 def settings_path(repository: Repository) -> Path:
@@ -102,11 +109,13 @@ def load_settings(repository: Repository) -> ModelSettings:
     model = raw.get("model")
     api_key = raw.get("api_key")
     provider = raw.get("provider")
+    effort = raw.get("effort")
     return ModelSettings(
         enabled=raw.get("enabled") is True,
         provider=provider if isinstance(provider, str) and provider else DEFAULT_PROVIDER,
         model=model if isinstance(model, str) and model.strip() else DEFAULT_MODEL,
         api_key=api_key if isinstance(api_key, str) and api_key else None,
+        effort=effort if effort in EFFORT_LEVELS else None,
     )
 
 
@@ -127,6 +136,7 @@ def save_settings(repository: Repository, settings: ModelSettings) -> None:
             "provider": settings.provider,
             "model": settings.model,
             "api_key": settings.api_key,
+            "effort": settings.effort,
         },
         indent=2,
     )
@@ -185,6 +195,7 @@ class Readiness:
     enabled: bool
     provider: str
     model: str
+    effort: str | None
     api_key_set: bool
     api_key_source: str | None
     ready: bool
@@ -210,6 +221,7 @@ def readiness(repository: Repository, environ: Mapping[str, str] | None = None) 
         enabled=settings.enabled,
         provider=settings.provider,
         model=settings.model,
+        effort=settings.effort,
         api_key_set=key is not None,
         api_key_source=source,
         ready=reason is None,
@@ -305,10 +317,13 @@ def anthropic_model(settings: ModelSettings, api_key: str) -> ModelFn:
             ],
             "messages": [{"role": "user", "content": request.user}],
         }
+        output_config: dict = {}
         if request.schema is not None:
-            arguments["output_config"] = {
-                "format": {"type": "json_schema", "schema": request.schema}
-            }
+            output_config["format"] = {"type": "json_schema", "schema": request.schema}
+        if settings.effort is not None:
+            output_config["effort"] = settings.effort
+        if output_config:
+            arguments["output_config"] = output_config
         try:
             response = client.messages.create(**arguments)
         except anthropic.AuthenticationError as exc:

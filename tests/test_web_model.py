@@ -110,11 +110,23 @@ def test_the_model_settings_read_off_by_default(tmp_path):
         "enabled": False,
         "provider": "anthropic",
         "model": "claude-opus-5",
+        "effort": None,
         "api_key_set": False,
         "api_key_source": None,
         "ready": False,
         "reason": model.REASON_OFF,
     }
+
+
+def test_the_effort_level_round_trips_and_an_unknown_one_is_refused(tmp_path):
+    client = _client(_repo(tmp_path))
+    saved = client.put("/api/model", json={"enabled": True, "model": "claude-opus-5", "effort": "low"})
+    assert saved.json()["effort"] == "low"
+    assert client.get("/api/model").json()["effort"] == "low"
+    cleared = client.put("/api/model", json={"enabled": True, "model": "claude-opus-5"})
+    assert cleared.json()["effort"] is None
+    refused = client.put("/api/model", json={"enabled": True, "model": "claude-opus-5", "effort": "extreme"})
+    assert refused.status_code == 422
 
 
 def test_the_key_is_stored_owner_only_and_never_returned(tmp_path, monkeypatch):

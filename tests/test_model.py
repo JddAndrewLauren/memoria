@@ -299,6 +299,30 @@ def test_the_provider_sends_the_brief_as_a_cached_system_block_and_returns_text(
     assert reply.usage == m.ModelUsage(model="claude-opus-5-served", input_tokens=10, output_tokens=5)
 
 
+def test_an_effort_level_travels_in_output_config_beside_the_format(monkeypatch):
+    _, calls = _fake_sdk(monkeypatch, lambda **kw: _Response([_Block("text", "{}")]))
+    settings = m.ModelSettings(enabled=True, model="claude-opus-5", effort="low")
+    call = m.anthropic_model(settings, "sk-key")
+    call(m.ModelRequest(system="BRIEF", user="paragraph"))
+    call(m.ModelRequest(system="BRIEF", user="paragraph", schema={"type": "object"}))
+    without_schema, with_schema = calls
+    assert without_schema["output_config"] == {"effort": "low"}
+    assert with_schema["output_config"] == {
+        "format": {"type": "json_schema", "schema": {"type": "object"}},
+        "effort": "low",
+    }
+
+
+def test_an_unknown_effort_in_the_file_loads_as_the_provider_default(tmp_path):
+    repository = _repo(tmp_path)
+    path = m.settings_path(repository)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"enabled": True, "model": "claude-opus-5", "effort": "extreme"}))
+    assert m.load_settings(repository).effort is None
+    m.save_settings(repository, m.ModelSettings(enabled=True, effort="xhigh"))
+    assert m.load_settings(repository).effort == "xhigh"
+
+
 def test_a_schema_becomes_the_json_output_format(monkeypatch):
     _, calls = _fake_sdk(monkeypatch, lambda **kw: _Response([_Block("text", '{"a": 1}')]))
     schema = {"type": "object", "properties": {"a": {"type": "integer"}}}

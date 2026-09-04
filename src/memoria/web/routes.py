@@ -1254,6 +1254,7 @@ def _model_out(repository: Repository) -> ModelSettingsOut:
         enabled=state.enabled,
         provider=state.provider,
         model=state.model,
+        effort=state.effort,
         api_key_set=state.api_key_set,
         api_key_source=state.api_key_source,
         ready=state.ready,
@@ -1294,8 +1295,8 @@ def read_model_settings(repository: Repository = Depends(get_repository)) -> Mod
 def update_model_settings(
     update: ModelSettingsUpdate, repository: Repository = Depends(get_repository)
 ) -> ModelSettingsOut:
-    """The author changing the switch, the model, or the stored key. The
-    provider is fixed to the one this slice ships; ``api_key`` absent
+    """The author changing the switch, the model, the effort, or the stored
+    key. The provider is fixed to the one this slice ships; ``api_key`` absent
     leaves the stored key alone and empty clears it."""
     current = load_settings(repository)
     if update.api_key is None:
@@ -1309,6 +1310,7 @@ def update_model_settings(
             provider=current.provider,
             model=update.model.strip(),
             api_key=api_key,
+            effort=update.effort,
         ),
     )
     return _model_out(repository)

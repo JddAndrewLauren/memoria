@@ -747,8 +747,8 @@ export interface paths {
         get: operations["read_model_settings_api_model_get"];
         /**
          * Update Model Settings
-         * @description The author changing the switch, the model, or the stored key. The
-         *     provider is fixed to the one this slice ships; ``api_key`` absent
+         * @description The author changing the switch, the model, the effort, or the stored
+         *     key. The provider is fixed to the one this slice ships; ``api_key`` absent
          *     leaves the stored key alone and empty clears it.
          */
         put: operations["update_model_settings_api_model_put"];
@@ -1490,6 +1490,8 @@ export interface components {
             provider: string;
             /** Model */
             model: string;
+            /** Effort */
+            effort: ("low" | "medium" | "high" | "xhigh" | "max") | null;
             /** Api Key Set */
             api_key_set: boolean;
             /** Api Key Source */
@@ -1501,16 +1503,19 @@ export interface components {
         };
         /**
          * ModelSettingsUpdate
-         * @description The author changing the switch, the model, or the stored key.
-         *     ``api_key`` absent or ``None`` leaves the stored key as it is; the empty
-         *     string clears it; anything else replaces it. The key is written to the
-         *     machine-local settings file only, never anywhere a commit could close.
+         * @description The author changing the switch, the model, the effort, or the stored
+         *     key. ``api_key`` absent or ``None`` leaves the stored key as it is; the
+         *     empty string clears it; anything else replaces it. The key is written to
+         *     the machine-local settings file only, never anywhere a commit could
+         *     close. ``effort`` ``None`` means the provider's default for the model.
          */
         ModelSettingsUpdate: {
             /** Enabled */
             enabled: boolean;
             /** Model */
             model: string;
+            /** Effort */
+            effort?: ("low" | "medium" | "high" | "xhigh" | "max") | null;
             /** Api Key */
             api_key?: string | null;
         };

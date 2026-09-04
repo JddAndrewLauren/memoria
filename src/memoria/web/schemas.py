@@ -8,6 +8,8 @@ verbatim; nothing here invents a field the schema does not have.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Base64Bytes, BaseModel, Field
 
 
@@ -835,6 +837,9 @@ class SampleUpload(BaseModel):
 # --- direct runs (ADR-0010) ------------------------------------------------------
 
 
+EffortLevel = Literal["low", "medium", "high", "xhigh", "max"]
+
+
 class ModelSettingsOut(BaseModel):
     """Whether a direct run can happen, and the settings behind that - the
     whole of what a client learns. **The key is never returned**:
@@ -845,6 +850,7 @@ class ModelSettingsOut(BaseModel):
     enabled: bool
     provider: str
     model: str
+    effort: EffortLevel | None
     api_key_set: bool
     api_key_source: str | None
     ready: bool
@@ -852,13 +858,15 @@ class ModelSettingsOut(BaseModel):
 
 
 class ModelSettingsUpdate(BaseModel):
-    """The author changing the switch, the model, or the stored key.
-    ``api_key`` absent or ``None`` leaves the stored key as it is; the empty
-    string clears it; anything else replaces it. The key is written to the
-    machine-local settings file only, never anywhere a commit could close."""
+    """The author changing the switch, the model, the effort, or the stored
+    key. ``api_key`` absent or ``None`` leaves the stored key as it is; the
+    empty string clears it; anything else replaces it. The key is written to
+    the machine-local settings file only, never anywhere a commit could
+    close. ``effort`` ``None`` means the provider's default for the model."""
 
     enabled: bool
     model: str = Field(min_length=1)
+    effort: EffortLevel | None = None
     api_key: str | None = None
 
 

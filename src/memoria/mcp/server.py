@@ -831,6 +831,7 @@ def render_model_status(state: Readiness) -> str:
         f"direct runs: {'on' if state.enabled else 'off'}",
         f"provider: {state.provider}",
         f"model: {state.model}",
+        f"effort: {state.effort or 'provider default'}",
         "API key: "
         + (f"set (from the {state.api_key_source})" if state.api_key_set else "not set"),
     ]

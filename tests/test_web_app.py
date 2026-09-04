@@ -50,6 +50,7 @@ ALLOWED_IMPORTS = {
     "contextlib",
     "ipaddress",
     "pathlib",
+    "typing",
     "fastapi",
     "pydantic",
     "memoria.web",

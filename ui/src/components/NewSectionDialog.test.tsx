@@ -59,6 +59,7 @@ const OFF: ModelSettingsOut = {
   enabled: false,
   provider: "anthropic",
   model: "claude-opus-5",
+  effort: null,
   api_key_set: false,
   api_key_source: null,
   ready: false,
