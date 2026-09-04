@@ -217,7 +217,7 @@ own number, a stub, or deleted), whether the index holds its paragraphs, and
 how many of them the extraction has read - derived from the ledger, the
 records and the index on every read, never stored (part 05 §5.4). `memoria
 sources` prints the same table. Beside it are the two passes a local client
-may launch (`docs/adr/0009-the-web-adapter-may-launch-a-model-free-pass.md`):
+may launch (`docs/adr/0011-the-web-adapter-may-launch-a-model-free-pass.md`):
 `POST /api/ingestion/normalize` and `POST /api/ingestion/rebuild`, the same
 runs as the CLI commands but with no embedder, refused for a non-local peer
 with a 403 and answered with a 409 while another pass is running.

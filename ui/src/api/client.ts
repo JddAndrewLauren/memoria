@@ -268,7 +268,7 @@ export function readIngestionStatus(): Promise<IngestionStatusOut> {
 }
 
 // The two model-free passes the author may launch from the page
-// (ADR-0009). Only ever called when `checkLocality` has said `is_local` -
+// (ADR-0011). Only ever called when `checkLocality` has said `is_local` -
 // the server refuses either way, and the buttons that reach these are
 // absent, not disabled, otherwise. A 409 is another pass still running.
 export function runNormalize(): Promise<IngestionRunOut> {

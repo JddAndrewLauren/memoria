@@ -291,7 +291,7 @@ def ingestion(repository: Repository = Depends(get_repository)) -> IngestionStat
 def ingestion_normalize(
     request: Request, repository: Repository = Depends(get_repository)
 ) -> IngestionRunOut:
-    """Run one normalization pass (ADR-0009): the same pass ``memoria
+    """Run one normalization pass (ADR-0011): the same pass ``memoria
     normalize`` runs, on the author's own machine only - the same peer
     check ``reveal`` makes, for the same reason. Synchronous: the response
     is the pass's report. A 409 is another pass already running.
@@ -313,7 +313,7 @@ def ingestion_normalize(
 def ingestion_rebuild(
     request: Request, repository: Repository = Depends(get_repository)
 ) -> IngestionRunOut:
-    """Regenerate the index from the records on disk (ADR-0009), with no
+    """Regenerate the index from the records on disk (ADR-0011), with no
     embedder - ``memoria rebuild`` remains the path that loads the model
     (ADR-0007). Local-only and synchronous, as ``/ingestion/normalize``.
     """

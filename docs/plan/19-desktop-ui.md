@@ -54,7 +54,7 @@ state (converted · out of date · no paragraphs, and so on), and the tree's foo
 an **Ingestion** page (`/ingestion`) listing every raw unit in the ledger — the failed
 and unconvertible ones included, which have no record and so no row in the tree — with
 whether each was converted, is in the index, and how much of it the extraction has read.
-On a local connection the page offers **Normalize** and **Rebuild index** (ADR-0009);
+On a local connection the page offers **Normalize** and **Rebuild index** (ADR-0011);
 the extraction is never launched from it. The status is derived, never stored (part 05
 §5.4).
 

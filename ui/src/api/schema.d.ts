@@ -99,7 +99,7 @@ export interface paths {
         put?: never;
         /**
          * Ingestion Normalize
-         * @description Run one normalization pass (ADR-0009): the same pass ``memoria
+         * @description Run one normalization pass (ADR-0011): the same pass ``memoria
          *     normalize`` runs, on the author's own machine only - the same peer
          *     check ``reveal`` makes, for the same reason. Synchronous: the response
          *     is the pass's report. A 409 is another pass already running.
@@ -122,7 +122,7 @@ export interface paths {
         put?: never;
         /**
          * Ingestion Rebuild
-         * @description Regenerate the index from the records on disk (ADR-0009), with no
+         * @description Regenerate the index from the records on disk (ADR-0011), with no
          *     embedder - ``memoria rebuild`` remains the path that loads the model
          *     (ADR-0007). Local-only and synchronous, as ``/ingestion/normalize``.
          */
@@ -1230,7 +1230,7 @@ export interface components {
         };
         /**
          * IngestionRunOut
-         * @description What one launched pass did (ADR-0009): ``kind`` is ``normalize`` or
+         * @description What one launched pass did (ADR-0011): ``kind`` is ``normalize`` or
          *     ``rebuild``, ``summary`` the counts that pass's own report carries.
          */
         IngestionRunOut: {

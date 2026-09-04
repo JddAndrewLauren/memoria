@@ -907,7 +907,7 @@ class StyleRunOut(BaseModel):
     style: StyleOut
 
 
-# --- the ingestion surface (ADR-0009) --------------------------------------------
+# --- the ingestion surface (ADR-0011) --------------------------------------------
 
 
 class UnitStatusOut(BaseModel):
@@ -950,7 +950,7 @@ class IngestionStatusOut(BaseModel):
 
 
 class IngestionRunOut(BaseModel):
-    """What one launched pass did (ADR-0009): ``kind`` is ``normalize`` or
+    """What one launched pass did (ADR-0011): ``kind`` is ``normalize`` or
     ``rebuild``, ``summary`` the counts that pass's own report carries."""
 
     kind: str

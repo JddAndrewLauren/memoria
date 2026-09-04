@@ -1,7 +1,7 @@
 """The ingestion status: what the ledger, the records and the index say
 about each raw unit, derived and never recorded (part 05 §5.4's "the record
 is the state"), plus the two model-free runs the web adapter may launch
-(ADR-0009).
+(ADR-0011).
 """
 
 from __future__ import annotations
@@ -300,7 +300,7 @@ def test_computing_the_status_writes_nothing(tmp_path):
     assert after == before
 
 
-# --- the two runs (ADR-0009) ---------------------------------------------------
+# --- the two runs (ADR-0011) ---------------------------------------------------
 
 
 def test_run_normalize_converts_and_reports_counts(tmp_path):

@@ -85,7 +85,7 @@ ALLOWED_IMPORTS = {
     "memoria.drivers",
     "memoria.extraction",
     "memoria.ledger",
-    # The ingestion surface (ADR-0009): a derived, model-free status the
+    # The ingestion surface (ADR-0011): a derived, model-free status the
     # core computes and two local-only runs the adapter forwards to it. The
     # adapter shapes the status and maps the runs' outcomes - a held lock
     # becomes a 409, a missing corpus a 404 - and computes no state, opens
@@ -1320,7 +1320,7 @@ def test_nothing_but_the_match_terms_route_writes(tmp_path):
         # session's extraction_record does - and a 409 until the author
         # switched direct runs on.
         "/extraction/run",
-        # ADR-0009: the two model-free derived-state passes the adapter may
+        # ADR-0011: the two model-free derived-state passes the adapter may
         # launch on the author's own machine. Neither is a durable write -
         # normalized records and the index are Derived (§42), outside the
         # write path - and neither computes anything here: the core runs

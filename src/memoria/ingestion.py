@@ -23,7 +23,7 @@ wrong", and safe to call at any time.
 
 The two run wrappers at the bottom exist for the web adapter, which may
 launch a model-free derived-state pass on the author's own machine
-(ADR-0009) but must not compute one itself. They run the same functions the
+(ADR-0011) but must not compute one itself. They run the same functions the
 CLI runs, under one process-wide lock so two clicks cannot run two passes
 over the same ledger at once. ``run_rebuild`` passes no embedder on purpose
 - embeddings enter by choice (ADR-0007), and the CLI's ``memoria rebuild``
@@ -286,7 +286,7 @@ def unprocessed_units(repository: Repository) -> tuple[str, ...] | None:
     )
 
 
-# --- the two runs the web adapter may launch (ADR-0009) -------------------------
+# --- the two runs the web adapter may launch (ADR-0011) -------------------------
 
 
 class RunInProgress(Exception):
