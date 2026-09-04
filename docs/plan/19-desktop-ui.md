@@ -49,6 +49,15 @@ count badge (`12`). Selection is a 3px maroon left bar plus a sand background.
 **Footer** — `⚙ Settings`, `✉ Feedback`, and a green status dot reading
 **"Curator idle · last pass 09:41"**.
 
+*Adopted 2026-09-03:* each `SOURCES` row carries a glyph for its raw unit's conversion
+state (converted · out of date · no paragraphs, and so on), and the tree's foot links to
+an **Ingestion** page (`/ingestion`) listing every raw unit in the ledger — the failed
+and unconvertible ones included, which have no record and so no row in the tree — with
+whether each was converted, is in the index, and how much of it the extraction has read.
+On a local connection the page offers **Normalize** and **Rebuild index** (ADR-0009);
+the extraction is never launched from it. The status is derived, never stored (part 05
+§5.4).
+
 ---
 
 ## 19.2 Ask Memoria
