@@ -11,6 +11,14 @@
 > part is §24.1's division of responsibility and §24.2's controlled tool surface.
 > The stack diagrams below and §§24.3–24.5 are retained as the future-option record
 > for a remote or multi-backend deployment — nothing the PoC builds.
+>
+> **Amended 2026-09-04** (`../adr/0010-model-calls-enter-by-choice-and-the-session-stays-the-default.md`):
+> §24.5's API backend now exists, as `memoria.model` — one function per provider
+> behind a plain callable rather than a `ModelBackend` class — off by default and
+> switched on by the author under Settings > Model. Its policy is the first of the
+> four §24.5 lists, "subscription only", until the author chooses the third for a
+> pass by asking for a direct run; every metered call is a `model_call` ledger line,
+> which is §24.5's "the author should be able to tell" made mechanical.
 
 Memoria should separate its durable architecture from the model runtime used to operate on it.
 

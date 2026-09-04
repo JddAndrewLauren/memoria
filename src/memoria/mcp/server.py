@@ -43,6 +43,14 @@ vector, never to generate text, needs no driving service because it needs no
 conversation, and costs no metered spend - the distinction ADR-0007 draws
 between this and the kind of model call §12.1 forbids running unasked.
 
+The ``*_run`` tools (ADR-0010) are the one deliberate widening of that rule:
+a **direct run** executes a pass here, through ``memoria.drivers`` and the
+``memoria.model`` seam, against a metered API - but only when the author
+switched direct runs on under Settings > Model, and still only when asked.
+The server itself still holds no model: it asks the seam for one at the
+point of use and hands it to the driver, and ``model_status()`` says whether
+that will succeed. Off by default, every call ledgered as spend.
+
 See ``docs/tool-surface.md`` for the forced signatures and what is still open.
 
 A bare ``SES-`` read's context manifest (#29) carries a token count per item
@@ -63,6 +71,7 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 import memoria.audit as audit
+import memoria.drivers as drivers
 import memoria.extraction as extraction
 import memoria.human_touched as human_touched
 import memoria.record_extractor as record_extractor
@@ -88,6 +97,15 @@ from memoria.ledger import (
     append_trace,
     append_writing_style,
     session_id_from_env,
+)
+from memoria.model import (
+    SETTINGS_SURFACE,
+    ModelError,
+    ModelFn,
+    ModelUnavailable,
+    Readiness,
+    readiness,
+    require_model,
 )
 from memoria.records import Read, ReadError, read as read_ref, real_paragraphs
 from memoria.repository import NoEvidenceRoot, Repository, from_env
@@ -121,7 +139,12 @@ mcp = MCPServer(
         "follow what it serves - the author's own direction for how their "
         "book is written. The style_* tools are the writing-style analysis "
         "the `writing-style` skill drives; the author confirms its "
-        "observations in Settings, never here."
+        "observations in Settings, never here. model_status() says whether "
+        "the author switched direct runs on under Settings > Model. When it "
+        "says ready, extraction_run, audit_run and style_run execute a pass "
+        "here against a metered API instead of this session reading the "
+        "paragraphs itself - they still run only when the author asked. When "
+        "it is not ready, the skills drive the serve/record tools as before."
     ),
 )
 
@@ -569,40 +592,7 @@ def render_audit_tasks(
             "A proposed rewrite (a finding's patch) follows this writing style.\n\n"
             + writing_style
         )
-    for task in tasks:
-        lines = [
-            f"anchor: {task.anchor}",
-            f"kind: {task.kind}",
-            f"not current because: {task.cause}",
-            "---",
-            "paragraph:",
-            task.paragraph_text,
-            "",
-            f"entry ({task.entry_id}) audit-visible body:",
-            task.entry_audit_visible_body,
-        ]
-        if task.kind == "engagement":
-            lines += [
-                "",
-                "Does this paragraph engage this entry at all? Answer with "
-                "engages (yes/no) and a short note on how.",
-                "",
-                f"subject: {task.subject_prompt}",
-            ]
-        else:
-            lines += [
-                "",
-                "Audit questions:",
-                task.subject_prompt,
-            ]
-            if task.gathered_anchors:
-                lines += [
-                    "",
-                    "gathered evidence - read each with read(ref) before answering:",
-                    *[f"- {a}" for a in task.gathered_anchors],
-                ]
-            lines += ["", audit.AUTHOR_TESTIMONY_POLICY]
-        blocks.append("\n".join(lines))
+    blocks += [audit.render_task(task) for task in tasks]
     return (
         "\n\n===\n\n".join(blocks)
         + f"\n\nawaiting audit: {remaining} (including this batch)"
@@ -749,35 +739,22 @@ def style_brief() -> str:
 
 def render_style_brief(result: style.Brief) -> str:
     """The prompt, then each sample contiguous and unmodified - the same
-    contract ``read`` keeps for evidence."""
-    lines = [result.prompt, "", "## What the style already says", ""]
-    current = style.writing_style_prompt(result.current)
-    if current is None:
-        lines.append("Nothing yet - every observation is new.")
-    else:
-        lines += [
-            "Do not repeat these; propose only what they do not already say.",
+    contract ``read`` keeps for evidence. Both halves are the core's
+    renderings; a direct run serves the same two as its system and user
+    blocks. Between them, the analysis key - a session echoes it back to
+    ``style_record``; a direct run passes it on itself."""
+    key = "\n".join(
+        [
+            "## The analysis key",
             "",
-            current,
+            "Pass this back to `style_record` as `key`; it binds the record to the "
+            "samples below, and a batch is refused if they change in between:",
+            result.analysis_key,
         ]
-    lines += [
-        "",
-        "## The analysis key",
-        "",
-        "Pass this back to `style_record` as `key`; it binds the record to the "
-        "samples below, and a batch is refused if they change in between:",
-        result.analysis_key,
-    ]
-    lines += ["", f"## The samples ({len(result.samples)})", ""]
-    for sample in result.samples:
-        lines += [f"### {sample.ref} - {sample.title}", ""]
-        if sample.truncated:
-            lines += [
-                f"(the first {style.SAMPLE_PARAGRAPH_LIMIT} paragraphs; the source runs longer)",
-                "",
-            ]
-        lines += [sample.text, ""]
-    return "\n".join(lines).rstrip("\n")
+    )
+    return "\n\n".join(
+        [style.render_brief_prompt(result), key, style.render_brief_samples(result)]
+    )
 
 
 @mcp.tool()
@@ -812,6 +789,204 @@ def render_style_outcome(outcome: style.RecordOutcome, total: int) -> str:
     return "\n".join(lines)
 
 
+# --- direct runs (ADR-0010) --------------------------------------------------
+#
+# The one class of tool on this server that reaches a generative model, and
+# it does so through `memoria.model`'s seam at the point of use, never by
+# holding a client. Each tool is `require_model` -> one driver call -> render;
+# the loop, the schemas and the ledgering are the driver's. Off by default:
+# every `*_run` refuses, naming Settings > Model, until the author switches
+# direct runs on.
+
+
+def _model() -> ModelFn:
+    try:
+        return require_model(repository())
+    except ModelUnavailable as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@mcp.tool()
+def model_status() -> str:
+    """Whether a direct run can happen here, and if not, why.
+
+    Call this first. When it says ready, ``extraction_run``, ``audit_run``
+    and ``style_run`` execute a pass on this server against a metered API;
+    when it does not, the skills drive the serve/record tools as before.
+    The switch, the model id and the key live under Settings > Model in the
+    app; nothing here changes them.
+    """
+    return render_model_status(readiness(repository()))
+
+
+def render_model_status(state: Readiness) -> str:
+    lines = [
+        f"direct runs: {'on' if state.enabled else 'off'}",
+        f"provider: {state.provider}",
+        f"model: {state.model}",
+        "API key: "
+        + (f"set (from the {state.api_key_source})" if state.api_key_set else "not set"),
+    ]
+    if state.ready:
+        lines.append(
+            "ready - extraction_run, audit_run and style_run execute a pass here, "
+            "metered, when the author asks for one"
+        )
+    else:
+        lines.append(
+            f"not ready: {state.reason} - the extraction, audit and writing-style "
+            "passes run in this session instead, through the serve/record tools; "
+            f"the author changes this under {SETTINGS_SURFACE}"
+        )
+    return "\n".join(lines)
+
+
+def render_spend(spend: drivers.Spend) -> str:
+    if spend.calls == 0:
+        return "metered: no calls made"
+    return (
+        f"metered: {spend.calls} call(s), {spend.input_tokens} tokens in / "
+        f"{spend.output_tokens} out, on {spend.model}"
+    )
+
+
+def render_rejections(rejected: tuple[drivers.Rejection, ...]) -> list[str]:
+    return [f"rejected {item.anchor} - {item.reason}" for item in rejected]
+
+
+@mcp.tool()
+def extraction_run(limit: int = 20) -> str:
+    """One bounded step of the extraction, executed here: only when
+    ``model_status()`` says ready and the author said go.
+
+    Reads up to ``limit`` paragraphs (one metered call each) and records
+    them; once every paragraph is read, closes the pass and writes up to
+    ``limit`` cluster summaries, leaves first. Call it again until it says
+    ``done`` unless a report contains a rejection; then stop and wait for
+    the author to request a retry. Nothing is lost between calls and nothing
+    repeats. The report names every item the model refused or the core
+    rejected.
+    """
+    if limit < 1:
+        raise ToolError("limit must be at least 1")
+    model = _model()
+    try:
+        report = drivers.run_extraction(repository(), model, session_id(), limit=limit)
+    except (ModelError, extraction.ExtractionError) as exc:
+        raise ToolError(str(exc)) from exc
+    return render_extraction_run(report)
+
+
+def render_extraction_run(report: drivers.ExtractionRun) -> str:
+    lines = [f"phase: {report.phase}"]
+    if report.phase == "paragraphs":
+        lines += [
+            f"paragraphs read: {report.paragraphs_read}, recorded: "
+            f"{report.paragraphs_accepted}, still awaiting extraction: "
+            f"{report.paragraphs_remaining}",
+        ]
+    else:
+        if report.finished:
+            promoted = ", ".join(report.promotions) if report.promotions else "nothing"
+            lines.append(f"pass closed; auto-promoted: {promoted}")
+        lines.append(
+            f"summaries written: {report.summaries_written}, still pending: "
+            f"{report.summaries_remaining}"
+        )
+    lines += render_rejections(report.rejected)
+    lines.append(render_spend(report.spend))
+    if report.rejected:
+        lines.append(
+            "stopped after rejection(s); report them to the author and wait for "
+            "an explicit retry request"
+        )
+    elif report.phase == "done":
+        lines.append(
+            "The extraction asserted nothing. Every candidate is a proposal; "
+            "match terms decide what is placed."
+        )
+    else:
+        lines.append("call extraction_run again to continue")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def audit_run(
+    chapter_number: int,
+    section_number: int | None = None,
+    paragraph_index: int | None = None,
+    limit: int = 20,
+) -> str:
+    """Audit one target here - a chapter, a section, or one highlighted
+    passage - only when ``model_status()`` says ready and the author asked
+    for the audit.
+
+    Answers up to ``limit`` of the target's not-current judgements, one
+    metered call each, and records them exactly as ``audit_record`` would.
+    Call it again while it reports judgements remaining unless a report
+    contains a rejection; then stop and wait for the author to request a
+    retry.
+    """
+    if limit < 1:
+        raise ToolError("limit must be at least 1")
+    model = _model()
+    try:
+        report = drivers.run_audit(
+            repository(),
+            model,
+            session_id(),
+            chapter_number=chapter_number,
+            section_number=section_number,
+            paragraph_index=paragraph_index,
+            limit=limit,
+        )
+    except (ModelError, ValueError) as exc:
+        raise ToolError(str(exc)) from exc
+    return render_audit_run(report)
+
+
+def render_audit_run(report: drivers.AuditRun) -> str:
+    lines = [
+        f"judgements recorded: {report.accepted} ({report.findings} finding(s)); "
+        f"still awaiting audit: {report.remaining}",
+    ]
+    lines += render_rejections(report.rejected)
+    lines.append(render_spend(report.spend))
+    if report.rejected:
+        lines.append(
+            "stopped after rejection(s); report them to the author and wait for "
+            "an explicit retry request"
+        )
+    elif report.remaining:
+        lines.append("call audit_run again to continue")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def style_run() -> str:
+    """Run the writing-style analysis here - only when ``model_status()``
+    says ready and the author asked for it.
+
+    One metered call over every chosen source and uploaded sample; the
+    observations it proposes are recorded exactly as ``style_record``
+    records them, for the author to confirm, change or discard under
+    Settings > Writing style. Nothing here writes the style.
+    """
+    model = _model()
+    try:
+        report = drivers.run_style(repository(), model, session_id())
+    except (ModelError, style.StyleError) as exc:
+        raise ToolError(str(exc)) from exc
+    return render_style_run(report)
+
+
+def render_style_run(report: drivers.StyleRun) -> str:
+    lines = [f"observations proposed: {report.accepted} - awaiting the author in Settings"]
+    lines += render_rejections(report.rejected)
+    lines.append(render_spend(report.spend))
+    return "\n".join(lines)
+
+
 # --- the extraction (#17) ----------------------------------------------------
 
 
@@ -839,26 +1014,10 @@ def extraction_brief() -> str:
 
 
 def render_brief(result: extraction.Brief) -> str:
-    lines = [result.extraction_prompt, "", "## The subjects", ""]
-    for subject in result.subjects:
-        lines += [
-            f"### {subject.id}",
-            "",
-            f"Match: {subject.match}",
-            f"Hazards: {subject.hazards}",
-            f"auto-promote: {'yes' if subject.auto_promote else 'no'}",
-            "",
-        ]
-    lines += ["## The entries that exist", ""]
-    if result.entry_names:
-        lines += [f"- {entry_id} ({name})" for entry_id, name in result.entry_names]
-    else:
-        lines.append(
-            "None yet. Every mention is an unplaced surface form, which is the "
-            "expected state of a fresh archive."
-        )
-    lines += ["", f"paragraphs awaiting extraction: {result.pending}"]
-    return "\n".join(lines)
+    return (
+        extraction.render_brief(result)
+        + f"\n\nparagraphs awaiting extraction: {result.pending}"
+    )
 
 
 @mcp.tool()
@@ -1000,23 +1159,11 @@ def render_summary_task(
     lines = [
         prompt,
         "",
-        f"cluster: {task.cluster_id}",
-        f"level: {task.level}",
         f"membership: {task.memo_key}",
-        f"defined by: {task.label}",
         f"remaining: {remaining}",
         "",
+        extraction.render_summary_task(task),
     ]
-    if task.child_summaries:
-        lines.append("## Its child clusters' summaries")
-        lines.append("")
-        lines += [f"- {summary}" for summary in task.child_summaries]
-    else:
-        lines.append("## Its member paragraphs")
-        lines.append("")
-        lines += [f"- {anchor}" for anchor in task.member_anchors]
-        lines.append("")
-        lines.append("Read them with read(ref) before writing.")
     return "\n".join(lines)
 
 

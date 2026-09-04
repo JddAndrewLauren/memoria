@@ -97,6 +97,11 @@ not exist in the PoC, so at M5 the surface opens from the Section view only (ADR
 
 Where: `poc-plan.md` §3 and §5, part 19 §19.11.
 
+**Note 2026-09-04** (`adr/0010-model-calls-enter-by-choice-and-the-session-stays-the-default.md`):
+a model driver now exists - the direct run, off by default, behind `memoria.model`'s
+seam - and Ask Memoria could one day be built over it. The deferral stands; ADR-0010
+decides who may call a model, not that this surface is built.
+
 ### 2.2 Semantic embeddings — CLOSED 2026-09-02, built at M2
 
 **Built** (#81): `search_semantic(query, filters)` ships on the tool surface
@@ -242,6 +247,7 @@ failure is recognised as evidence rather than as a surprise.
 | A fresh archive shows no candidates until the author runs the extraction | ADR-0005 — one engine, author-launched | The first extraction of a real archive being unaffordably long in one session |
 | Quoted replies are dropped from email records, not kept unindexed | part 05 §5.4 — one body per record, the quote is in the raw file and usually the parent record | A quoted message whose original was never exported (a sent-folder-only export) that the author needs to find by search |
 | docx and pdf are one record per file until a real file breaks it | part 05 §5.2 — start simple; the split rule is the amendment path | A journal-style file whose every paragraph carries one date, polluting Timeline candidates |
+| A direct run puts archive text on a metered third-party API | ADR-0010 — opt-in under Settings > Model, off by default | The author leaving direct runs on without noticing the spend, or a pass the session would have done better |
 | The ingest is planned against an unconfirmed format list | part 05 §5.2 — docx, pdf, email exports assumed | The real archive's bulk turning out to be something else (chat exports, scans) and the normalizer covering none of it |
 
 ---

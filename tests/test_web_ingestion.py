@@ -1,4 +1,4 @@
-"""``GET /api/ingestion`` and the two runs beside it (ADR-0009).
+"""``GET /api/ingestion`` and the two runs beside it (ADR-0011).
 
 The adapter shapes ``memoria.ingestion``'s status and forwards two
 local-only, model-free passes; these tests exercise the shaping and the

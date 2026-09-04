@@ -182,6 +182,24 @@ and badged entry statements. The only half the curation restraint rules and the
 entry write matrix constrain; testimony is never its to write.
 _Avoid_: Scribe, harvester, note-taker, summarizer
 
+### Running a pass
+
+**Session run**:
+A pass that needs a model — the [[extraction]], the [[audit]], the writing-style
+analysis — run as a conversation: Memoria's tools serve text out, the Claude Code
+session reads it, and the results come back as tool arguments. The default, and
+the only way a pass runs until the author says otherwise. Curation is always one.
+_Avoid_: Manual run, interactive mode, subscription mode
+
+**Direct run**:
+The same pass executed by Memoria itself against a metered model API — the backend
+or the MCP server holding the model's end of the conversation — off by default and
+switched on by the author under Settings > Model (ADR-0010). Still author-launched,
+from a button or a tool call; bounded per call and resumable; every model call a
+ledger line the author can count. The prompts, the validation and what is stored
+are exactly a session run's.
+_Avoid_: API mode, autopilot, background pass, headless run, model-driving service
+
 ### Author knowledge
 
 **Author testimony**:

@@ -27,7 +27,20 @@ interface Stub {
   current: StyleOut;
   onPut?: (body: unknown) => Response | undefined;
   onPost?: (url: string, body: unknown) => Response | undefined;
+  // Settings > Model's answer (ADR-0010); off unless a test says so.
+  model?: Record<string, unknown>;
 }
+
+const MODEL_OFF = {
+  enabled: false,
+  provider: "anthropic",
+  model: "claude-opus-5",
+  api_key_set: false,
+  api_key_source: null,
+  ready: false,
+  reason: "direct runs are off",
+};
+const MODEL_READY = { ...MODEL_OFF, enabled: true, api_key_set: true, api_key_source: "settings", ready: true, reason: null };
 
 function stubFetch(stub: Stub) {
   const calls: { url: string; method: string; body: unknown }[] = [];
@@ -67,6 +80,39 @@ function stubFetch(stub: Stub) {
           ],
         };
         return new Response(JSON.stringify(stub.current), { status: 200 });
+      }
+      if (url.endsWith("/api/style/analyse") && method === "POST") {
+        const custom = stub.onPost?.(url, body);
+        if (custom) return custom;
+        stub.current = {
+          ...stub.current,
+          pending: [
+            ...stub.current.pending,
+            { id: 9, aspect: "diction", observation: "Reach for the plain word.", example: "The deck went up." },
+          ],
+        };
+        return new Response(
+          JSON.stringify({
+            accepted: 1,
+            rejected: [],
+            spend: { calls: 1, model: "claude-opus-5" },
+            style: stub.current,
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.endsWith("/api/model")) {
+        return new Response(JSON.stringify(stub.model ?? MODEL_OFF), { status: 200 });
+      }
+      if (url.endsWith("/api/extraction")) {
+        return new Response(
+          JSON.stringify({
+            paragraphs: 12, extracted: 4, pending: 8, candidates_raw: 0, candidates_above_threshold: 0,
+            unplaced_forms: 0, proposed_match_terms: 0, clusters: 0, summaries_done: 0, summaries_pending: 0,
+            derived: false,
+          }),
+          { status: 200 },
+        );
       }
       if (url.includes("/api/style") && method === "PUT") {
         const custom = stub.onPut?.(body);
@@ -282,6 +328,39 @@ describe("the settings dialog", () => {
       filename: "Letter to Bob.txt",
       content: btoa("Dear Bob,\n\nNo."),
     });
+  });
+
+  it("has a Model row that opens the direct-run settings", async () => {
+    stubFetch({ current: style() });
+    renderDialog();
+    await screen.findByLabelText("Direction");
+
+    const nav = screen.getByRole("navigation", { name: "Settings sections" });
+    expect(within(nav).getAllByRole("button").map((b) => b.textContent)).toEqual(["Writing style", "Model"]);
+    fireEvent.click(within(nav).getByRole("button", { name: "Model" }));
+
+    expect(await screen.findByLabelText("Let Memoria call the model directly")).not.toBeChecked();
+    expect(screen.getByText("Not ready: direct runs are off.")).toBeInTheDocument();
+    expect(await screen.findByText(/8 awaiting/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /run extraction/i })).not.toBeInTheDocument();
+  });
+
+  it("offers Analyse now only when a direct run is ready, and shows what it proposed", async () => {
+    stubFetch({ current: style() });
+    renderDialog();
+    await screen.findByLabelText("Direction");
+    expect(screen.getByText("/writing-style")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /analyse now/i })).not.toBeInTheDocument();
+    vi.unstubAllGlobals();
+
+    const calls = stubFetch({ current: style({ pending: [] }), model: MODEL_READY });
+    renderDialog();
+    const button = await screen.findByRole("button", { name: /analyse now/i });
+    fireEvent.click(button);
+
+    await screen.findByText("Reach for the plain word.");
+    expect(calls.some((c) => c.url.endsWith("/api/style/analyse") && c.method === "POST")).toBe(true);
+    expect(screen.getByText(/1 proposed · 1 metered call/)).toBeInTheDocument();
   });
 
   it("adds a chosen source from the archive and removes one", async () => {

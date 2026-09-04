@@ -51,6 +51,24 @@ const REVIEW = {
   sessions: ["SES-20260912-1432", "SES-20260913-0900"],
 };
 
+const MODEL_OFF = {
+  enabled: false,
+  provider: "anthropic",
+  model: "claude-opus-5",
+  api_key_set: false,
+  api_key_source: null,
+  ready: false,
+  reason: "direct runs are off",
+};
+const MODEL_READY = { ...MODEL_OFF, enabled: true, api_key_set: true, api_key_source: "settings", ready: true, reason: null };
+const AUDIT_DONE = {
+  accepted: 2,
+  findings: 1,
+  remaining: 0,
+  rejected: [],
+  spend: { calls: 2, model: "claude-opus-5" },
+};
+
 const CITATION = {
   ref: "src-000184-p17",
   citation: "SRC-000184 ¶17",
@@ -72,6 +90,10 @@ const CITATION = {
 
 type Overrides = {
   review?: Record<string, unknown>;
+  // Settings > Model's answer (ADR-0010); off unless a test says so.
+  model?: Record<string, unknown>;
+  // What each successive POST to the audit's button serves; the last repeats.
+  audits?: Record<string, unknown>[];
   // What each successive read of the review serves; the last one repeats.
   reviews?: Record<string, unknown>[];
   onPut?: (url: string, body: unknown) => Response;
@@ -92,6 +114,11 @@ function stubApi(overrides: Overrides = {}) {
               { status: 200 },
             ));
         return handler(url, JSON.parse(String(init.body)));
+      }
+      if (init?.method === "POST" && url.endsWith("/audit")) {
+        const queued = overrides.audits ?? [];
+        const served = queued.length > 1 ? queued.shift() : queued[0];
+        return new Response(JSON.stringify(served ?? AUDIT_DONE), { status: 200 });
       }
       if (init?.method === "POST") {
         const handler =
@@ -115,6 +142,9 @@ function stubApi(overrides: Overrides = {}) {
       }
       if (url.includes("/api/read?ref=")) {
         return new Response(JSON.stringify(CITATION), { status: 200 });
+      }
+      if (url.endsWith("/api/model")) {
+        return new Response(JSON.stringify(overrides.model ?? MODEL_OFF), { status: 200 });
       }
       if (url.includes("/api/sources") || url.includes("/api/subjects") || url.includes("/api/manuscript")) {
         return new Response(JSON.stringify({ items: [], chapters: [], total: 0, limit: 0, offset: 0, is_built: true }), {
@@ -463,5 +493,66 @@ describe("the Review surface", () => {
     stubApi({ review: { ...REVIEW, findings: [], verdicts_current: 6, verdicts_not_current: 0 } });
     renderReview();
     expect(await screen.findByText(/The audit found nothing to disagree with/)).toBeInTheDocument();
+  });
+
+  it("offers no button while direct runs are off, and keeps saying the audit runs from a session", async () => {
+    stubApi({ review: { ...REVIEW, findings: [], verdicts_current: 0, verdicts_not_current: 6 } });
+    renderReview();
+    expect(await screen.findByText(/Run one from a session/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /run audit/i })).not.toBeInTheDocument();
+  });
+
+  it("runs the audit in steps until nothing remains, then re-reads the review", async () => {
+    stubApi({
+      model: MODEL_READY,
+      reviews: [
+        { ...REVIEW, findings: [], verdicts_current: 0, verdicts_not_current: 6 },
+        REVIEW,
+      ],
+      audits: [
+        { ...AUDIT_DONE, accepted: 4, findings: 0, remaining: 2 },
+        AUDIT_DONE,
+      ],
+    });
+    renderReview();
+
+    fireEvent.click(await screen.findByRole("button", { name: /run audit/i }));
+
+    expect(await screen.findByText(/Contemporaneous evidence places/)).toBeInTheDocument();
+    const audits = fetchCalls().filter((url) => url.endsWith("/audit"));
+    expect(audits).toEqual(["/api/sections/SEC-0001/audit", "/api/sections/SEC-0001/audit"]);
+    expect(screen.getByText(/2 judgements recorded · 1 finding · every judgement current · 2 metered calls/)).toBeInTheDocument();
+    expect(fetchCalls().filter((url) => url.endsWith("/review")).length).toBe(2);
+  });
+
+  it("requires an explicit retry after an audit judgement is rejected", async () => {
+    stubApi({
+      model: MODEL_READY,
+      review: { ...REVIEW, findings: [], verdicts_current: 0, verdicts_not_current: 2 },
+      audits: [
+        {
+          ...AUDIT_DONE,
+          accepted: 0,
+          findings: 0,
+          remaining: 2,
+          rejected: [{ anchor: "02/01#7|SUB-people/bob", reason: "the model refused" }],
+        },
+        AUDIT_DONE,
+      ],
+    });
+    renderReview();
+
+    fireEvent.click(await screen.findByRole("button", { name: /run audit/i }));
+
+    expect(await screen.findByText(/1 rejected/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /run audit/i })).toBeEnabled(),
+    );
+    expect(fetchCalls().filter((url) => url.endsWith("/audit"))).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /run audit/i }));
+    await waitFor(() =>
+      expect(fetchCalls().filter((url) => url.endsWith("/audit"))).toHaveLength(2),
+    );
   });
 });

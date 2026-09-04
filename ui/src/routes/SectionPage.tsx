@@ -11,6 +11,7 @@ import {
   type SectionParagraphOut,
 } from "../api/client";
 import { Badge } from "../components/Badge";
+import { RunAuditButton, useModelReadiness } from "../components/DirectRun";
 import { useCitationPanel } from "../lib/citationPanel";
 
 // The five staleness causes `memoria.audit.STALENESS_CAUSES` names (part 06
@@ -46,6 +47,9 @@ export default function SectionPage() {
     queryFn: () => readSection(sectionId as string),
     enabled: Boolean(sectionId),
   });
+  // Read before the early returns below: a hook, so its call must not
+  // depend on the section having loaded.
+  const { ready: directRunReady } = useModelReadiness();
 
   if (section.isLoading) return <p className="p-8 text-sm text-muted">Loading...</p>;
   if (section.isError) {
@@ -93,11 +97,17 @@ export default function SectionPage() {
             identical on every not-current paragraph, and the distinction
             between causes is carried beside each one. */}
         {data.has_draft && data.paragraphs.length > 0 && (
-          <p className="mb-4 max-w-[640px] font-mono text-[11px] text-muted">
-            {notCurrentParagraphs === 0
-              ? "Every paragraph is current."
-              : `${notCurrentParagraphs} of ${data.paragraphs.length} paragraphs not current · audit this section from a session to bring them current`}
-          </p>
+          <div className="mb-4 flex max-w-[640px] flex-wrap items-center gap-3">
+            <p className="font-mono text-[11px] text-muted">
+              {notCurrentParagraphs === 0
+                ? "Every paragraph is current."
+                : directRunReady
+                  ? `${notCurrentParagraphs} of ${data.paragraphs.length} paragraphs not current`
+                  : `${notCurrentParagraphs} of ${data.paragraphs.length} paragraphs not current · audit this section from a session to bring them current`}
+            </p>
+            {/* ADR-0010: the audit's button, only when direct runs are on. */}
+            {notCurrentParagraphs > 0 && <RunAuditButton sectionId={data.id} />}
+          </div>
         )}
 
         {!data.has_draft ? (

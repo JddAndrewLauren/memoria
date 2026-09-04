@@ -5,14 +5,17 @@ import {
   listAllSources,
   readStyle,
   resolveObservation,
+  runStyleAnalysis,
   updateStyle,
   uploadStyleSample,
   type SourceSummary,
   type StyleObservationOut,
   type StyleOut,
 } from "../api/client";
+import { Region } from "./SettingsRegion";
+import { RunButton, describeSpend, useModelReadiness } from "./DirectRun";
 
-const STYLE_KEY = ["style"] as const;
+export const STYLE_KEY = ["style"] as const;
 
 /**
  * The writing style (ADR-0009): the author's book-wide direction for how
@@ -337,6 +340,7 @@ function encodeFile(file: File): Promise<string> {
 
 function Analysis({ style }: { style: StyleOut }) {
   const queryClient = useQueryClient();
+  const { ready: directRunReady } = useModelReadiness();
   const [confirmedThisVisit, setConfirmedThisVisit] = useState<string[]>([]);
   const [discardedThisVisit, setDiscardedThisVisit] = useState(0);
   const pending = style.pending;
@@ -368,12 +372,33 @@ function Analysis({ style }: { style: StyleOut }) {
   return (
     <Region
       label="Analyse your writing"
-      note="A model reads the samples above and proposes observations about how you write. It runs as a Claude Code session, never from here."
+      note="A model reads the samples above and proposes observations about how you write. Its observations appear here for you to confirm, change or discard."
     >
-      <p className="mb-3 rounded border border-border bg-panel px-3 py-2 text-xs text-secondary">
-        Run <span className="font-mono">/writing-style</span> in a Claude Code session with the
-        Memoria server up. Its observations appear here for you to confirm, change or discard.
-      </p>
+      {directRunReady ? (
+        <div className="mb-3">
+          <RunButton
+            label="Analyse now"
+            runningLabel="Analysing…"
+            step={async () => {
+              const result = await runStyleAnalysis();
+              queryClient.setQueryData<StyleOut>(STYLE_KEY, result.style);
+              const rejected =
+                result.rejected.length > 0 ? ` · ${result.rejected.length} rejected` : "";
+              return {
+                done: true,
+                canContinue: false,
+                summary: `${result.accepted} proposed${rejected} · ${describeSpend(result.spend)}`,
+              };
+            }}
+          />
+        </div>
+      ) : (
+        <p className="mb-3 rounded border border-border bg-panel px-3 py-2 text-xs text-secondary">
+          Run <span className="font-mono">/writing-style</span> in a Claude Code session with the
+          Memoria server up. With direct runs on under Settings &gt; Model, a button appears here
+          instead.
+        </p>
+      )}
 
       {current ? (
         <div
@@ -473,23 +498,5 @@ function Analysis({ style }: { style: StyleOut }) {
         </ul>
       )}
     </Region>
-  );
-}
-
-function Region({
-  label,
-  note,
-  children,
-}: {
-  label: string;
-  note?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section>
-      <h4 className="font-mono text-[11px] uppercase tracking-wide text-secondary">{label}</h4>
-      {note && <p className="mb-2 mt-0.5 max-w-[560px] text-xs text-muted">{note}</p>}
-      {children}
-    </section>
   );
 }

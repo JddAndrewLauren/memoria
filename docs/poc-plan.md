@@ -156,6 +156,14 @@ service on personal subscription auth, then building a capacity scheduler to
 manage the resulting fragility. Using Claude Code as an interactive client is its
 ordinary supported use.
 
+> **Amended 2026-09-04** (`adr/0010-model-calls-enter-by-choice-and-the-session-stays-the-default.md`):
+> the backend and the MCP server may call a model directly — a **direct run** —
+> when the author has switched it on under Settings > Model, against their own
+> metered API key. Still no service and no scheduler: a direct run is an
+> author-launched act from a button or a tool call, bounded per call, resumable,
+> and ledgered per model call as spend. Off by default; the session run above
+> stays the way the system works when nobody has chosen otherwise.
+
 §10 survives without Memoria owning the conversation loop: Claude Code writes
 per-session JSONL under `~/.claude/projects/<slug>/<session-id>.jsonl` with
 `sessionId`, `parentUuid` chains and a uuid per message, so

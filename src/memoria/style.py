@@ -544,6 +544,35 @@ def brief(repository: Repository) -> Brief:
     )
 
 
+def render_brief_prompt(served: Brief) -> str:
+    """The instruction half of a brief: the analysis prompt verbatim, then
+    what the style already says so nothing is proposed twice. The one
+    rendering (ADR-0004, ADR-0009) the ``style_brief`` tool and a direct
+    run's system block both serve."""
+    lines = [served.prompt, "", "## What the style already says", ""]
+    current = writing_style_prompt(served.current)
+    if current is None:
+        lines.append("Nothing yet - every observation is new.")
+    else:
+        lines += ["Do not repeat these; propose only what they do not already say.", "", current]
+    return "\n".join(lines)
+
+
+def render_brief_samples(served: Brief) -> str:
+    """The sample half of a brief: every sample contiguous and unmodified,
+    the same contract ``read`` keeps for evidence."""
+    lines = [f"## The samples ({len(served.samples)})", ""]
+    for sample in served.samples:
+        lines += [f"### {sample.ref} - {sample.title}", ""]
+        if sample.truncated:
+            lines += [
+                f"(the first {SAMPLE_PARAGRAPH_LIMIT} paragraphs; the source runs longer)",
+                "",
+            ]
+        lines += [sample.text, ""]
+    return "\n".join(lines).rstrip("\n")
+
+
 @dataclass
 class RecordedObservation:
     """One observation as the model sends it back."""

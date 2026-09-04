@@ -1,5 +1,9 @@
 # The web adapter may launch a model-free derived-state pass, locally, one at a time
 
+_Renumbered 2026-09-04: this decision and the writing style (ADR-0009) both landed as
+0009 from parallel branches. The writing style kept the number, since ADR-0010 already
+builds on it; this one took the next free one. Its date order is unchanged._
+
 Until 2026-09-03 the web adapter (ADR-0002) never ran a pass. Its writes were the
 author's own acts through the write path (ADR-0003) and one local convenience, "Reveal in
 editor"; every pass — `memoria normalize`, `memoria rebuild`, the extraction — was

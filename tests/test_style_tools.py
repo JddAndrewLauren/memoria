@@ -217,3 +217,6 @@ def test_the_skill_names_every_analysis_tool_and_holds_no_copy_of_the_prompt():
     first_rule = style.STYLE_ANALYSIS_PROMPT.splitlines()[2]
     assert first_rule not in text
     assert "ask" in text.lower() and "Settings" in text
+    # ADR-0010: the direct run is offered after the author's go, never before.
+    assert text.index("model_status()") > text.index("Then ask whether to run it")
+    assert "`style_run()`" in text

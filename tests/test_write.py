@@ -508,6 +508,10 @@ ALLOWED_WRITERS = {
     "subjects.py",
     "sessions.py",
     "context_manifest.py",
+    # ADR-0010: the direct-run settings file beside the index - machine-local,
+    # gitignored, written 0600 and never a durable file a commit closes,
+    # which is exactly why it must not go through `memoria.write`.
+    "model.py",
 }
 FILE_WRITING_CALLS = {
     "write_text", "write_bytes",

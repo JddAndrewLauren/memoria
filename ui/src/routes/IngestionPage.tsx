@@ -22,7 +22,7 @@ import { STATE_ORDER, drawState, extractedLabel } from "../lib/ingestion";
  * convert, or has no converter, is visible at all: it never becomes a
  * record, so the SOURCES tree cannot list it.
  *
- * Two actions, "Normalize" and "Rebuild index" (ADR-0009), present only when
+ * Two actions, "Normalize" and "Rebuild index" (ADR-0011), present only when
  * `/api/locality` says this browser and the server share a machine - absent
  * otherwise, never disabled. Each is one synchronous pass; a 409 is the
  * other one still running. The extraction is not launchable here: it needs
@@ -157,7 +157,7 @@ function UnitRow({ unit, indexBuilt }: { unit: UnitStatusOut; indexBuilt: boolea
   );
 }
 
-// The two passes (ADR-0009). Both buttons disable while either runs: they
+// The two passes (ADR-0011). Both buttons disable while either runs: they
 // share one lock on the server, and a click that would only earn a 409 is
 // not an act worth offering.
 function Actions({ status }: { status: IngestionStatusOut }) {

@@ -99,7 +99,7 @@ export interface paths {
         put?: never;
         /**
          * Ingestion Normalize
-         * @description Run one normalization pass (ADR-0009): the same pass ``memoria
+         * @description Run one normalization pass (ADR-0011): the same pass ``memoria
          *     normalize`` runs, on the author's own machine only - the same peer
          *     check ``reveal`` makes, for the same reason. Synchronous: the response
          *     is the pass's report. A 409 is another pass already running.
@@ -122,7 +122,7 @@ export interface paths {
         put?: never;
         /**
          * Ingestion Rebuild
-         * @description Regenerate the index from the records on disk (ADR-0009), with no
+         * @description Regenerate the index from the records on disk (ADR-0011), with no
          *     embedder - ``memoria rebuild`` remains the path that loads the model
          *     (ADR-0007). Local-only and synchronous, as ``/ingestion/normalize``.
          */
@@ -694,6 +694,129 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Model Settings
+         * @description Settings > Model's one read: the switch, the model id, whether a key
+         *     is set and where from, and whether a direct run would succeed. Never
+         *     the key.
+         */
+        get: operations["read_model_settings_api_model_get"];
+        /**
+         * Update Model Settings
+         * @description The author changing the switch, the model, or the stored key. The
+         *     provider is fixed to the one this slice ships; ``api_key`` absent
+         *     leaves the stored key alone and empty clears it.
+         */
+        put: operations["update_model_settings_api_model_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/extraction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Extraction Status
+         * @description Where the extraction stands - the numbers Settings shows beside the
+         *     Run button, so the author sees what a run would read before it spends
+         *     anything. A read; nothing here runs.
+         */
+        get: operations["read_extraction_status_api_extraction_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/extraction/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Extraction
+         * @description One bounded step of a direct extraction run: up to ``limit``
+         *     paragraphs read and recorded, or - once every paragraph is read - the
+         *     pass closed and up to ``limit`` summaries written. **409** while direct
+         *     runs are off or not ready (the detail names Settings > Model), **502**
+         *     when the provider fails mid-run (what was recorded stays).
+         */
+        post: operations["run_extraction_api_extraction_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sections/{section_id}/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Audit
+         * @description The audit's button on a section, or on one paragraph of it
+         *     (CONTEXT.md: "a button on a section or a chapter, or on a highlighted
+         *     passage") - run here, directly. Up to ``limit`` judgements answered
+         *     and recorded per call; the client calls again while ``remaining`` is
+         *     above zero. **404** for a section that is not there, **409** while
+         *     direct runs are off, **502** when the provider fails.
+         */
+        post: operations["run_audit_api_sections__section_id__audit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/style/analyse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Style Analysis
+         * @description Settings > Writing style's "Analyse now": the analysis run here,
+         *     directly, its proposed observations recorded for the author to confirm
+         *     exactly as the skill's ``style_record`` records them. **400** with
+         *     nothing to analyse, **409** while direct runs are off, **502** when the
+         *     provider fails.
+         */
+        post: operations["run_style_analysis_api_style_analyse_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -753,6 +876,31 @@ export interface components {
             matched_by: string[];
             /** Sources */
             sources: string[];
+        };
+        /** AuditRunOut */
+        AuditRunOut: {
+            /** Accepted */
+            accepted: number;
+            /** Findings */
+            findings: number;
+            /** Remaining */
+            remaining: number;
+            /** Rejected */
+            rejected: components["schemas"]["RejectionOut"][];
+            spend: components["schemas"]["SpendOut"];
+        };
+        /**
+         * AuditRunRequest
+         * @description A section's audit, or one highlighted passage of it.
+         */
+        AuditRunRequest: {
+            /**
+             * Limit
+             * @default 20
+             */
+            limit: number;
+            /** Paragraph Index */
+            paragraph_index?: number | null;
         };
         /**
          * CitationOut
@@ -913,6 +1061,62 @@ export interface components {
             match_terms: string[];
         };
         /**
+         * ExtractionRunOut
+         * @description One bounded step of a direct extraction run. ``phase`` is what this
+         *     call did - ``paragraphs``, ``summaries`` or ``done`` - and the client
+         *     calls again until it is ``done``.
+         */
+        ExtractionRunOut: {
+            /** Phase */
+            phase: string;
+            /** Paragraphs Read */
+            paragraphs_read: number;
+            /** Paragraphs Accepted */
+            paragraphs_accepted: number;
+            /** Paragraphs Remaining */
+            paragraphs_remaining: number;
+            /** Summaries Written */
+            summaries_written: number;
+            /** Summaries Remaining */
+            summaries_remaining: number;
+            /** Finished */
+            finished: boolean;
+            /** Promotions */
+            promotions: string[];
+            /** Rejected */
+            rejected: components["schemas"]["RejectionOut"][];
+            spend: components["schemas"]["SpendOut"];
+        };
+        /**
+         * ExtractionStatusOut
+         * @description Where the extraction stands - what the Settings panel shows before
+         *     the author spends anything.
+         */
+        ExtractionStatusOut: {
+            /** Paragraphs */
+            paragraphs: number;
+            /** Extracted */
+            extracted: number;
+            /** Pending */
+            pending: number;
+            /** Candidates Raw */
+            candidates_raw: number;
+            /** Candidates Above Threshold */
+            candidates_above_threshold: number;
+            /** Unplaced Forms */
+            unplaced_forms: number;
+            /** Proposed Match Terms */
+            proposed_match_terms: number;
+            /** Clusters */
+            clusters: number;
+            /** Summaries Done */
+            summaries_done: number;
+            /** Summaries Pending */
+            summaries_pending: number;
+            /** Derived */
+            derived: boolean;
+        };
+        /**
          * FallbackOut
          * @description A phrase the scope named that resolved to no entry, and the
          *     unpromoted candidate assembly fell back to - named, never silent
@@ -1026,7 +1230,7 @@ export interface components {
         };
         /**
          * IngestionRunOut
-         * @description What one launched pass did (ADR-0009): ``kind`` is ``normalize`` or
+         * @description What one launched pass did (ADR-0011): ``kind`` is ``normalize`` or
          *     ``rebuild``, ``summary`` the counts that pass's own report carries.
          */
         IngestionRunOut: {
@@ -1118,6 +1322,45 @@ export interface components {
             token: string;
             /** Match Terms */
             match_terms: string[];
+        };
+        /**
+         * ModelSettingsOut
+         * @description Whether a direct run can happen, and the settings behind that - the
+         *     whole of what a client learns. **The key is never returned**:
+         *     ``api_key_set`` and where it came from (``"environment"`` for
+         *     ``ANTHROPIC_API_KEY``, ``"settings"`` for the stored one) are all the
+         *     surface shows. ``reason`` says why ``ready`` is false.
+         */
+        ModelSettingsOut: {
+            /** Enabled */
+            enabled: boolean;
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Api Key Set */
+            api_key_set: boolean;
+            /** Api Key Source */
+            api_key_source: string | null;
+            /** Ready */
+            ready: boolean;
+            /** Reason */
+            reason: string | null;
+        };
+        /**
+         * ModelSettingsUpdate
+         * @description The author changing the switch, the model, or the stored key.
+         *     ``api_key`` absent or ``None`` leaves the stored key as it is; the empty
+         *     string clears it; anything else replaces it. The key is written to the
+         *     machine-local settings file only, never anywhere a commit could close.
+         */
+        ModelSettingsUpdate: {
+            /** Enabled */
+            enabled: boolean;
+            /** Model */
+            model: string;
+            /** Api Key */
+            api_key?: string | null;
         };
         /**
          * NotCurrentOut
@@ -1259,6 +1502,13 @@ export interface components {
             /** Citing Settlements */
             citing_settlements: string[];
         };
+        /** RejectionOut */
+        RejectionOut: {
+            /** Anchor */
+            anchor: string;
+            /** Reason */
+            reason: string;
+        };
         /**
          * RevealSourceResponse
          * @description Confirms "Reveal in editor" (#65) launched.
@@ -1330,6 +1580,18 @@ export interface components {
             token: string;
             /** Text */
             text: string;
+        };
+        /**
+         * RunRequest
+         * @description How much one direct-run call may do: at most ``limit`` metered model
+         *     calls. The client loops, showing each report, until the run says so.
+         */
+        RunRequest: {
+            /**
+             * Limit
+             * @default 20
+             */
+            limit: number;
         };
         /**
          * SampleUpload
@@ -1633,6 +1895,22 @@ export interface components {
             original_locator: string;
         };
         /**
+         * SpendOut
+         * @description What one call cost, in the units this surface may show: the metered
+         *     calls made, on the model that answered. Part 13 §24.5's "the author
+         *     should be able to tell whether a task is using subscription capacity or
+         *     metered API usage", on the surface that started the task - and no
+         *     further: part 14 §40 (as amended by ADR-0001) bans the other figure from
+         *     every author-facing view, so what each call cost the model stays in the
+         *     ledger's ``model_call`` lines and on the model-facing MCP surface.
+         */
+        SpendOut: {
+            /** Calls */
+            calls: number;
+            /** Model */
+            model: string;
+        };
+        /**
          * StatementOut
          * @description One paragraph of an entry body, with its badge if it has one -
          *     mirrors ``memoria.subjects.Statement`` field for field.
@@ -1694,6 +1972,19 @@ export interface components {
             confirmed_count: number;
             /** Discarded Count */
             discarded_count: number;
+        };
+        /**
+         * StyleRunOut
+         * @description One direct writing-style analysis, and the style as Settings shows
+         *     it afterwards - the proposed observations now in ``style.pending``.
+         */
+        StyleRunOut: {
+            /** Accepted */
+            accepted: number;
+            /** Rejected */
+            rejected: components["schemas"]["RejectionOut"][];
+            spend: components["schemas"]["SpendOut"];
+            style: components["schemas"]["StyleOut"];
         };
         /**
          * StyleSampleOut
@@ -2577,6 +2868,167 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_model_settings_api_model_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSettingsOut"];
+                };
+            };
+        };
+    };
+    update_model_settings_api_model_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSettingsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_extraction_status_api_extraction_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtractionStatusOut"];
+                };
+            };
+        };
+    };
+    run_extraction_api_extraction_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtractionRunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_audit_api_sections__section_id__audit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                section_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuditRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditRunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_style_analysis_api_style_analyse_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StyleRunOut"];
                 };
             };
         };

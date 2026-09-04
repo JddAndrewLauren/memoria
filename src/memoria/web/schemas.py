@@ -794,6 +794,122 @@ class SampleUpload(BaseModel):
     content: Base64Bytes = Field(max_length=8 * 1024 * 1024)
 
 
+# --- direct runs (ADR-0010) ------------------------------------------------------
+
+
+class ModelSettingsOut(BaseModel):
+    """Whether a direct run can happen, and the settings behind that - the
+    whole of what a client learns. **The key is never returned**:
+    ``api_key_set`` and where it came from (``"environment"`` for
+    ``ANTHROPIC_API_KEY``, ``"settings"`` for the stored one) are all the
+    surface shows. ``reason`` says why ``ready`` is false."""
+
+    enabled: bool
+    provider: str
+    model: str
+    api_key_set: bool
+    api_key_source: str | None
+    ready: bool
+    reason: str | None
+
+
+class ModelSettingsUpdate(BaseModel):
+    """The author changing the switch, the model, or the stored key.
+    ``api_key`` absent or ``None`` leaves the stored key as it is; the empty
+    string clears it; anything else replaces it. The key is written to the
+    machine-local settings file only, never anywhere a commit could close."""
+
+    enabled: bool
+    model: str = Field(min_length=1)
+    api_key: str | None = None
+
+
+class RunRequest(BaseModel):
+    """How much one direct-run call may do: at most ``limit`` metered model
+    calls. The client loops, showing each report, until the run says so."""
+
+    limit: int = Field(default=20, ge=1, le=200)
+
+
+class AuditRunRequest(RunRequest):
+    """A section's audit, or one highlighted passage of it."""
+
+    paragraph_index: int | None = None
+
+
+class RejectionOut(BaseModel):
+    anchor: str
+    reason: str
+
+
+class SpendOut(BaseModel):
+    """What one call cost, in the units this surface may show: the metered
+    calls made, on the model that answered. Part 13 §24.5's "the author
+    should be able to tell whether a task is using subscription capacity or
+    metered API usage", on the surface that started the task - and no
+    further: part 14 §40 (as amended by ADR-0001) bans the other figure from
+    every author-facing view, so what each call cost the model stays in the
+    ledger's ``model_call`` lines and on the model-facing MCP surface."""
+
+    calls: int
+    model: str
+
+
+class ExtractionStatusOut(BaseModel):
+    """Where the extraction stands - what the Settings panel shows before
+    the author spends anything."""
+
+    paragraphs: int
+    extracted: int
+    pending: int
+    candidates_raw: int
+    candidates_above_threshold: int
+    unplaced_forms: int
+    proposed_match_terms: int
+    clusters: int
+    summaries_done: int
+    summaries_pending: int
+    derived: bool
+
+
+class ExtractionRunOut(BaseModel):
+    """One bounded step of a direct extraction run. ``phase`` is what this
+    call did - ``paragraphs``, ``summaries`` or ``done`` - and the client
+    calls again until it is ``done``."""
+
+    phase: str
+    paragraphs_read: int
+    paragraphs_accepted: int
+    paragraphs_remaining: int
+    summaries_written: int
+    summaries_remaining: int
+    finished: bool
+    promotions: list[str]
+    rejected: list[RejectionOut]
+    spend: SpendOut
+
+
+class AuditRunOut(BaseModel):
+    accepted: int
+    findings: int
+    remaining: int
+    rejected: list[RejectionOut]
+    spend: SpendOut
+
+
+class StyleRunOut(BaseModel):
+    """One direct writing-style analysis, and the style as Settings shows
+    it afterwards - the proposed observations now in ``style.pending``."""
+
+    accepted: int
+    rejected: list[RejectionOut]
+    spend: SpendOut
+    style: StyleOut
+
+
+# --- the ingestion surface (ADR-0011) --------------------------------------------
+
+
 class UnitStatusOut(BaseModel):
     """One raw unit's ingestion row (``memoria.ingestion.UnitStatus``).
 
@@ -834,7 +950,7 @@ class IngestionStatusOut(BaseModel):
 
 
 class IngestionRunOut(BaseModel):
-    """What one launched pass did (ADR-0009): ``kind`` is ``normalize`` or
+    """What one launched pass did (ADR-0011): ``kind`` is ``normalize`` or
     ``rebuild``, ``summary`` the counts that pass's own report carries."""
 
     kind: str
