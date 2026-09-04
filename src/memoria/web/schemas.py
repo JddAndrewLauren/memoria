@@ -905,3 +905,61 @@ class StyleRunOut(BaseModel):
     rejected: list[RejectionOut]
     spend: SpendOut
     style: StyleOut
+
+
+# --- a new section (ADR-0011) --------------------------------------------------
+
+
+class SectionCreate(BaseModel):
+    """The author writing a new section from the dialog: the prose, and the
+    brief where they wrote one. ``brief`` empty means none was written and
+    the prose's opening stands in, marked unconfirmed (CONTEXT.md's
+    *unconfirmed brief*), for the author to confirm or edit later."""
+
+    brief: str = ""
+    draft: str = Field(min_length=1)
+
+
+class SectionCreated(BaseModel):
+    """The section that now exists: its stable id, where it landed
+    (appended to its chapter), and whether its brief awaits confirmation."""
+
+    id: str
+    chapter_id: str
+    chapter_number: int
+    section_number: int
+    unconfirmed: bool
+
+
+class GrillTurnIn(BaseModel):
+    """One turn of the interview as the dialog holds it."""
+
+    role: str = Field(pattern="^(author|interviewer)$")
+    text: str
+
+
+class GrillRequest(BaseModel):
+    """One interviewer turn of a grilling about a new section of
+    ``chapter_id`` (ADR-0011), run directly. The transcript is the client's:
+    the whole of it comes with every request and none of it is kept.
+    ``source_ref`` is the source the dialog was opened from, if any, whose
+    text joins the interviewer's context."""
+
+    chapter_id: str
+    source_ref: str | None = None
+    turns: list[GrillTurnIn] = []
+
+
+class GrillOut(BaseModel):
+    """The interviewer's turn. ``done`` false: ``question`` and
+    ``recommended_answer``; ``done`` true: ``brief`` and ``draft``, for the
+    author to edit and write. A reply the run could not use is the one
+    ``rejected`` item, and the author sends the transcript again."""
+
+    done: bool
+    question: str
+    recommended_answer: str
+    brief: str
+    draft: str
+    rejected: list[RejectionOut]
+    spend: SpendOut

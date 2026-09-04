@@ -306,6 +306,14 @@ def append_style_brief(repository: Repository, session_id: str, served: list[str
     _append(repository, session_id, {"tool": "style_brief", "served": served})
 
 
+def append_grill_brief(repository: Repository, session_id: str, served: list[str]) -> None:
+    """Ledger one served grilling brief (ADR-0011): the chapter's briefs and,
+    when the interview was opened from a source, that source's text entered
+    a context - named by ``CHP-`` and ``SRC-`` id, so the supplied-context
+    account reads the source as served the same way a ``read`` of it is."""
+    _append(repository, session_id, {"tool": "grill_brief", "served": served})
+
+
 def _filters_dict(filters: SearchFilters | None) -> dict | None:
     """``asdict`` rather than a hand-picked field list: a filter `#12` adds
     later is ledgered automatically, instead of silently dropping until

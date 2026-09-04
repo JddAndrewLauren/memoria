@@ -292,6 +292,20 @@ the extraction's numbers with a *Run extraction* button, Review and the
 Section view gain *Run audit*, and every run reports what it metered. Nothing
 under `ui/` reaches a model: each button posts to the API.
 
+A floating `+ New section` button on every page opens the **New section**
+dialog (`docs/adr/0011-…`): pick the chapter it is appended to (the current
+one, from a section page), then either **Write now** — the prose, and a brief
+where you write one; left empty, the prose's opening stands in as an
+unconfirmed brief — or **Grill me**, the writing interview: one question at a
+time with a recommended answer each, until the two of you share what the
+section says and it drafts the brief and the prose for you to edit and write.
+Opened from a source page, that source joins the interview's context. The
+interview runs directly when Settings > Model is ready; otherwise the dialog
+prints the `/grill-writing CHP-… SRC-…` command and the `grill-writing` skill
+runs it from a session, writing the section only after you confirm. Either
+way the section is created through the write path — from the dialog as your
+own commit, from a session under an authorization citing your turn.
+
 Styling is Tailwind v4, tokens declared in `ui/src/index.css`'s `@theme`
 block and extracted from `docs/design/memoria-desktop.dc.html` (the canvas
 is a reference, never a source — components are built against the tokens,

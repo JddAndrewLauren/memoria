@@ -54,6 +54,8 @@ ALLOWED_IMPORTS = {
     "memoria.style",  # ADR-0009: writing_style and the style_* analysis tools
     "memoria.model",  # ADR-0010: readiness, and the seam the *_run tools ask for a model at the point of use
     "memoria.drivers",  # ADR-0010: the four direct-run loops
+    "memoria.grill",  # ADR-0011: grill_brief, the writing interview's briefing
+    "memoria.authorship",  # ADR-0011: section_create, the interview's write under its authorization
 }
 
 FILE_OPENING_CALLS = {"open", "read_text", "read_bytes", "write_text", "write_bytes"}
@@ -477,6 +479,12 @@ def test_the_tool_surface_is_the_read_tools_and_the_extraction_tools():
         "extraction_run",
         "audit_run",
         "style_run",
+        # ADR-0011: the grilling toward a new section - the briefing served
+        # to this session as interviewer, and the write of what the author
+        # confirmed, citing their turn. No grill_run: the interview's other
+        # party is the author, so the direct run lives in the app's dialog.
+        "grill_brief",
+        "section_create",
     }
 
 

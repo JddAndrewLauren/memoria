@@ -84,6 +84,10 @@ ALLOWED_IMPORTS = {
     "memoria.model",
     "memoria.drivers",
     "memoria.extraction",
+    # ADR-0011: the grilling's error type, so an unknown chapter or source
+    # in a `/grill` request is a 404 the way a `ManuscriptError` is. The
+    # driver does the work; the adapter maps the outcome.
+    "memoria.grill",
     "memoria.ledger",
 }
 
@@ -1308,11 +1312,19 @@ def test_nothing_but_the_match_terms_route_writes(tmp_path):
     )
     assert write_methods
     assert paths == [
+        # ADR-0011: the author writing a new section from the dialog - the
+        # brief and the prose, two commits through the write path's
+        # creation door, committed as the author because the click is the act.
+        "/chapters/{chapter_id}/sections",
         # ADR-0010: a direct extraction run, one bounded step per call.
         # Not a durable write - it caches readings in the index, as the
         # session's extraction_record does - and a 409 until the author
         # switched direct runs on.
         "/extraction/run",
+        # ADR-0011: one interviewer turn of a grilling, run directly. Not a
+        # write at all - the transcript is the client's and the draft goes
+        # back to the author - and a 409 until direct runs are on.
+        "/grill",
         # ADR-0010: Settings > Model - the switch, the model id and the
         # stored key, in the machine-local settings file beside the index;
         # the one write here that is neither durable nor through

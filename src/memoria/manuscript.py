@@ -37,11 +37,15 @@ git history - are each a design decision of their own, while a separate
 allocation file is what both ADRs reject. Until that decision is taken,
 this is the gap.
 
-This is the brief's own write path, built to this issue's (#35) scope. It is
-**not** issue #66's single write coordinator - no staleness token, no commit.
-The two issues are independent and run in parallel (see the batch scope card
-on #66); #66's mechanism is the pattern a future slice can put this write
-behind, not a dependency this one waits on.
+The ``create_*``/``write_brief``/``confirm_brief`` functions are the brief's
+own write path, built to issue #35's scope: **not** issue #66's single write
+coordinator - no staleness token, no commit - and kept for the legacy import
+and the gates that exercise the on-disk shape directly. ``plan_section`` and
+``add_section`` (ADR-0011) are the same creation put behind #66's mechanism:
+the brief's bytes go through ``memoria.write.create``, so a section an author
+adds from a surface is committed and attributed the moment it exists, and a
+section an AI writes from a conversation carries its authorization on the
+commit (``memoria.authorship.write_section_from_conversation``).
 """
 
 from __future__ import annotations
@@ -54,7 +58,9 @@ from pathlib import Path
 
 import yaml
 
+from memoria import write
 from memoria.repository import Repository
+from memoria.write import Actor, Rejected
 
 # Where the book's own brief lives - the one singleton, so it carries a fixed
 # ID rather than a minted one.
@@ -378,6 +384,110 @@ def create_section(
     path = section_path(repository, chapter_number, number)
     _write_brief_file(path, brief)
     return SectionEntry(number=number, dir=path.parent, path=path, brief=brief)
+
+
+# --- creation through the write path (ADR-0011) ----------------------------
+#
+# The author-facing create: a section added from a surface, or written by an
+# AI from a conversation the author answered. Two steps, so the caller can
+# know the minted ``SEC-`` id before anything is written - an authorization
+# (``memoria.authorship``) names its target, and the target is that id.
+# Nothing here bypasses the guards above: these are the deliberate acts on a
+# brief that part 04 §2.1 allows, and the bytes still reach disk only through
+# ``memoria.write``, committed and attributed.
+
+# How much of the prose stands in for a brief the author did not write.
+BRIEF_FROM_PROSE_LIMIT = 200
+
+
+@dataclass(frozen=True)
+class PlannedSection:
+    """A section about to be created: where it will live and the id it will
+    carry, minted but not yet written. Nothing on disk changes until
+    ``add_section`` is called with it."""
+
+    chapter: ChapterEntry
+    number: int
+    brief_id: str
+    dir: Path
+    path: Path
+
+
+def plan_section(repository: Repository, chapter_id: str) -> PlannedSection:
+    """Where the next section of ``chapter_id`` goes: appended after the
+    chapter's last section (position is the directory number, part 04
+    §2.1), with the next ``SEC-`` id. Pure - reads the tree, writes
+    nothing. ``ManuscriptError`` for a chapter id no chapter carries."""
+    chapter = resolve_chapter(repository, chapter_id)
+    number = _next_directory_number(sections_root(repository, chapter.number))
+    path = section_path(repository, chapter.number, number)
+    return PlannedSection(
+        chapter=chapter,
+        number=number,
+        brief_id=_mint_section_id(repository),
+        dir=path.parent,
+        path=path,
+    )
+
+
+def add_section(
+    repository: Repository,
+    planned: PlannedSection,
+    text: str,
+    actor: Actor,
+    *,
+    unconfirmed: bool = False,
+    trailers: tuple[tuple[str, str], ...] = (),
+) -> SectionEntry:
+    """Bring a planned section's brief into being through the write path:
+    one file, one commit, attributed to ``actor`` (ADR-0003's "creation is
+    a second door, not a bypass"). ``unconfirmed`` is for a brief nobody
+    wrote - one derived from the prose by ``brief_from_prose`` - and is
+    ``False`` for a brief the author or a conversation produced."""
+    brief = Brief(id=planned.brief_id, text=text, unconfirmed=unconfirmed)
+    relative = planned.path.relative_to(repository.root).as_posix()
+    result = write.create(
+        repository, relative, brief_to_markdown(brief), actor, trailers=trailers
+    )
+    if isinstance(result, Rejected):
+        raise ManuscriptError(
+            f"{relative} appeared underneath the create ({result.outcome}); "
+            "plan the section again"
+        )
+    return SectionEntry(number=planned.number, dir=planned.dir, path=planned.path, brief=brief)
+
+
+def add_draft(
+    repository: Repository,
+    section: SectionEntry,
+    text: str,
+    actor: Actor,
+    *,
+    trailers: tuple[tuple[str, str], ...] = (),
+) -> str:
+    """Bring a section's ``draft.md`` into being through the write path -
+    the prose of a section that had none. Returns the repository-relative
+    path written. A draft already there is a ``ManuscriptError``: replacing
+    prose is ``memoria.authorship``'s job, under an authorization, or the
+    author's own in their editor."""
+    relative = draft_relative_path(repository, section)
+    result = write.create(repository, relative, text, actor, trailers=trailers)
+    if isinstance(result, Rejected):
+        raise ManuscriptError(f"{relative} already exists ({result.outcome}); nothing written")
+    return relative
+
+
+def brief_from_prose(text: str) -> str:
+    """The brief a section gets when the author wrote prose and no brief:
+    the prose's first paragraph, shortened. This is CONTEXT.md's
+    *unconfirmed brief* - "drafted by summarizing existing prose, not yet
+    confirmed" - so a caller writes it with ``unconfirmed=True``, and the
+    author's first edit or confirmation makes it theirs."""
+    paragraphs = [block.strip() for block in text.strip().split("\n\n") if block.strip()]
+    first = " ".join(paragraphs[0].split()) if paragraphs else ""
+    if len(first) <= BRIEF_FROM_PROSE_LIMIT:
+        return first
+    return first[: BRIEF_FROM_PROSE_LIMIT - 1].rstrip() + "…"
 
 
 # --- the author write path, for briefs that already exist ------------------

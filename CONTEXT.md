@@ -197,7 +197,8 @@ or the MCP server holding the model's end of the conversation — off by default
 switched on by the author under Settings > Model (ADR-0010). Still author-launched,
 from a button or a tool call; bounded per call and resumable; every model call a
 ledger line the author can count. The prompts, the validation and what is stored
-are exactly a session run's.
+are exactly a session run's. The [[grilling]] is the one pass whose direct run lives
+only in the app: its other party is the author at a surface (ADR-0011).
 _Avoid_: API mode, autopilot, background pass, headless run, model-driving service
 
 ### Author knowledge
@@ -275,6 +276,18 @@ with their briefs; a planned section is a section whose brief is written and who
 draft is empty. Reordering renumbers directories, and the stable IDs in frontmatter
 keep references intact. There is no outline file.
 _Avoid_: outline.md, table of contents, structure document
+
+**Grilling**:
+The writing interview a new section can begin with (ADR-0011): relentless, one
+question at a time, a recommended answer with each, facts looked up in the chapter and
+the source rather than asked, the decisions the author's — until the two share what
+the section says, and it is drafted as a [[brief]] and prose. The "AI writes it from a
+grilling conversation the author answered" write path, extended to the prose beneath.
+From the app's `New section` dialog it is a [[direct run]] whose draft the author edits
+and writes as their own act; from a session it is the `grill-writing` skill, which
+writes the section under two authorizations citing the author's confirming turn.
+Nothing is written before the author says so.
+_Avoid_: Interview wizard, questionnaire, chat, prompt, brainstorm, outline assistant
 
 **Appearances**:
 The manuscript passages an entry turns out to touch, with a short note on how. Derived
