@@ -18,6 +18,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from memoria.ledger import session_id_from_env
 from memoria.repository import Repository, from_env
 from memoria.web.routes import router
 
@@ -45,6 +46,10 @@ def create_app(repository: Repository | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.repository = repository if repository is not None else from_env()
+        # The session a direct run (ADR-0010) ledgers its model calls and
+        # served text under - one per server process, the same rule the
+        # stdio MCP server keeps (#13), and `MEMORIA_SESSION_ID` names it.
+        app.state.session_id = session_id_from_env()
         yield
 
     app = FastAPI(

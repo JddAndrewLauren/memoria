@@ -77,6 +77,14 @@ ALLOWED_IMPORTS = {
     # author write through the same path as match terms, and the confirm/
     # discard acts on proposed observations. The adapter shapes outcomes.
     "memoria.style",
+    # ADR-0010: direct runs. The seam's readiness and settings (the one
+    # machine-local file the core writes for the app), the four drivers,
+    # the extraction's status for the panel, and the ledger's session id
+    # minted at lifespan so a run's spend has a session to land under.
+    "memoria.model",
+    "memoria.drivers",
+    "memoria.extraction",
+    "memoria.ledger",
 }
 
 FILE_OPENING_CALLS = {"open", "read_text", "read_bytes", "write_text", "write_bytes"}
@@ -1300,6 +1308,18 @@ def test_nothing_but_the_match_terms_route_writes(tmp_path):
     )
     assert write_methods
     assert paths == [
+        # ADR-0010: a direct extraction run, one bounded step per call.
+        # Not a durable write - it caches readings in the index, as the
+        # session's extraction_record does - and a 409 until the author
+        # switched direct runs on.
+        "/extraction/run",
+        # ADR-0010: Settings > Model - the switch, the model id and the
+        # stored key, in the machine-local settings file beside the index;
+        # the one write here that is neither durable nor through
+        # memoria.write, because a credential must never be committed.
+        "/model",
+        # ADR-0010: the audit's button on a section, run directly.
+        "/sections/{section_id}/audit",
         # #43: the author applying a proposed rewrite from Review - the
         # Section/Review surfaces' one write, through the same write path.
         "/sections/{section_id}/paragraphs/{paragraph_index}",
@@ -1311,6 +1331,9 @@ def test_nothing_but_the_match_terms_route_writes(tmp_path):
         # proposed observation confirmed or discarded, one sample uploaded.
         # All three through the same write path, committed as the author.
         "/style",
+        # ADR-0010: the writing-style analysis run directly; proposes, the
+        # author still confirms in Settings.
+        "/style/analyse",
         "/style/observations/{observation_id}",
         "/style/samples",
         "/subjects/{subject_id}/entries/{entry_slug}/match-terms",

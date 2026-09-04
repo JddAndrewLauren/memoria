@@ -1,4 +1,5 @@
-"""The one place a route reaches the ``Repository`` value from.
+"""The one place a route reaches the ``Repository`` value from, and the
+session id a direct run ledgers under.
 
 Split out from ``app.py`` so routes can depend on it without importing the
 app module that constructs them - a route file importing the app it is
@@ -20,3 +21,11 @@ def get_repository(request: Request) -> Repository:
     place that happens.
     """
     return request.app.state.repository
+
+
+def get_session_id(request: Request) -> str:
+    """The session this app's direct runs ledger under (ADR-0010), minted
+    once at ``lifespan`` the way the stdio MCP server mints one per
+    process: one server run is one session, and ``MEMORIA_SESSION_ID`` in
+    the environment names it explicitly."""
+    return request.app.state.session_id

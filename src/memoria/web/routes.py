@@ -22,7 +22,19 @@ import ipaddress
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+import memoria.drivers as drivers
 import memoria.references as references
+from memoria.extraction import status as extraction_status
+from memoria.model import (
+    ModelError,
+    ModelFn,
+    ModelSettings,
+    ModelUnavailable,
+    load_settings,
+    readiness,
+    require_model,
+    save_settings,
+)
 from memoria.index import SearchFilters
 from memoria.index import appearances_supported
 from memoria.index import gather as gather_set
@@ -46,7 +58,7 @@ from memoria.review import (
     review_section,
     settle_finding,
 )
-from memoria.section import compose_section, outline as manuscript_outline
+from memoria.section import compose_section, locate_section, outline as manuscript_outline
 from memoria.style import (
     StyleError,
     WritingStyle,
@@ -72,8 +84,18 @@ from memoria.subjects import (
     serve_entry,
     set_match_terms,
 )
-from memoria.web.dependencies import get_repository
+from memoria.web.dependencies import get_repository, get_session_id
 from memoria.web.schemas import (
+    AuditRunOut,
+    AuditRunRequest,
+    ExtractionRunOut,
+    ExtractionStatusOut,
+    ModelSettingsOut,
+    ModelSettingsUpdate,
+    RejectionOut,
+    RunRequest,
+    SpendOut,
+    StyleRunOut,
     SettleRequest,
     SettlementOut,
     AppearanceOut,
@@ -1056,3 +1078,200 @@ def upload_style_sample(
             detail=f"{result.path} already exists - nothing was written. Rename the file and try again.",
         )
     return _style_out(repository)
+
+
+# --- direct runs (ADR-0010) ------------------------------------------------------
+#
+# The one class of route that reaches a generative model, and it does so
+# through `memoria.model`'s seam at the point of use, never by holding a
+# client: `require_model` -> one driver call -> shape the report. Off by
+# default - every run route is a 409 naming Settings > Model until the
+# author switches direct runs on. The settings file is machine-local
+# (beside the index, gitignored), so writing it is not a durable write and
+# does not go through `memoria.write`; the core owns the file, this shapes.
+
+
+def _model_out(repository: Repository) -> ModelSettingsOut:
+    state = readiness(repository)
+    return ModelSettingsOut(
+        enabled=state.enabled,
+        provider=state.provider,
+        model=state.model,
+        api_key_set=state.api_key_set,
+        api_key_source=state.api_key_source,
+        ready=state.ready,
+        reason=state.reason,
+    )
+
+
+def _model(repository: Repository) -> ModelFn:
+    try:
+        return require_model(repository)
+    except ModelUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _spend(spend: drivers.Spend) -> SpendOut:
+    return SpendOut(
+        calls=spend.calls,
+        input_tokens=spend.input_tokens,
+        output_tokens=spend.output_tokens,
+        model=spend.model,
+    )
+
+
+def _rejections(rejected: tuple[drivers.Rejection, ...]) -> list[RejectionOut]:
+    return [RejectionOut(anchor=item.anchor, reason=item.reason) for item in rejected]
+
+
+def _provider_failure(exc: ModelError) -> HTTPException:
+    return HTTPException(status_code=502, detail=str(exc))
+
+
+@router.get("/model")
+def read_model_settings(repository: Repository = Depends(get_repository)) -> ModelSettingsOut:
+    """Settings > Model's one read: the switch, the model id, whether a key
+    is set and where from, and whether a direct run would succeed. Never
+    the key."""
+    return _model_out(repository)
+
+
+@router.put("/model")
+def update_model_settings(
+    update: ModelSettingsUpdate, repository: Repository = Depends(get_repository)
+) -> ModelSettingsOut:
+    """The author changing the switch, the model, or the stored key. The
+    provider is fixed to the one this slice ships; ``api_key`` absent
+    leaves the stored key alone and empty clears it."""
+    current = load_settings(repository)
+    if update.api_key is None:
+        api_key = current.api_key
+    else:
+        api_key = update.api_key.strip() or None
+    save_settings(
+        repository,
+        ModelSettings(
+            enabled=update.enabled,
+            provider=current.provider,
+            model=update.model.strip(),
+            api_key=api_key,
+        ),
+    )
+    return _model_out(repository)
+
+
+@router.get("/extraction")
+def read_extraction_status(
+    repository: Repository = Depends(get_repository),
+) -> ExtractionStatusOut:
+    """Where the extraction stands - the numbers Settings shows beside the
+    Run button, so the author sees what a run would read before it spends
+    anything. A read; nothing here runs."""
+    state = extraction_status(repository)
+    return ExtractionStatusOut(
+        paragraphs=state.paragraphs,
+        extracted=state.extracted,
+        pending=state.pending,
+        candidates_raw=state.candidates_raw,
+        candidates_above_threshold=state.candidates_above_threshold,
+        unplaced_forms=state.unplaced_forms,
+        proposed_match_terms=state.proposed_match_terms,
+        clusters=sum(state.clusters_by_level.values()),
+        summaries_done=state.summaries_done,
+        summaries_pending=state.summaries_pending,
+        derived=state.derived,
+    )
+
+
+@router.post("/extraction/run")
+def run_extraction(
+    request: RunRequest,
+    repository: Repository = Depends(get_repository),
+    session_id: str = Depends(get_session_id),
+) -> ExtractionRunOut:
+    """One bounded step of a direct extraction run: up to ``limit``
+    paragraphs read and recorded, or - once every paragraph is read - the
+    pass closed and up to ``limit`` summaries written. **409** while direct
+    runs are off or not ready (the detail names Settings > Model), **502**
+    when the provider fails mid-run (what was recorded stays)."""
+    model = _model(repository)
+    try:
+        report = drivers.run_extraction(repository, model, session_id, limit=request.limit)
+    except ModelError as exc:
+        raise _provider_failure(exc) from exc
+    return ExtractionRunOut(
+        phase=report.phase,
+        paragraphs_read=report.paragraphs_read,
+        paragraphs_accepted=report.paragraphs_accepted,
+        paragraphs_remaining=report.paragraphs_remaining,
+        summaries_written=report.summaries_written,
+        summaries_remaining=report.summaries_remaining,
+        finished=report.finished,
+        promotions=list(report.promotions),
+        rejected=_rejections(report.rejected),
+        spend=_spend(report.spend),
+    )
+
+
+@router.post("/sections/{section_id}/audit")
+def run_audit(
+    section_id: str,
+    request: AuditRunRequest,
+    repository: Repository = Depends(get_repository),
+    session_id: str = Depends(get_session_id),
+) -> AuditRunOut:
+    """The audit's button on a section, or on one paragraph of it
+    (CONTEXT.md: "a button on a section or a chapter, or on a highlighted
+    passage") - run here, directly. Up to ``limit`` judgements answered
+    and recorded per call; the client calls again while ``remaining`` is
+    above zero. **404** for a section that is not there, **409** while
+    direct runs are off, **502** when the provider fails."""
+    try:
+        chapter, section = locate_section(repository, section_id)
+    except ManuscriptError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    model = _model(repository)
+    try:
+        report = drivers.run_audit(
+            repository,
+            model,
+            session_id,
+            chapter_number=chapter.number,
+            section_number=section.number,
+            paragraph_index=request.paragraph_index,
+            limit=request.limit,
+        )
+    except ModelError as exc:
+        raise _provider_failure(exc) from exc
+    return AuditRunOut(
+        accepted=report.accepted,
+        findings=report.findings,
+        remaining=report.remaining,
+        rejected=_rejections(report.rejected),
+        spend=_spend(report.spend),
+    )
+
+
+@router.post("/style/analyse")
+def run_style_analysis(
+    repository: Repository = Depends(get_repository),
+    session_id: str = Depends(get_session_id),
+) -> StyleRunOut:
+    """Settings > Writing style's "Analyse now": the analysis run here,
+    directly, its proposed observations recorded for the author to confirm
+    exactly as the skill's ``style_record`` records them. **400** with
+    nothing to analyse, **409** while direct runs are off, **502** when the
+    provider fails."""
+    model = _model(repository)
+    try:
+        report = drivers.run_style(repository, model, session_id)
+    except StyleError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ModelError as exc:
+        raise _provider_failure(exc) from exc
+    return StyleRunOut(
+        accepted=report.accepted,
+        rejected=_rejections(report.rejected),
+        spend=_spend(report.spend),
+        style=_style_out(repository),
+    )
