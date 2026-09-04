@@ -7,6 +7,8 @@ gating, not the derivation ``tests/test_ingestion.py`` already covers.
 
 from __future__ import annotations
 
+import base64
+
 from fastapi.testclient import TestClient
 
 import memoria.web.routes as routes
@@ -136,3 +138,68 @@ def test_a_run_is_a_409_while_another_holds_the_lock(tmp_path, monkeypatch):
         assert client.post("/api/ingestion/rebuild").status_code == 409
     finally:
         _RUN_LOCK.release()
+
+
+# --- adding a raw unit (ADR-0013) ------------------------------------------------
+
+
+def _upload(path: str, data: bytes) -> dict:
+    return {"path": path, "content": base64.b64encode(data).decode("ascii")}
+
+
+def test_add_unit_places_the_bytes_under_raw_and_says_where(tmp_path):
+    """The TestClient's peer is non-local, and that is the point: unlike the
+    two runs, adding a unit is not gated - the bytes travel (ADR-0002)."""
+    repository, evidence_root = _corpus(tmp_path)
+    client = _client(repository)
+
+    response = client.post("/api/ingestion/units", json=_upload("box 3/note.txt", b"hello"))
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"path": "raw/box 3/note.txt", "size": 5}
+    assert (evidence_root / "raw" / "box 3" / "note.txt").read_bytes() == b"hello"
+
+
+def test_add_unit_is_a_409_for_a_path_already_taken(tmp_path):
+    repository, evidence_root = _corpus(tmp_path, ("one.txt", "original"))
+    client = _client(repository)
+
+    response = client.post("/api/ingestion/units", json=_upload("one.txt", b"other"))
+
+    assert response.status_code == 409
+    assert "raw/one.txt already exists" in response.json()["detail"]
+    assert (evidence_root / "raw" / "one.txt").read_text() == "original"
+
+
+def test_add_unit_is_a_400_for_a_path_that_climbs_out_or_hides(tmp_path):
+    repository, _ = _corpus(tmp_path)
+    client = _client(repository)
+
+    assert client.post("/api/ingestion/units", json=_upload("../x.txt", b"x")).status_code == 400
+    assert client.post("/api/ingestion/units", json=_upload(".DS_Store", b"x")).status_code == 400
+
+
+def test_add_unit_is_a_404_without_an_evidence_root(tmp_path):
+    client = _client(Repository(root=tmp_path))
+
+    assert client.post("/api/ingestion/units", json=_upload("x.txt", b"x")).status_code == 404
+
+
+def test_add_unit_refuses_an_oversize_or_malformed_body_at_the_boundary(tmp_path):
+    repository, _ = _corpus(tmp_path)
+    client = _client(repository)
+
+    too_big = base64.b64encode(b"x" * (64 * 1024 * 1024 + 1)).decode("ascii")
+    assert client.post("/api/ingestion/units", json={"path": "x.txt", "content": too_big}).status_code == 422
+    assert client.post("/api/ingestion/units", json={"path": "x.txt", "content": "not base64!"}).status_code == 422
+
+
+def test_status_carries_the_unnumbered_raw_files(tmp_path):
+    repository, _ = _corpus(tmp_path, ("waiting.txt", "hello"))
+    client = _client(repository)
+
+    body = client.get("/api/ingestion").json()
+
+    assert body["units"] == []
+    assert body["unnumbered"] == ["raw/waiting.txt"]
+    assert _client(Repository(root=tmp_path)).get("/api/ingestion").json()["unnumbered"] is None

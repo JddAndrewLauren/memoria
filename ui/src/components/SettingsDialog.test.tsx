@@ -283,6 +283,12 @@ describe("the settings dialog", () => {
     fireEvent.click(within(card).getByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(screen.getByText("2 of 2")).toBeInTheDocument());
 
+    // The refresh itself lands a tick after the counter: the query cache
+    // notifies asynchronously, and the editor adopts the new snapshot - and
+    // its token - in an effect. Wait for the adopted observation, the
+    // visible sign that the effect ran, before saving against its token.
+    await screen.findByRole("button", { name: "Remove observation: End on the noun." });
+
     // The typed direction survived that refresh...
     expect(screen.getByLabelText("Direction")).toHaveValue("No hindsight.");
 

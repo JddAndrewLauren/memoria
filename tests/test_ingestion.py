@@ -17,8 +17,12 @@ from memoria import extraction as ex
 from memoria.index import INDEX_RELATIVE_PATH, build_index
 from memoria.ingestion import (
     CONVERTED_STATES,
+    AddedRawUnit,
+    RawUnitError,
+    RawUnitExists,
     RunInProgress,
     _RUN_LOCK,
+    add_raw_unit,
     ingestion_status,
     run_normalize,
     run_rebuild,
@@ -398,3 +402,89 @@ def test_the_lock_serialises_concurrent_runs(tmp_path):
         release.set()
         worker.join(timeout=10)
         ingestion.run_normalize_pass = real
+
+
+# --- adding a raw unit (ADR-0013) ------------------------------------------------
+
+
+def test_add_raw_unit_writes_the_bytes_under_raw_keeping_the_folder_shape(tmp_path):
+    repository, evidence_root = _corpus(tmp_path)
+
+    added = add_raw_unit(repository, "letters/1952/march.txt", b"hello\n\nworld")
+
+    assert added == AddedRawUnit(path="raw/letters/1952/march.txt", size=12)
+    assert (evidence_root / "raw" / "letters" / "1952" / "march.txt").read_bytes() == b"hello\n\nworld"
+    # No stray temp file is left beside it.
+    assert [p.name for p in (evidence_root / "raw" / "letters" / "1952").iterdir()] == ["march.txt"]
+
+
+def test_add_raw_unit_refuses_a_path_already_taken_and_leaves_it_untouched(tmp_path):
+    repository, evidence_root = _corpus(tmp_path, ("one.txt", "original"))
+
+    with pytest.raises(RawUnitExists) as excinfo:
+        add_raw_unit(repository, "one.txt", b"replacement")
+
+    assert excinfo.value.path == "raw/one.txt"
+    assert (evidence_root / "raw" / "one.txt").read_text() == "original"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "",
+        "   ",
+        "/abs.txt",
+        "../out.txt",
+        "a/../b.txt",
+        ".DS_Store",
+        "dir/.hidden/x.txt",
+        "manifest.yaml",
+        "dir\\file.txt",
+        "bad\0name.txt",
+    ],
+)
+def test_add_raw_unit_refuses_a_path_the_ledger_must_never_see(tmp_path, path):
+    repository, evidence_root = _corpus(tmp_path)
+
+    with pytest.raises(RawUnitError):
+        add_raw_unit(repository, path, b"x")
+
+    assert not (evidence_root / "raw").exists() or not list((evidence_root / "raw").rglob("*"))
+
+
+def test_add_raw_unit_needs_an_evidence_root(tmp_path):
+    with pytest.raises(NoEvidenceRoot):
+        add_raw_unit(Repository(root=tmp_path), "one.txt", b"x")
+
+
+def test_add_raw_unit_does_not_touch_the_ledger_and_the_next_normalize_numbers_it(tmp_path):
+    repository, evidence_root = _corpus(tmp_path, ("b.txt", "first"))
+    normalize(repository, evidence_root)
+
+    add_raw_unit(repository, "a.txt", b"second")
+    ids_before = [e.id for e in load_manifest(evidence_root / DEFAULT_MANIFEST_RELATIVE_PATH)]
+    normalize(repository, evidence_root)
+
+    entries = load_manifest(evidence_root / DEFAULT_MANIFEST_RELATIVE_PATH)
+    assert ids_before == ["SRC-000001"]
+    # Sorted-path order would put a.txt first, but the ledger never
+    # renumbers (ADR-0006): the newcomer takes the next id.
+    assert [(e.id, e.path) for e in entries] == [
+        ("SRC-000001", "raw/b.txt"),
+        ("SRC-000002", "raw/a.txt"),
+    ]
+
+
+def test_status_names_the_raw_files_the_ledger_has_not_numbered(tmp_path):
+    repository, evidence_root = _corpus(tmp_path, ("b.txt", "one"))
+    normalize(repository, evidence_root)
+    _write_raw_file(evidence_root, "box/a.txt", "two")
+    _write_raw_file(evidence_root, "c.txt", "three")
+
+    status = ingestion_status(repository)
+
+    assert status.unnumbered == ("raw/box/a.txt", "raw/c.txt")
+    assert [u.path for u in status.units] == ["raw/b.txt"]
+    normalize(repository, evidence_root)
+    assert ingestion_status(repository).unnumbered == ()
+    assert ingestion_status(Repository(root=tmp_path)).unnumbered is None

@@ -337,8 +337,8 @@ number, a stub with no paragraphs, or deleted with its number kept), whether the
 holds its paragraphs, and how many of them the [[extraction]] has read under the current
 subject prompts. Derived on every read and never recorded — the record is the state —
 and computed without a model, so it is safe at any time. Served by `memoria sources`,
-`GET /api/ingestion` and the `/ingestion` page, which is the one place a raw unit that
-never became a record is visible at all.
+`GET /api/ingestion` and the `/sources` page (its Units view), which is the one place a
+raw unit that never became a record is visible at all.
 _Avoid_: Pipeline state, sync status, ingest log, processing queue, stale, pending
 
 **Authorization**:

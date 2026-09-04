@@ -1339,6 +1339,12 @@ def test_nothing_but_the_match_terms_route_writes(tmp_path):
         # the pass and this forwards its report.
         "/ingestion/normalize",
         "/ingestion/rebuild",
+        # ADR-0013: one raw unit's bytes placed under raw/ from the app.
+        # Original state, outside DURABLE_PATHS and never committed; no id
+        # minted - the next normalize numbers it (ADR-0006). The core
+        # writes the file, this forwards where it landed. Not local-only:
+        # the bytes travel, so it works hosted (ADR-0002).
+        "/ingestion/units",
         # ADR-0010: Settings > Model - the switch, the model id and the
         # stored key, in the machine-local settings file beside the index;
         # the one write here that is neither durable nor through
@@ -1362,6 +1368,10 @@ def test_nothing_but_the_match_terms_route_writes(tmp_path):
         "/style/analyse",
         "/style/observations/{observation_id}",
         "/style/samples",
+        # ADR-0014: the author adding a subject from the dialog - one
+        # prompt file through the write path's creation door, committed as
+        # the author because the click is the act (the ADR-0012 shape).
+        "/subjects",
         "/subjects/{subject_id}/entries/{entry_slug}/match-terms",
     ]
 

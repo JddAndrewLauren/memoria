@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SourcesTree } from "./SourcesTree";
+import { AddRawUnitsContext } from "../lib/addRawUnitsContext";
 
 /**
  * The `SOURCES` tree's rows carry the raw unit's conversion state as a
@@ -56,6 +57,7 @@ function unit(id: string, converted: string) {
 const INGESTION = {
   units: [unit("SRC-000001", "failed"), unit("SRC-000002", "current"), unit("SRC-000004", "out_of_date")],
   counts: { current: 1, out_of_date: 1, failed: 1 },
+  unnumbered: [],
   is_normalized: true,
   is_indexed: true,
   generated_at: "2026-09-03T10:00:00+00:00",
@@ -87,6 +89,24 @@ describe("the SOURCES tree's ingestion glyphs", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
+  it("offers to add sources from the app, through whatever App hung on the context", async () => {
+    const open = vi.fn();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <AddRawUnitsContext.Provider value={open}>
+            <SourcesTree />
+          </AddRawUnitsContext.Provider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add sources…" }));
+
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
   it("marks each row with its raw unit's conversion state", async () => {
     renderTree();
     fireEvent.click(await screen.findByText("journal · 2"));
@@ -97,14 +117,14 @@ describe("the SOURCES tree's ingestion glyphs", () => {
     expect(outOfDate).toContainElement(screen.getByRole("img", { name: "out of date" }));
   });
 
-  it("links to the ingestion page and counts the failed units the tree cannot show", async () => {
+  it("opens the Sources page from its header, and flags what the tree cannot show", async () => {
     renderTree();
 
-    // The count arrives with the ingestion status, one read after the tree.
-    const link = await screen.findByRole("link", { name: /Ingestion status.*1 failed/ });
-    expect(link).toHaveAttribute("href", "/ingestion");
-    // The failed unit has no record and so no row.
-    expect(screen.queryByText("SRC-000001")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Sources" })).toHaveAttribute("href", "/sources");
+    expect(screen.getByRole("button", { name: "Collapse Sources" })).toBeInTheDocument();
+    // The counts arrive with the ingestion status, one read after the tree.
+    const flag = await screen.findByRole("link", { name: "1 failed" });
+    expect(flag).toHaveAttribute("href", "/sources");
   });
 
   it("still draws the rows when the ingestion status is unavailable", async () => {

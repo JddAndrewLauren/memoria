@@ -53,6 +53,7 @@ describe("indexByUnitId", () => {
     const status: IngestionStatusOut = {
       units: [unit({ id: "SRC-000001" }), unit({ id: "SRC-000002", converted: "failed" })],
       counts: {},
+      unnumbered: [],
       is_normalized: true,
       is_indexed: true,
       generated_at: "2026-09-03T00:00:00+00:00",

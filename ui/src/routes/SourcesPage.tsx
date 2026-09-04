@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -11,16 +12,21 @@ import {
   type UnitStatusOut,
 } from "../api/client";
 import { Badge } from "../components/Badge";
+import { RawFileTree } from "../components/RawFileTree";
 import { STATE_ORDER, drawState, extractedLabel } from "../lib/ingestion";
+import { useOpenAddRawUnits } from "../lib/addRawUnitsContext";
 
 /**
- * The ingestion status: every raw unit in the ledger, with whether it was
- * converted into a normalized record, whether the index holds it, and how
- * much of it the extraction has read - derived on the server from the
- * ledger, the records and the index, never recorded (part 05 §5.4: "the
- * record is the state"). This is the one place a raw unit that *failed* to
- * convert, or has no converter, is visible at all: it never becomes a
- * record, so the SOURCES tree cannot list it.
+ * The Sources page, reached from the SOURCES header in the sidebar: the
+ * archive and its ingestion status on one surface. Two views of the same
+ * status - *Files*, every file under `raw/` in its folders whether or not
+ * the ledger has numbered it (ADR-0013), and *Units*, every ledger row with
+ * whether it was converted into a normalized record, whether the index
+ * holds it, and how much of it the extraction has read - derived on the
+ * server from the ledger, the records and the index, never recorded (part
+ * 05 §5.4: "the record is the state"). This is the one place a raw unit
+ * that *failed* to convert, has no converter, or is not yet numbered is
+ * visible at all: none becomes a record, so the SOURCES tree cannot list it.
  *
  * Two actions, "Normalize" and "Rebuild index" (ADR-0011), present only when
  * `/api/locality` says this browser and the server share a machine - absent
@@ -28,11 +34,13 @@ import { STATE_ORDER, drawState, extractedLabel } from "../lib/ingestion";
  * other one still running. The extraction is not launchable here: it needs
  * a model, and nothing that needs a model runs unasked (ADR-0005).
  */
-export default function IngestionPage() {
+export default function SourcesPage() {
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["ingestion"],
     queryFn: readIngestionStatus,
   });
+  const openAddRawUnits = useOpenAddRawUnits();
+  const [view, setView] = useState<"files" | "units">("files");
 
   if (isLoading) return <p className="p-8 text-sm text-muted">Loading...</p>;
   if (isError) {
@@ -45,28 +53,100 @@ export default function IngestionPage() {
   return (
     <article className="p-8">
       <header className="mb-4 flex flex-wrap items-center gap-3">
-        <h1 className="font-serif text-xl text-ink">Ingestion</h1>
+        <h1 className="font-serif text-xl text-ink">Sources</h1>
         <span className="font-mono text-[11px] text-muted">as of {data.generated_at}</span>
+        {data.unnumbered && (
+          <span className="font-mono text-[11px] text-muted">
+            {fileCount(data)} {fileCount(data) === 1 ? "file" : "files"}
+            {data.unnumbered.length > 0 && ` · ${data.unnumbered.length} not numbered yet`}
+          </span>
+        )}
+        {/* ADR-0013: not locality-gated - the bytes travel - so it sits in
+            the header rather than among the two local-only runs below. */}
+        <button
+          type="button"
+          onClick={() => openAddRawUnits()}
+          className="ml-auto rounded border border-border bg-panel px-3 py-1 text-xs font-medium text-ink hover:bg-hover"
+        >
+          Add sources…
+        </button>
       </header>
       <Actions status={data} />
+      {data.unnumbered && data.unnumbered.length > 0 && (
+        // Files under raw/ the ledger has not seen: the one archive fact no
+        // row above can show, and where "already in the archive" from the
+        // Add dialog points.
+        <p role="note" className="mt-4 max-w-[640px] rounded border border-amber/40 bg-panel px-3 py-2 text-xs text-body">
+          {data.unnumbered.length} {data.unnumbered.length === 1 ? "file" : "files"} in{" "}
+          <code className="font-mono">raw/</code> {data.unnumbered.length === 1 ? "is" : "are"} not
+          numbered yet. Normalize — above, or <code className="font-mono">memoria normalize</code> —
+          numbers and converts them.
+        </p>
+      )}
       {data.units === null ? (
         <p className="mt-6 max-w-[640px] text-xs text-muted">
           Not checked — no evidence corpus is configured. Set{" "}
           <code className="font-mono">MEMORIA_EVIDENCE_ROOT</code> to the archive and the ledger
           under it is what this page reads.
         </p>
-      ) : data.units.length === 0 ? (
-        <p className="mt-6 max-w-[640px] text-xs text-muted">
-          The ledger is empty. Run <code className="font-mono">memoria normalize</code> against
-          the evidence root — or Normalize above — to number the raw units and convert them.
-        </p>
       ) : (
         <>
-          <SummaryBar status={data} />
-          <UnitsTable status={data} units={data.units} />
+          {data.units.length > 0 && <SummaryBar status={data} />}
+          <div role="tablist" className="mt-4 flex gap-1 border-b border-border text-xs">
+            <ViewTab current={view} value="files" onPick={setView}>
+              Files
+            </ViewTab>
+            <ViewTab current={view} value="units" onPick={setView}>
+              Units
+            </ViewTab>
+          </div>
+          {view === "files" ? (
+            <RawFileTree status={data} />
+          ) : data.units.length === 0 ? (
+            <p className="mt-6 max-w-[640px] text-xs text-muted">
+              The ledger is empty. Run <code className="font-mono">memoria normalize</code> against
+              the evidence root — or Normalize above — to number the raw units and convert them.
+            </p>
+          ) : (
+            <UnitsTable status={data} units={data.units} />
+          )}
         </>
       )}
     </article>
+  );
+}
+
+// Files under raw/: the ledger's live paths (one file however many
+// messages it holds) plus the ones it has not numbered.
+function fileCount(status: IngestionStatusOut): number {
+  const paths = new Set(status.units?.filter((u) => !u.deleted).map((u) => u.path));
+  return paths.size + (status.unnumbered?.length ?? 0);
+}
+
+function ViewTab({
+  current,
+  value,
+  onPick,
+  children,
+}: {
+  current: "files" | "units";
+  value: "files" | "units";
+  onPick: (view: "files" | "units") => void;
+  children: string;
+}) {
+  const selected = current === value;
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={selected}
+      onClick={() => onPick(value)}
+      className={`-mb-px border-b-2 px-3 py-1.5 ${
+        selected ? "border-ink font-medium text-ink" : "border-transparent text-secondary hover:text-ink"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 

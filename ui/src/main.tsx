@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import Home from "./routes/Home";
@@ -10,7 +10,7 @@ import EntryPage from "./routes/EntryPage";
 import SectionPage from "./routes/SectionPage";
 import ReviewPage from "./routes/ReviewPage";
 import SuppliedContextPage from "./routes/SuppliedContextPage";
-import IngestionPage from "./routes/IngestionPage";
+import SourcesPage from "./routes/SourcesPage";
 import "./index.css";
 import "./prose.css";
 
@@ -28,7 +28,10 @@ ReactDOM.createRoot(rootElement).render(
         <Routes>
           <Route path="/" element={<App />}>
             <Route index element={<Home />} />
-            <Route path="ingestion" element={<IngestionPage />} />
+            <Route path="sources" element={<SourcesPage />} />
+            {/* The two pages Sources unified; old links still land. */}
+            <Route path="ingestion" element={<Navigate to="/sources" replace />} />
+            <Route path="archive" element={<Navigate to="/sources" replace />} />
             <Route path="sources/:id" element={<SourceDetailPage />} />
             <Route path="sources/:id/raw" element={<RawSourcePage />} />
             <Route
