@@ -83,6 +83,10 @@ see *Installing* above, or run `scripts/run.sh` once, which installs both.
 This is the one command every issue uses to run the Python suite on its own.
 It needs no evidence corpus and no environment variables.
 
+`.github/workflows/ci.yml` runs the same two suites, plus `npm run typecheck`,
+on every pull request and every push to `main`. The gate walks below are not
+in it.
+
 ### Walking a milestone gate
 
 ```
@@ -260,8 +264,10 @@ Writes `ui/src/api/schema.d.ts` from the app's OpenAPI schema. Run it after
 changing a route or a response model in `src/memoria/web/`, and commit the
 result — `tests/test_web_types.py` fails the suite when the committed file
 goes stale against the schema, which is the mitigation the ADR names for a
-two-language stack in a repo with no CI: a backend field rename becomes a
-compile error in `ui/`, not a runtime surprise nobody sees.
+two-language stack: a backend field rename becomes a compile error in `ui/`,
+not a runtime surprise nobody sees. `.github/workflows/ci.yml` runs both
+suites and `npm run typecheck` on every PR, so the rename fails the check
+before it merges.
 
 ## The web client (`ui/`)
 
