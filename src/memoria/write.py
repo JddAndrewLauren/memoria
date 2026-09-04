@@ -59,6 +59,9 @@ DURABLE_PATHS = (
     "decisions.md",
     "questions.md",
     "research/",
+    # The writing style and the author's uploaded style samples (ADR-0009):
+    # author-supreme craft direction, the same class as a brief.
+    "style/",
 )
 
 

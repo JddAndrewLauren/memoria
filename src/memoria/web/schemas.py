@@ -8,7 +8,7 @@ verbatim; nothing here invents a field the schema does not have.
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import Base64Bytes, BaseModel, Field
 
 
 class SourceSummary(BaseModel):
@@ -720,3 +720,75 @@ class SuppliedContextOut(BaseModel):
 
     section_id: str
     sessions: list[SessionSuppliedContextOut]
+
+
+# --- the writing style (ADR-0009) -------------------------------------------
+
+
+class StyleSampleOut(BaseModel):
+    """One document the author uploaded for its style alone - a path under
+    ``style/samples/``, never a ``SRC-`` id: it is not evidence."""
+
+    path: str
+    title: str
+    original_file: str
+
+
+class StyleObservationOut(BaseModel):
+    """One observation a style analysis proposed and the author has not yet
+    acted on. Derived, asserting nothing until confirmed."""
+
+    id: int
+    aspect: str
+    observation: str
+    example: str
+
+
+class StyleOut(BaseModel):
+    """The writing style as Settings shows it: the file's contents and the
+    token a write must present back (ADR-0003) - ``None`` while no file
+    exists and the first write creates it - the uploaded samples, and the
+    proposed observations awaiting the author, oldest first."""
+
+    exists: bool
+    direction: str
+    observations: list[str]
+    sample_sources: list[str]
+    samples: list[StyleSampleOut]
+    token: str | None
+    pending: list[StyleObservationOut]
+    confirmed_count: int
+    discarded_count: int
+
+
+class StyleUpdate(BaseModel):
+    """The author replacing the writing style. ``token`` is what
+    ``StyleOut`` served, presented back unread; ``None`` only while no
+    style file exists yet."""
+
+    token: str | None = None
+    direction: str
+    observations: list[str]
+    sample_sources: list[str]
+
+
+class ObservationResolution(BaseModel):
+    """The author acting on one proposed observation: ``confirm`` (as
+    proposed, or as ``text`` where they changed it) appends it to the style
+    through the write path and needs the style's ``token``; ``discard``
+    writes nothing durable."""
+
+    action: str = Field(pattern="^(confirm|discard)$")
+    token: str | None = None
+    text: str | None = None
+
+
+class SampleUpload(BaseModel):
+    """One document uploaded as a style sample. ``content`` is the file's
+    bytes, base64 in transit (a JSON body rather than multipart, so the
+    client needs no form encoding and the server no extra dependency);
+    capped so a stray upload is refused at the boundary rather than held
+    in memory."""
+
+    filename: str = Field(min_length=1, max_length=255)
+    content: Base64Bytes = Field(max_length=8 * 1024 * 1024)

@@ -118,7 +118,13 @@ INDEX_RELATIVE_PATH = ".memoria/index.db"
 # model output - `memoria.human_touched` re-derives them from git history,
 # which is why `--reset-cache` may still delete the file - but they are
 # state a rebuild has no business touching.
-PRESERVED_TABLES = ("memoria_schema", "memo", "human_touched")
+# `style_observations` (ADR-0009) is the fourth: the observations a style
+# analysis proposed and the author's confirm/discard acts on them. They are
+# model output like the memo cache, so a rebuild keeps them - and unlike
+# `human_touched` they are not re-derivable, so `--reset-cache` discards
+# whatever the author had not yet acted on (the confirmed ones are already
+# in `style/writing-style.md`).
+PRESERVED_TABLES = ("memoria_schema", "memo", "human_touched", "style_observations")
 
 # Everything else. Dropped and regenerated on every `memoria rebuild`, which
 # is §42's contract made mechanical.
@@ -182,6 +188,19 @@ _PRESERVED_DDL = (
     "entry_id TEXT NOT NULL, statement TEXT NOT NULL, "
     "commit_sha TEXT NOT NULL, flagged_at TEXT NOT NULL, "
     "PRIMARY KEY (entry_id, statement)"
+    ")",
+    # One row per observation a style analysis proposed (ADR-0009,
+    # `memoria.style`). Derived and asserting nothing: a row becomes part of
+    # the writing style only when the author confirms it, which is a write
+    # to `style/writing-style.md`. `analysis_key` names the prompt and the
+    # samples it was proposed from, so a re-run over the same samples
+    # replaces its still-proposed rows; `resolved_text` is what the author
+    # confirmed, which may differ from `observation` where they changed it.
+    "CREATE TABLE IF NOT EXISTS style_observations("
+    "id INTEGER PRIMARY KEY, analysis_key TEXT NOT NULL, ordinal INTEGER NOT NULL, "
+    "aspect TEXT NOT NULL, observation TEXT NOT NULL, example TEXT NOT NULL, "
+    "status TEXT NOT NULL CHECK (status IN ('proposed', 'confirmed', 'discarded')), "
+    "resolved_text TEXT, written_at TEXT NOT NULL"
     ")",
 )
 

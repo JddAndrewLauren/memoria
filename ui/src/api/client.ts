@@ -49,6 +49,12 @@ export type SessionSuppliedContextOut = components["schemas"]["SessionSuppliedCo
 export type AssembledEntryOut = components["schemas"]["AssembledEntryOut"];
 export type FallbackOut = components["schemas"]["FallbackOut"];
 export type ServedSinceOut = components["schemas"]["ServedSinceOut"];
+export type StyleOut = components["schemas"]["StyleOut"];
+export type StyleSampleOut = components["schemas"]["StyleSampleOut"];
+export type StyleObservationOut = components["schemas"]["StyleObservationOut"];
+export type StyleUpdate = components["schemas"]["StyleUpdate"];
+export type ObservationResolution = components["schemas"]["ObservationResolution"];
+export type SampleUpload = components["schemas"]["SampleUpload"];
 
 class ApiError extends Error {
   constructor(
@@ -243,6 +249,30 @@ export function settleFinding(sectionId: string, request: SettleRequest): Promis
 
 export function search(query: string): Promise<SearchResponse> {
   return get(`/api/search?q=${encodeURIComponent(query)}`);
+}
+
+// The writing style (ADR-0009): the Settings surface's one read and its
+// three writes - the style replaced whole, one proposed observation
+// confirmed or discarded, one sample uploaded. `token` on the writes is
+// what `readStyle` served, passed back unread (ADR-0003); it is null only
+// while no style file exists yet and the first write creates it.
+export function readStyle(): Promise<StyleOut> {
+  return get(`/api/style`);
+}
+
+export function updateStyle(update: StyleUpdate): Promise<StyleOut> {
+  return put(`/api/style`, update);
+}
+
+export function resolveObservation(
+  observationId: number,
+  resolution: ObservationResolution,
+): Promise<StyleOut> {
+  return post(`/api/style/observations/${observationId}`, resolution);
+}
+
+export function uploadStyleSample(upload: SampleUpload): Promise<StyleOut> {
+  return post(`/api/style/samples`, upload);
 }
 
 export { ApiError };

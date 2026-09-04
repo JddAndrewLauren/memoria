@@ -47,6 +47,18 @@ from memoria.review import (
     settle_finding,
 )
 from memoria.section import compose_section, outline as manuscript_outline
+from memoria.style import (
+    StyleError,
+    WritingStyle,
+    add_sample,
+    confirm_observation,
+    discard_observation,
+    list_samples,
+    pending_observations,
+    serve_style,
+    set_style,
+    status as style_status,
+)
 from memoria.supplied_context import supplied_context as compose_supplied_context
 from memoria.subjects import (
     Entry,
@@ -82,6 +94,12 @@ from memoria.web.schemas import (
     MatchTermsResponse,
     MatchTermsUpdate,
     NotCurrentOut,
+    ObservationResolution,
+    SampleUpload,
+    StyleObservationOut,
+    StyleOut,
+    StyleSampleOut,
+    StyleUpdate,
     OutlineChapterOut,
     OutlineSectionOut,
     OverlayActOut,
@@ -897,3 +915,144 @@ def rewrite_paragraph(
         text=update.text.strip(),
         token=review.token or "",
     )
+
+
+# --- the writing style (ADR-0009) -------------------------------------------
+
+
+def _style_out(repository: Repository) -> StyleOut:
+    style, token = serve_style(repository)
+    state = style_status(repository)
+    current = style or WritingStyle()
+    return StyleOut(
+        exists=style is not None,
+        direction=current.direction,
+        observations=list(current.observations),
+        sample_sources=list(current.sample_sources),
+        samples=[
+            StyleSampleOut(path=s.path, title=s.title, original_file=s.original_file)
+            for s in list_samples(repository)
+        ],
+        token=token,
+        pending=[
+            StyleObservationOut(
+                id=o.id, aspect=o.aspect, observation=o.observation, example=o.example
+            )
+            for o in pending_observations(repository)
+        ],
+        confirmed_count=state.confirmed,
+        discarded_count=state.discarded,
+    )
+
+
+def _stale(result: Rejected) -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail=(
+            f"{result.path} changed since it was read - nothing was written. "
+            "Re-read the writing style and try again."
+        ),
+    )
+
+
+@router.get("/style")
+def read_style(repository: Repository = Depends(get_repository)) -> StyleOut:
+    """The writing style, its samples, and the observations awaiting the
+    author - the Settings surface's one read. A repository with no style
+    yet is an honest empty state with ``exists=False`` and no token."""
+    try:
+        return _style_out(repository)
+    except StyleError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.put("/style")
+def update_style(
+    update: StyleUpdate, repository: Repository = Depends(get_repository)
+) -> StyleOut:
+    """Replace the writing style - an author act through the single write
+    path, committed as the author (``repository_actor``, never a name in
+    the payload; ADR-0002). The same outcomes as ``update_match_terms``:
+    **409** for a style changed since it was read (or one that appeared
+    where the client thought there was none), **400** for a sample source
+    that names no record, **500** for a write that cannot be attempted."""
+    try:
+        actor = repository_actor(repository)
+        result = set_style(
+            repository,
+            WritingStyle(
+                direction=update.direction,
+                observations=tuple(update.observations),
+                sample_sources=tuple(update.sample_sources),
+            ),
+            update.token,
+            actor,
+        )
+    except StyleError as exc:
+        status = 500 if "must be attributed" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    except WriteError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if isinstance(result, Rejected):
+        raise _stale(result)
+    return _style_out(repository)
+
+
+@router.post("/style/observations/{observation_id}")
+def resolve_style_observation(
+    observation_id: int,
+    resolution: ObservationResolution,
+    repository: Repository = Depends(get_repository),
+) -> StyleOut:
+    """The author acting on one proposed observation. ``confirm`` appends
+    it - as proposed, or as ``text`` where they changed it - to the style
+    through the write path first, and only a committed write marks the
+    row confirmed; **409** leaves both untouched. ``discard`` marks the
+    row and writes nothing durable. An observation that is not proposed,
+    or does not exist, is a **404**."""
+    try:
+        if resolution.action == "discard":
+            discard_observation(repository, observation_id)
+        else:
+            actor = repository_actor(repository)
+            result = confirm_observation(
+                repository, observation_id, resolution.text, resolution.token, actor
+            )
+            if isinstance(result, Rejected):
+                raise _stale(result)
+    except StyleError as exc:
+        message = str(exc)
+        if message.startswith("no such observation") or "is already" in message:
+            status = 404
+        elif "must be attributed" in message:
+            status = 500
+        else:
+            status = 400
+        raise HTTPException(status_code=status, detail=message) from exc
+    except WriteError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return _style_out(repository)
+
+
+@router.post("/style/samples")
+def upload_style_sample(
+    upload: SampleUpload, repository: Repository = Depends(get_repository)
+) -> StyleOut:
+    """Add one uploaded document as a style sample, written under
+    ``style/samples/`` and committed as the author. **409** for a name
+    already taken (nothing overwritten), **400** for an unsupported type,
+    a document with no text, or a converter this install lacks."""
+    try:
+        actor = repository_actor(repository)
+        result = add_sample(repository, upload.filename, bytes(upload.content), actor)
+    except StyleError as exc:
+        status = 500 if "must be attributed" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    except WriteError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if isinstance(result, Rejected):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{result.path} already exists - nothing was written. Rename the file and try again.",
+        )
+    return _style_out(repository)

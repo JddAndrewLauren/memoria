@@ -66,6 +66,7 @@ from memoria.index import GatheredSource, gather
 from memoria.manuscript import Brief
 from memoria.repository import Repository
 from memoria.scope import contains_term, resolve_scope
+from memoria.style import STYLE_RELATIVE_PATH, load_style, writing_style_prompt
 from memoria.subjects import load_entry
 
 
@@ -112,6 +113,11 @@ class WorkingContext:
     fallbacks: tuple[ScopeFallback, ...]
     unconfirmed: bool
     empty: bool
+    # Tier 1's "voice guidance" (part 18 §52.4): the writing style rendered
+    # as the text a writer receives (``memoria.style.writing_style_prompt``),
+    # or ``None`` when the author has set none. Loaded, never resolved: it
+    # is book-wide and names no scope.
+    writing_style: str | None = None
 
 
 def _fallbacks(
@@ -170,6 +176,7 @@ def assemble(repository: Repository, session_id: str, brief: Brief) -> WorkingCo
         term for terms in resolution.matched_by.values() for term in terms
     )
     fallbacks = _fallbacks(repository, brief, matched_terms)
+    writing_style = writing_style_prompt(load_style(repository))
 
     ledger.append_assembly(
         repository,
@@ -193,6 +200,7 @@ def assemble(repository: Repository, session_id: str, brief: Brief) -> WorkingCo
         ],
         unconfirmed=resolution.unconfirmed,
         empty=resolution.empty,
+        writing_style=STYLE_RELATIVE_PATH if writing_style is not None else None,
     )
 
     return WorkingContext(
@@ -200,4 +208,5 @@ def assemble(repository: Repository, session_id: str, brief: Brief) -> WorkingCo
         fallbacks=fallbacks,
         unconfirmed=resolution.unconfirmed,
         empty=resolution.empty,
+        writing_style=writing_style,
     )

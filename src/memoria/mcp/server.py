@@ -66,6 +66,7 @@ import memoria.audit as audit
 import memoria.extraction as extraction
 import memoria.human_touched as human_touched
 import memoria.record_extractor as record_extractor
+import memoria.style as style
 from memoria.embeddings import default_embed_fn
 from memoria.index import (
     ReadOverlay,
@@ -83,7 +84,9 @@ from memoria.ledger import (
     append_search,
     append_search_global,
     append_search_semantic,
+    append_style_brief,
     append_trace,
+    append_writing_style,
     session_id_from_env,
 )
 from memoria.records import Read, ReadError, read as read_ref, real_paragraphs
@@ -113,7 +116,12 @@ mcp = MCPServer(
         "transcript turn; nothing there is called mid-conversation. "
         "trace(ref) answers why a paragraph of manuscript prose says what it "
         "says: the commit that last touched it, the session turn that "
-        "authorized an AI write, and what that session had loaded."
+        "authorized an AI write, and what that session had loaded. Before "
+        "drafting or rewriting any manuscript prose, call writing_style() and "
+        "follow what it serves - the author's own direction for how their "
+        "book is written. The style_* tools are the writing-style analysis "
+        "the `writing-style` skill drives; the author confirms its "
+        "observations in Settings, never here."
     ),
 )
 
@@ -547,10 +555,20 @@ def render_global(result: extraction.GlobalSearchResult) -> str:
 # docstring, test_audit.py's AST sweep).
 
 
-def render_audit_tasks(tasks: list[audit.AuditTask], remaining: int) -> str:
+def render_audit_tasks(
+    tasks: list[audit.AuditTask], remaining: int, *, writing_style: str | None = None
+) -> str:
     if not tasks:
         return "Nothing to audit in this target - every judgement is current."
     blocks = []
+    if writing_style is not None:
+        # A finding may carry a proposed rewrite (a patch), and a rewrite is
+        # manuscript prose: it follows the author's writing style like any
+        # other AI write (ADR-0009). Printed once, above the batch.
+        blocks.append(
+            "A proposed rewrite (a finding's patch) follows this writing style.\n\n"
+            + writing_style
+        )
     for task in tasks:
         lines = [
             f"anchor: {task.anchor}",
@@ -627,7 +645,11 @@ def audit_pending(
         )
     except ValueError as exc:
         raise ToolError(str(exc)) from exc
-    return render_audit_tasks(list(tasks), remaining=len(total))
+    return render_audit_tasks(
+        list(tasks),
+        remaining=len(total),
+        writing_style=style.writing_style_prompt(style.load_style(repository())),
+    )
 
 
 def render_audit_outcome(outcome: audit.AuditRecordOutcome, total: int) -> str:
@@ -653,6 +675,127 @@ def audit_record(results: list[audit.RecordedAuditItem]) -> str:
         raise ToolError("no results to record")
     outcome = audit.record_audit_batch(repository(), results)
     return render_audit_outcome(outcome, len(results))
+
+
+# --- the writing style (ADR-0009) -------------------------------------------
+
+
+@mcp.tool()
+def writing_style() -> str:
+    """The author's writing style, verbatim - call this before drafting or
+    rewriting any manuscript prose, and follow it.
+
+    Serves ``style/writing-style.md`` rendered as direction for a writer:
+    the author's own prose about how the book is written, then the
+    observations they confirmed from an analysis of their own writing. A
+    repository with no style yet says so; the answer is not to invent one.
+    """
+    rendered = style.writing_style_prompt(style.load_style(repository()))
+    if rendered is None:
+        return (
+            "No writing style is set. The author sets one under Settings > "
+            "Writing style; until then, write plainly and match the prose "
+            "already in the section."
+        )
+    append_writing_style(repository(), session_id(), style.STYLE_RELATIVE_PATH)
+    return rendered
+
+
+@mcp.tool()
+def style_status() -> str:
+    """Where the writing-style analysis stands: whether a style exists, how
+    many samples the author chose or uploaded, and how many observations
+    are proposed, confirmed or discarded. Call this first; the analysis
+    reads every sample with a model and runs only when the author says so.
+    """
+    return render_style_status(style.status(repository()))
+
+
+def render_style_status(state: style.StyleStatus) -> str:
+    lines = [
+        f"writing style: {'set' if state.exists else 'none yet'}",
+        f"direction: {'written' if state.direction_set else 'empty'}",
+        f"confirmed observations in the style: {state.observations}",
+        f"chosen sources: {state.sample_sources}",
+        f"uploaded samples: {state.uploaded_samples}",
+        f"observations proposed, awaiting the author: {state.proposed}",
+        f"observations confirmed: {state.confirmed}",
+        f"observations discarded: {state.discarded}",
+    ]
+    if state.sample_sources == 0 and state.uploaded_samples == 0:
+        lines.append(
+            "Nothing to analyse: the author chooses sources or uploads documents "
+            "under Settings > Writing style first."
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def style_brief() -> str:
+    """The briefing for one writing-style analysis: fetch it once and hold it.
+
+    Carries the analysis prompt verbatim, every chosen source's paragraphs
+    and every uploaded sample, and what the style already says so nothing
+    is proposed twice. Refuses when the author has chosen nothing. Send the
+    observations back with ``style_record``.
+    """
+    try:
+        result = style.brief(repository())
+    except style.StyleError as exc:
+        raise ToolError(str(exc)) from exc
+    append_style_brief(repository(), session_id(), [sample.ref for sample in result.samples])
+    return render_style_brief(result)
+
+
+def render_style_brief(result: style.Brief) -> str:
+    """The prompt, then each sample contiguous and unmodified - the same
+    contract ``read`` keeps for evidence."""
+    lines = [result.prompt, "", "## What the style already says", ""]
+    current = style.writing_style_prompt(result.current)
+    if current is None:
+        lines.append("Nothing yet - every observation is new.")
+    else:
+        lines += [
+            "Do not repeat these; propose only what they do not already say.",
+            "",
+            current,
+        ]
+    lines += ["", f"## The samples ({len(result.samples)})", ""]
+    for sample in result.samples:
+        lines += [f"### {sample.ref} - {sample.title}", ""]
+        if sample.truncated:
+            lines += [
+                f"(the first {style.SAMPLE_PARAGRAPH_LIMIT} paragraphs; the source runs longer)",
+                "",
+            ]
+        lines += [sample.text, ""]
+    return "\n".join(lines).rstrip("\n")
+
+
+@mcp.tool()
+def style_record(observations: list[style.RecordedObservation]) -> str:
+    """Record one batch of proposed observations for the author to confirm.
+
+    Send the whole batch in one call. Each element is accepted or rejected
+    on its own: an observation whose ``example`` does not occur verbatim in
+    the samples served is refused and names why, and the rest are kept.
+    Re-send only what was rejected, corrected. Nothing here writes the
+    style: the author confirms, changes or discards each observation under
+    Settings > Writing style.
+    """
+    if not observations:
+        raise ToolError("no observations to record")
+    try:
+        outcome = style.record_observations(repository(), observations)
+    except style.StyleError as exc:
+        raise ToolError(str(exc)) from exc
+    return render_style_outcome(outcome, len(observations))
+
+
+def render_style_outcome(outcome: style.RecordOutcome, total: int) -> str:
+    lines = [f"accepted {len(outcome.accepted)} of {total} - awaiting the author in Settings"]
+    lines += [f"rejected #{ordinal} - {reason}" for ordinal, reason in outcome.rejected]
+    return "\n".join(lines)
 
 
 # --- the extraction (#17) ----------------------------------------------------
