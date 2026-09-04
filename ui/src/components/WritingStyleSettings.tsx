@@ -373,7 +373,7 @@ function Analysis({ style }: { style: StyleOut }) {
               const result = await runStyleAnalysis();
               queryClient.setQueryData<StyleOut>(STYLE_KEY, result.style);
               const rejected =
-                result.rejected.length > 0 ? ` · ${result.rejected.length} refused` : "";
+                result.rejected.length > 0 ? ` · ${result.rejected.length} rejected` : "";
               return {
                 done: true,
                 canContinue: false,

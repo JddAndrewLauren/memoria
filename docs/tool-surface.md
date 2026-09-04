@@ -44,7 +44,9 @@ write, and they exist because there is nowhere else to put them.
 | `writing_style()`, `style_status()`, `style_brief()`, `style_record(observations)` | **Forced** — ADR-0009, below |
 | `model_status()`, `extraction_run(limit)`, `audit_run(...)`, `style_run()` | **Forced** — ADR-0010, below |
 
-The last five are the author's side of the pass rather than the pass itself.
+The five #17 tools (`extraction_candidates`, `extraction_unplaced_forms`,
+`extraction_cluster` and the two `extraction_promote_*`) are the author's side of the
+pass rather than the pass itself.
 #17 keeps rejected candidates and unplaced forms *enumerable* and offers
 promotion as a one-key act; the three list tools are the enumeration, and the
 two promote tools are the key. They exist on the server for the same reason

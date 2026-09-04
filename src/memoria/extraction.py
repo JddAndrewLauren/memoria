@@ -1559,6 +1559,58 @@ def brief(repository: Repository) -> Brief:
     )
 
 
+def render_brief(brief: Brief) -> str:
+    """The brief as text: the prompt verbatim, every subject's match and
+    hazards, the entries that exist. The one rendering (ADR-0004: the core
+    composes, an adapter prints) - the session's ``extraction_brief`` tool
+    and a direct run's system block both serve exactly this, each with its
+    own closing line."""
+    lines = [brief.extraction_prompt, "", "## The subjects", ""]
+    for subject in brief.subjects:
+        lines += [
+            f"### {subject.id}",
+            "",
+            f"Match: {subject.match}",
+            f"Hazards: {subject.hazards}",
+            f"auto-promote: {'yes' if subject.auto_promote else 'no'}",
+            "",
+        ]
+    lines += ["## The entries that exist", ""]
+    if brief.entry_names:
+        lines += [f"- {entry_id} ({name})" for entry_id, name in brief.entry_names]
+    else:
+        lines.append(
+            "None yet. Every mention is an unplaced surface form, which is the "
+            "expected state of a fresh archive."
+        )
+    return "\n".join(lines)
+
+
+def render_summary_task(task: PendingSummary, texts: Mapping[str, str] | None = None) -> str:
+    """One summary task as text: the cluster, what defines it, and what to
+    write it from. A parent serves its children's summaries. A leaf serves
+    its member paragraphs - as anchors to ``read(ref)`` when ``texts`` is
+    ``None`` (a session), or inlined from ``texts`` (a direct run)."""
+    lines = [
+        f"cluster: {task.cluster_id}",
+        f"level: {task.level}",
+        f"defined by: {task.label}",
+        "",
+    ]
+    if task.child_summaries:
+        lines += ["## Its child clusters' summaries", ""]
+        lines += [f"- {summary}" for summary in task.child_summaries]
+    elif texts is None:
+        lines += ["## Its member paragraphs", ""]
+        lines += [f"- {anchor}" for anchor in task.member_anchors]
+        lines += ["", "Read them with read(ref) before writing."]
+    else:
+        lines += ["## Its member paragraphs", ""]
+        for anchor in task.member_anchors:
+            lines += [f"### {anchor}", "", texts.get(anchor, ""), ""]
+    return "\n".join(lines).rstrip("\n")
+
+
 def pending_paragraphs(
     repository: Repository, *, limit: int | None = None
 ) -> list[PendingParagraph]:

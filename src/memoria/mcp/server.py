@@ -592,40 +592,7 @@ def render_audit_tasks(
             "A proposed rewrite (a finding's patch) follows this writing style.\n\n"
             + writing_style
         )
-    for task in tasks:
-        lines = [
-            f"anchor: {task.anchor}",
-            f"kind: {task.kind}",
-            f"not current because: {task.cause}",
-            "---",
-            "paragraph:",
-            task.paragraph_text,
-            "",
-            f"entry ({task.entry_id}) audit-visible body:",
-            task.entry_audit_visible_body,
-        ]
-        if task.kind == "engagement":
-            lines += [
-                "",
-                "Does this paragraph engage this entry at all? Answer with "
-                "engages (yes/no) and a short note on how.",
-                "",
-                f"subject: {task.subject_prompt}",
-            ]
-        else:
-            lines += [
-                "",
-                "Audit questions:",
-                task.subject_prompt,
-            ]
-            if task.gathered_anchors:
-                lines += [
-                    "",
-                    "gathered evidence - read each with read(ref) before answering:",
-                    *[f"- {a}" for a in task.gathered_anchors],
-                ]
-            lines += ["", audit.AUTHOR_TESTIMONY_POLICY]
-        blocks.append("\n".join(lines))
+    blocks += [audit.render_task(task) for task in tasks]
     return (
         "\n\n===\n\n".join(blocks)
         + f"\n\nawaiting audit: {remaining} (including this batch)"
@@ -772,27 +739,10 @@ def style_brief() -> str:
 
 def render_style_brief(result: style.Brief) -> str:
     """The prompt, then each sample contiguous and unmodified - the same
-    contract ``read`` keeps for evidence."""
-    lines = [result.prompt, "", "## What the style already says", ""]
-    current = style.writing_style_prompt(result.current)
-    if current is None:
-        lines.append("Nothing yet - every observation is new.")
-    else:
-        lines += [
-            "Do not repeat these; propose only what they do not already say.",
-            "",
-            current,
-        ]
-    lines += ["", f"## The samples ({len(result.samples)})", ""]
-    for sample in result.samples:
-        lines += [f"### {sample.ref} - {sample.title}", ""]
-        if sample.truncated:
-            lines += [
-                f"(the first {style.SAMPLE_PARAGRAPH_LIMIT} paragraphs; the source runs longer)",
-                "",
-            ]
-        lines += [sample.text, ""]
-    return "\n".join(lines).rstrip("\n")
+    contract ``read`` keeps for evidence. Both halves are the core's
+    renderings; a direct run serves the same two as its system and user
+    blocks."""
+    return style.render_brief_prompt(result) + "\n\n" + style.render_brief_samples(result)
 
 
 @mcp.tool()
@@ -1032,26 +982,10 @@ def extraction_brief() -> str:
 
 
 def render_brief(result: extraction.Brief) -> str:
-    lines = [result.extraction_prompt, "", "## The subjects", ""]
-    for subject in result.subjects:
-        lines += [
-            f"### {subject.id}",
-            "",
-            f"Match: {subject.match}",
-            f"Hazards: {subject.hazards}",
-            f"auto-promote: {'yes' if subject.auto_promote else 'no'}",
-            "",
-        ]
-    lines += ["## The entries that exist", ""]
-    if result.entry_names:
-        lines += [f"- {entry_id} ({name})" for entry_id, name in result.entry_names]
-    else:
-        lines.append(
-            "None yet. Every mention is an unplaced surface form, which is the "
-            "expected state of a fresh archive."
-        )
-    lines += ["", f"paragraphs awaiting extraction: {result.pending}"]
-    return "\n".join(lines)
+    return (
+        extraction.render_brief(result)
+        + f"\n\nparagraphs awaiting extraction: {result.pending}"
+    )
 
 
 @mcp.tool()
@@ -1193,23 +1127,11 @@ def render_summary_task(
     lines = [
         prompt,
         "",
-        f"cluster: {task.cluster_id}",
-        f"level: {task.level}",
         f"membership: {task.memo_key}",
-        f"defined by: {task.label}",
         f"remaining: {remaining}",
         "",
+        extraction.render_summary_task(task),
     ]
-    if task.child_summaries:
-        lines.append("## Its child clusters' summaries")
-        lines.append("")
-        lines += [f"- {summary}" for summary in task.child_summaries]
-    else:
-        lines.append("## Its member paragraphs")
-        lines.append("")
-        lines += [f"- {anchor}" for anchor in task.member_anchors]
-        lines.append("")
-        lines.append("Read them with read(ref) before writing.")
     return "\n".join(lines)
 
 

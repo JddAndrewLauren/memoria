@@ -347,6 +347,7 @@ def append_model_call(
     cache_creation_input_tokens: int = 0,
     stop_reason: str = "end_turn",
     anchor: str | None = None,
+    error: str | None = None,
 ) -> None:
     """Ledger one metered model call made by a direct run (ADR-0010).
 
@@ -354,7 +355,10 @@ def append_model_call(
     subscription capacity or metered API usage; this line is that, made
     mechanical - one per call, with the pass it served, the model that
     answered and what it cost in tokens. A refusal is ledgered too (it was
-    billed for its input), with ``stop_reason`` saying so.
+    billed for its input), with ``stop_reason`` saying so. A call the
+    provider failed is ledgered with ``stop_reason`` ``error``, the
+    provider's reason in ``error``, and zero usage - the provider reported
+    none, and the author may still have been billed for it.
 
     Deliberately **no ``served`` key**: ``supplied_context`` reads every
     event carrying one as a served read, and what reached the model's
@@ -376,6 +380,7 @@ def append_model_call(
             "cache_creation_input_tokens": cache_creation_input_tokens,
             "stop_reason": stop_reason,
             "anchor": anchor,
+            "error": error,
         },
     )
 

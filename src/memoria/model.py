@@ -137,7 +137,6 @@ def save_settings(repository: Repository, settings: ModelSettings) -> None:
     except BaseException:
         temp.unlink(missing_ok=True)
         raise
-    os.chmod(temp, 0o600)
     os.replace(temp, path)
 
 

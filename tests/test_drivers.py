@@ -277,7 +277,12 @@ def test_a_provider_failure_stops_the_run_and_keeps_what_was_recorded(tmp_path):
     # again next time, at one call's price.
     with pytest.raises(ModelError):
         drivers.run_extraction(repository, FakeModel(handler), SESSION, limit=3)
-    assert len(_model_calls(repository)) == 1
+    # The failed call is ledgered too - the author may have been billed for
+    # it - as an error line with no usage figures, and the run stops there.
+    calls = _model_calls(repository)
+    assert [c["stop_reason"] for c in calls] == ["end_turn", "error"]
+    assert calls[1]["error"] == "rate-limited"
+    assert calls[1]["input_tokens"] == 0 and calls[1]["model"] == ""
     assert len(ex.pending_paragraphs(repository)) == 3
 
 
@@ -387,7 +392,13 @@ def test_the_audit_serves_the_policy_the_entry_and_the_gathered_evidence(tmp_pat
 
     verdicts = [r for r in model.requests if "kind: audit_verdict" in r.user]
     assert verdicts
-    assert audit.AUTHOR_TESTIMONY_POLICY in verdicts[0].system
+    # The policy rides on each verdict task, as audit_pending serves it - and
+    # on no engagement task, which a session never sees it on either.
+    assert audit.AUTHOR_TESTIMONY_POLICY in verdicts[0].user
+    assert audit.AUTHOR_TESTIMONY_POLICY not in verdicts[0].system
+    engagements = [r for r in model.requests if "kind: engagement" in r.user]
+    assert engagements
+    assert all(audit.AUTHOR_TESTIMONY_POLICY not in r.user for r in engagements)
     assert "Bob is tall." in verdicts[0].user
     assert "Bob went to town." in verdicts[0].user
     assert "gathered evidence:" in verdicts[0].user
