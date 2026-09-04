@@ -524,4 +524,35 @@ describe("the Review surface", () => {
     expect(screen.getByText(/2 judgements recorded · 1 finding · every judgement current · 2 metered calls/)).toBeInTheDocument();
     expect(fetchCalls().filter((url) => url.endsWith("/review")).length).toBe(2);
   });
+
+  it("requires an explicit retry after an audit judgement is rejected", async () => {
+    stubApi({
+      model: MODEL_READY,
+      review: { ...REVIEW, findings: [], verdicts_current: 0, verdicts_not_current: 2 },
+      audits: [
+        {
+          ...AUDIT_DONE,
+          accepted: 0,
+          findings: 0,
+          remaining: 2,
+          rejected: [{ anchor: "02/01#7|SUB-people/bob", reason: "the model refused" }],
+        },
+        AUDIT_DONE,
+      ],
+    });
+    renderReview();
+
+    fireEvent.click(await screen.findByRole("button", { name: /run audit/i }));
+
+    expect(await screen.findByText(/1 rejected/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /run audit/i })).toBeEnabled(),
+    );
+    expect(fetchCalls().filter((url) => url.endsWith("/audit"))).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /run audit/i }));
+    await waitFor(() =>
+      expect(fetchCalls().filter((url) => url.endsWith("/audit"))).toHaveLength(2),
+    );
+  });
 });

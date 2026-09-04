@@ -376,6 +376,7 @@ function Analysis({ style }: { style: StyleOut }) {
                 result.rejected.length > 0 ? ` · ${result.rejected.length} refused` : "";
               return {
                 done: true,
+                canContinue: false,
                 summary: `${result.accepted} proposed${rejected} · ${describeSpend(result.spend)}`,
               };
             }}

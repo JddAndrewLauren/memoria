@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ApiError,
@@ -42,13 +42,18 @@ export function describeSpend(spend: SpendOut): string {
 export interface Step {
   done: boolean;
   summary: string;
+  // A caller must explicitly authorize another metered call. Rejections
+  // and a step that changed nothing both require a fresh button click.
+  canContinue: boolean;
 }
 
 /**
- * A Run button that loops one bounded step until the run says it is done
- * or the author stops it - the same resumable shape the skills keep, so a
- * stop between steps loses nothing. Shows the latest step's summary
- * inline, and the failure when a step fails.
+ * A Run button that loops one bounded step while the caller says another
+ * metered call is safe, until the run is done or the author stops it. A
+ * rejection or a step with no progress leaves retrying to a fresh click.
+ * This is the same resumable shape the skills keep, so a stop between
+ * steps loses nothing. Shows the latest step's summary inline, and the
+ * failure when a step fails.
  */
 export function RunButton({
   label,
@@ -67,22 +72,47 @@ export function RunButton({
   const [summary, setSummary] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const stopRequested = useRef(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    // StrictMode runs setup, cleanup, setup in development. Restore this
+    // ref in setup so its rehearsal cleanup does not look like an unmount.
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      stopRequested.current = true;
+    };
+  }, []);
 
   async function start() {
     stopRequested.current = false;
     setRunning(true);
     setError(null);
+    let completedSteps = 0;
+    let stepFailed = false;
     try {
       let result: Step;
       do {
         result = await step();
-        setSummary(result.summary);
-      } while (!result.done && !stopRequested.current);
-      await onFinished?.();
+        completedSteps += 1;
+        if (mounted.current) setSummary(result.summary);
+      } while (!result.done && result.canContinue && !stopRequested.current);
     } catch (failure) {
-      setError(failure instanceof ApiError ? failure.message : "The run failed.");
+      stepFailed = true;
+      if (mounted.current) {
+        setError(failure instanceof ApiError ? failure.message : "The run failed.");
+      }
     } finally {
-      setRunning(false);
+      if (completedSteps > 0) {
+        try {
+          await onFinished?.();
+        } catch (failure) {
+          if (!stepFailed && mounted.current) {
+            setError(failure instanceof ApiError ? failure.message : "The run failed.");
+          }
+        }
+      }
+      if (mounted.current) setRunning(false);
     }
   }
 
@@ -144,7 +174,12 @@ export function RunAuditButton({ sectionId }: { sectionId: string }) {
       runningLabel="Auditing…"
       step={async () => {
         const result = await runAudit(sectionId, { limit: 20 });
-        return { done: result.remaining === 0, summary: describeAudit(result) };
+        return {
+          done: result.remaining === 0,
+          canContinue:
+            result.remaining > 0 && result.accepted > 0 && result.rejected.length === 0,
+          summary: describeAudit(result),
+        };
       }}
       onFinished={() =>
         Promise.all([

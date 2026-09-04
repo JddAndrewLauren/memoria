@@ -18,7 +18,12 @@ from memoria.index import build_index, gather
 from memoria.ledger import event_path
 from memoria.manuscript import create_chapter, create_section
 from memoria.model import ModelError, ModelReply, ModelRequest, ModelUsage
-from memoria.records import NORMALIZED_RELATIVE_PATH, NormalizedRecord, write_normalized_records
+from memoria.records import (
+    NORMALIZED_RELATIVE_PATH,
+    NormalizedRecord,
+    record_path,
+    write_normalized_records,
+)
 from memoria.repository import Repository
 from memoria.subjects import Entry, entry_to_markdown, write_builtin_subjects
 from memoria.write import Actor
@@ -389,6 +394,24 @@ def test_the_audit_serves_the_policy_the_entry_and_the_gathered_evidence(tmp_pat
     assert "Bob went to market." in verdicts[0].user, "a session would read(ref) it; the driver inlines it"
     reads = [e for e in _ledger(repository) if e["tool"] == "read"]
     assert reads and reads[0]["ref"] == "src-000001-p1"
+
+
+def test_the_audit_rejects_a_verdict_when_its_gathered_evidence_cannot_be_read(tmp_path):
+    repository, chapter, section = _manuscript(tmp_path)
+    assert gather(repository, "SUB-people/bob"), "the stale index must still name the source"
+    record_path(repository, "SRC-000001").unlink()
+    model = FakeModel(_answer_audit)
+
+    report = drivers.run_audit(
+        repository, model, SESSION, chapter_number=chapter.number, section_number=section.number
+    )
+
+    assert report.accepted == 1, "the evidence-free engagement judgement can still be recorded"
+    assert report.remaining == 1
+    assert len(report.rejected) == 1
+    assert "src-000001-p1" in report.rejected[0].reason
+    assert "could not be read" in report.rejected[0].reason
+    assert not any("kind: audit_verdict" in request.user for request in model.requests)
 
 
 def test_the_audit_puts_the_writing_style_above_a_verdict(tmp_path):

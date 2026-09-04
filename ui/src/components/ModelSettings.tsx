@@ -220,7 +220,17 @@ function ExtractionRegion({ ready }: { ready: boolean }) {
           runningLabel="Extracting…"
           step={async () => {
             const result = await runExtraction(20);
-            return { done: result.phase === "done", summary: describeExtraction(result) };
+            const progressed =
+              result.phase === "paragraphs"
+                ? result.paragraphs_accepted > 0
+                : result.phase === "summaries"
+                  ? result.summaries_written > 0
+                  : true;
+            return {
+              done: result.phase === "done",
+              canContinue: progressed && result.rejected.length === 0,
+              summary: describeExtraction(result),
+            };
           }}
           onFinished={() => queryClient.invalidateQueries({ queryKey: EXTRACTION_KEY })}
         />

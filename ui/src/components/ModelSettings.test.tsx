@@ -204,6 +204,34 @@ describe("Settings > Model", () => {
     expect(screen.getByRole("button", { name: /run extraction/i })).toBeEnabled();
   });
 
+  it("requires an explicit retry after an extraction item is rejected", async () => {
+    const calls = stubFetch({
+      current: READY,
+      runs: [
+        step({
+          paragraphs_accepted: 0,
+          paragraphs_remaining: 1,
+          rejected: [{ anchor: "src-000001-p1", reason: "the model refused" }],
+        }),
+        step({ phase: "done", paragraphs_read: 0, spend: { calls: 0, model: "" } }),
+      ],
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: /run extraction/i }));
+
+    expect(await screen.findByText(/1 rejected/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /run extraction/i })).toBeEnabled(),
+    );
+    expect(calls.filter((c) => c.url.endsWith("/api/extraction/run"))).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /run extraction/i }));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url.endsWith("/api/extraction/run"))).toHaveLength(2),
+    );
+  });
+
   it("reports a refused run rather than looping on it", async () => {
     stubFetch({ current: READY });
     vi.mocked(globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {

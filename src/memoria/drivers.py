@@ -557,7 +557,7 @@ def audit_user_text(task: audit.AuditTask, gathered: dict[str, str]) -> str:
         if task.gathered_anchors:
             lines += ["", "gathered evidence:"]
             for anchor in task.gathered_anchors:
-                lines += ["", f"### {anchor}", "", gathered.get(anchor, "")]
+                lines += ["", f"### {anchor}", "", gathered[anchor]]
     return "\n".join(lines)
 
 
@@ -621,16 +621,31 @@ def run_audit(
     if tasks:
         system = audit_system_text(repository)
         gathered: dict[str, str] = {}
+        gathered_failures: dict[str, str] = {}
         for task in tasks:
+            unreadable: list[tuple[str, str]] = []
             for anchor in task.gathered_anchors:
                 if anchor in gathered:
                     continue
+                if anchor in gathered_failures:
+                    unreadable.append((anchor, gathered_failures[anchor]))
+                    continue
                 try:
                     served = records.read(repository, anchor)
-                except records.ReadError:
+                except records.ReadError as exc:
+                    gathered_failures[anchor] = str(exc)
+                    unreadable.append((anchor, str(exc)))
                     continue
                 gathered[anchor] = served.text
                 ledger.append_read(repository, session_id, served)
+            if unreadable:
+                details = "; ".join(
+                    f"{anchor} could not be read: {reason}" for anchor, reason in unreadable
+                )
+                meter.rejected.append(
+                    Rejection(task.anchor, f"gathered evidence {details}")
+                )
+                continue
             reply = _call(
                 repository,
                 session_id,
