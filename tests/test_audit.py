@@ -595,9 +595,14 @@ def test_the_writing_functions_are_reachable_only_from_audit_py_and_the_mcp_serv
     server's audit tools (`audit_pending`/`audit_record`) - never in ingest
     (`memoria.index`), the extraction pass, the CLI, or the record
     extractor. `memoria.index.rebuild` calling the *read-only*
-    `compute_staleness_map` is a different function and is unaffected."""
+    `compute_staleness_map` is a different function and is unaffected.
+
+    ADR-0010 adds one caller: `memoria.drivers.run_audit`, the direct run,
+    which records a batch exactly as `audit_record` does and is reached
+    only from `audit_run` / the section's audit route - an explicit audit
+    request, never anything running on its own."""
     writing_functions = {"record_engagement", "record_audit_verdict", "record_audit_batch"}
-    allowed_files = {"audit.py", "server.py"}
+    allowed_files = {"audit.py", "server.py", "drivers.py"}
     for path in SRC_ROOT.rglob("*.py"):
         if path.name in allowed_files:
             continue

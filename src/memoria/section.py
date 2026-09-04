@@ -166,7 +166,7 @@ class SectionView:
     questions: tuple[QuestionRecord, ...]
 
 
-def _locate(repository: Repository, section_id: str) -> tuple[ChapterEntry, SectionEntry]:
+def locate_section(repository: Repository, section_id: str) -> tuple[ChapterEntry, SectionEntry]:
     """The chapter and section a ``SEC-`` id names - ``resolve_section``
     finds the section, but the surface needs its chapter too."""
     section = resolve_section(repository, section_id)
@@ -247,7 +247,7 @@ def compose_section(repository: Repository, section_id: str) -> SectionView:
     Raises ``memoria.manuscript.ManuscriptError`` for an id no section
     carries, the same error ``read(SEC-...)`` gives.
     """
-    chapter, section = _locate(repository, section_id)
+    chapter, section = locate_section(repository, section_id)
     draft_path = section.dir / DRAFT_FILENAME
 
     not_current_by_index: dict[int, list[NotCurrentJudgement]] = {}

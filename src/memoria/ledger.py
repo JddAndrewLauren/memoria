@@ -334,6 +334,52 @@ def _append(repository: Repository, session_id: str, event: dict) -> None:
         f.write(json.dumps(line) + "\n")
 
 
+def append_model_call(
+    repository: Repository,
+    session_id: str,
+    *,
+    pass_name: str,
+    provider: str,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_input_tokens: int = 0,
+    cache_creation_input_tokens: int = 0,
+    stop_reason: str = "end_turn",
+    anchor: str | None = None,
+) -> None:
+    """Ledger one metered model call made by a direct run (ADR-0010).
+
+    Part 13 §24.5 asks that the author can tell whether a task used
+    subscription capacity or metered API usage; this line is that, made
+    mechanical - one per call, with the pass it served, the model that
+    answered and what it cost in tokens. A refusal is ledgered too (it was
+    billed for its input), with ``stop_reason`` saying so.
+
+    Deliberately **no ``served`` key**: ``supplied_context`` reads every
+    event carrying one as a served read, and what reached the model's
+    context is already ledgered by the same ``append_extraction_*`` and
+    ``append_style_brief`` lines a session's tools write - the driver
+    writes those too. This line records spend, not supply.
+    """
+    _append(
+        repository,
+        session_id,
+        {
+            "tool": "model_call",
+            "pass": pass_name,
+            "provider": provider,
+            "model": model,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cache_read_input_tokens": cache_read_input_tokens,
+            "cache_creation_input_tokens": cache_creation_input_tokens,
+            "stop_reason": stop_reason,
+            "anchor": anchor,
+        },
+    )
+
+
 def append_extraction_brief(
     repository: Repository, session_id: str, subject_ids: list[str]
 ) -> None:

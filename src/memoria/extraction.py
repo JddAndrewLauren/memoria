@@ -562,7 +562,7 @@ def derive(
     entries = load_all_entries(repository)
     digest = subject_prompts_digest(subjects)
 
-    paragraphs = _paragraph_texts(repository)
+    paragraphs = paragraph_texts(repository)
     con = connect(repository)
     try:
         cached = _memo_values(con, "paragraph")
@@ -610,8 +610,11 @@ def derive(
     )
 
 
-def _paragraph_texts(repository: Repository) -> dict[str, str]:
+def paragraph_texts(repository: Repository) -> dict[str, str]:
     """Every paragraph in the archive, by anchor, read from the record files.
+    Public for the direct run's summary loop (ADR-0010), which hands a leaf
+    cluster's member paragraphs to the model the way a session would
+    ``read(ref)`` them.
 
     From the records rather than from the FTS5 copy beside them, and the
     reason is the same one ``read(ref)`` has: the index is derived state that
@@ -1571,7 +1574,7 @@ def pending_paragraphs(
     whole corpus - the price part 06 §8.1 already names.
     """
     digest = subject_prompts_digest(load_all_subjects(repository))
-    paragraphs = _paragraph_texts(repository)
+    paragraphs = paragraph_texts(repository)
     con = connect(repository)
     try:
         cached = {
@@ -1616,7 +1619,7 @@ def record_batch(
     archive for every paragraph in the batch, which is quadratic in exactly
     the dimension that grows.
     """
-    texts = _paragraph_texts(repository)
+    texts = paragraph_texts(repository)
     subjects = load_all_subjects(repository)
     entries = load_all_entries(repository)
     digest = subject_prompts_digest(subjects)
@@ -1892,7 +1895,7 @@ def status(repository: Repository) -> Status:
     seeing these numbers and saying go.
     """
     pending = pending_paragraphs(repository)
-    paragraphs = len(_paragraph_texts(repository))
+    paragraphs = len(paragraph_texts(repository))
     con = connect(repository)
     try:
         meta = {
