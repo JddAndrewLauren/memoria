@@ -161,7 +161,10 @@ runs** on under Settings > Model in the app (`docs/adr/0010-…`); when it says
 ready, `extraction_run`, `audit_run` and `style_run` execute the pass on the
 server against the author's own metered API key, bounded per call and
 ledgered per model call. The `extraction` and `writing-style` skills check it
-after the author says go. `docs/tool-surface.md` has the four tools.
+after the author says go. `docs/tool-surface.md` has the four tools. For a
+corpus too large for one session to read itself, the `extraction-dispatch`
+skill (`.claude/skills/extraction-dispatch/`) serves paragraphs to parallel
+sub-agents and records their readings through the same core function.
 
 ## The FastAPI app
 

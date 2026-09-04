@@ -133,6 +133,11 @@ If the paragraph loop finished and the summary loop did not, say so plainly:
 the extraction is complete and the summary set is partial. That is a
 supported state, not a broken one (part 13 §24.3).
 
+If the corpus is more than one session can read - thousands of batches, not
+tens - `/extraction-dispatch` runs the same pass with the reading delegated
+to parallel sub-agents and the recording done by a script; the close of the
+pass and the promotion rules are this skill's, unchanged.
+
 ## The report
 
 Close with:
