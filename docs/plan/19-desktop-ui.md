@@ -370,6 +370,13 @@ commit d41f2a9            the git commit for an author edit
   durable file the dialog edits through the write path. **Its second row, the same
   day** (ADR-0010): Model — the switch for direct runs, the model id and the API key,
   machine-local and never a durable file. `Feedback` stays unresolved.
+- A floating `+ New section` button. **Adopted 2026-09-04** (ADR-0012), on every page:
+  its dialog appends a section to a chosen chapter (the current one, from a section
+  page), by **Write now** — prose, and a brief where the author wrote one — or by
+  **Grill me**, the writing interview, run directly when Settings > Model is ready and
+  from a session with `/grill-writing` otherwise. A source page's source joins the
+  interview's context. The dialog's textarea is the app's first prose input and creates
+  a file that did not exist; §19.7's editor of existing prose stays open.
 
 **Runs ahead of decisions that are still open. Recorded, not resolved.**
 

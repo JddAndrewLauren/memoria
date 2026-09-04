@@ -39,7 +39,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from memoria import audit, extraction, ledger, records, style
+from memoria import audit, extraction, grill, ledger, records, style
 from memoria.model import ModelError, ModelFn, ModelReply, ModelRequest
 from memoria.repository import Repository
 
@@ -47,6 +47,7 @@ PASS_EXTRACTION = "extraction"
 PASS_CLUSTER_SUMMARY = "cluster_summary"
 PASS_AUDIT = "audit"
 PASS_STYLE = "style"
+PASS_GRILL = "grill"
 
 # Room for the reply, per pass. A paragraph's reading is a short JSON
 # object; a summary is a paragraph or two of prose; an audit verdict may
@@ -57,6 +58,9 @@ MAX_TOKENS = {
     PASS_CLUSTER_SUMMARY: 2048,
     PASS_AUDIT: 4096,
     PASS_STYLE: 8192,
+    # A grilling turn is one question, or at its end a brief and a whole
+    # section's prose.
+    PASS_GRILL: 8192,
 }
 
 # --- the schemas ---------------------------------------------------------------
@@ -160,6 +164,23 @@ STYLE_SCHEMA = {
     "additionalProperties": False,
 }
 
+# One interviewer turn. ``done`` false: ``question`` and
+# ``recommended_answer`` carry the turn and the draft fields are empty;
+# ``done`` true: ``brief`` and ``draft`` carry the section and the question
+# fields are empty. Empty strings stand in for null, as in ``VERDICT_SCHEMA``.
+GRILL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "done": {"type": "boolean"},
+        "question": _STRING,
+        "recommended_answer": _STRING,
+        "brief": _STRING,
+        "draft": _STRING,
+    },
+    "required": ["done", "question", "recommended_answer", "brief", "draft"],
+    "additionalProperties": False,
+}
+
 
 # --- the reports ---------------------------------------------------------------
 
@@ -214,6 +235,33 @@ class AuditRun:
 @dataclass(frozen=True)
 class StyleRun:
     accepted: int
+    rejected: tuple[Rejection, ...]
+    spend: Spend
+
+
+@dataclass(frozen=True)
+class GrillTurn:
+    """One turn of the interview as the client holds it. ``role`` is
+    ``author`` or ``interviewer``; the transcript is the client's, so a
+    driver call receives the whole of it and stores none of it."""
+
+    role: str
+    text: str
+
+
+@dataclass(frozen=True)
+class GrillRun:
+    """One interviewer turn (ADR-0012). While ``done`` is false it is the
+    next ``question`` with its ``recommended_answer``; once true it is the
+    ``brief`` and the ``draft``, for the author to edit and write. A reply
+    the driver could not use is the one ``rejected`` item, and every other
+    field is empty."""
+
+    done: bool
+    question: str
+    recommended_answer: str
+    brief: str
+    draft: str
     rejected: tuple[Rejection, ...]
     spend: Spend
 
@@ -735,5 +783,109 @@ def run_style(
     return StyleRun(
         accepted=len(outcome.accepted),
         rejected=tuple(Rejection(str(ordinal), reason) for ordinal, reason in outcome.rejected),
+        spend=meter.spend(),
+    )
+
+
+# --- the grilling ----------------------------------------------------------------
+
+GRILL_ROLE_AUTHOR = "author"
+GRILL_ROLE_INTERVIEWER = "interviewer"
+
+
+def grill_system_text(served: grill.Brief) -> str:
+    """The whole briefing - prompt and context - as ``grill_brief`` serves
+    it to a session, plus the reply shape. Identical across every turn of
+    one interview, so it is the cached system block."""
+    return (
+        grill.render_brief(served)
+        + "\n\nAnswer as JSON. While the understanding is not yet shared: done false, "
+        "the next question and your recommended answer, brief and draft empty. "
+        "Once it is, or once the author asks you to write: done true, the brief and "
+        "the draft, question and recommended_answer empty."
+    )
+
+
+def grill_user_text(turns: tuple[GrillTurn, ...]) -> str:
+    """The interview so far, verbatim, oldest first - or the opening, when
+    there is none yet."""
+    if not turns:
+        return "The interview is starting. Ask your first question."
+    lines = ["## The interview so far", ""]
+    for turn in turns:
+        speaker = "Author" if turn.role == GRILL_ROLE_AUTHOR else "Interviewer"
+        lines += [f"### {speaker}", "", turn.text, ""]
+    lines.append("Reply with your next turn.")
+    return "\n".join(lines)
+
+
+def run_grill(
+    repository: Repository,
+    model: ModelFn,
+    session_id: str,
+    *,
+    chapter_id: str,
+    source_ref: str | None,
+    turns: tuple[GrillTurn, ...],
+    provider: str = "anthropic",
+) -> GrillRun:
+    """One interviewer turn of a grilling about a new section of
+    ``chapter_id`` (ADR-0012): the briefing as the system text, the
+    client's transcript as the user text, one metered call. Stateless -
+    nothing is kept between calls but what the client sends back. The
+    briefing is ledgered as served every call, since every call serves it.
+    ``grill.GrillError`` for an unknown chapter or source, as ``grill.brief``
+    refuses it."""
+    meter = _Meter()
+    served = grill.brief(repository, chapter_id, source_ref)
+    ledger.append_grill_brief(repository, session_id, served.served)
+    reply = _call(
+        repository,
+        session_id,
+        model,
+        ModelRequest(
+            system=grill_system_text(served),
+            user=grill_user_text(turns),
+            schema=GRILL_SCHEMA,
+            max_tokens=MAX_TOKENS[PASS_GRILL],
+            pass_name=PASS_GRILL,
+        ),
+        meter,
+        provider=provider,
+    )
+    try:
+        value = _object(reply)
+        done = value.get("done")
+        if not isinstance(done, bool):
+            raise _Rejected("'done' is not a boolean")
+        fields = {}
+        for name in ("question", "recommended_answer", "brief", "draft"):
+            text = value.get(name, "")
+            if not isinstance(text, str):
+                raise _Rejected(f"{name!r} is not a string")
+            fields[name] = text.strip()
+        if done and not fields["draft"]:
+            raise _Rejected("the interviewer said it was done and drafted nothing")
+        if done and not fields["brief"]:
+            raise _Rejected("the interviewer said it was done and wrote no brief")
+        if not done and not fields["question"]:
+            raise _Rejected("the interviewer asked nothing")
+    except _Rejected as exc:
+        return GrillRun(
+            done=False,
+            question="",
+            recommended_answer="",
+            brief="",
+            draft="",
+            rejected=(Rejection("interview", str(exc)),),
+            spend=meter.spend(),
+        )
+    return GrillRun(
+        done=done,
+        question=fields["question"] if not done else "",
+        recommended_answer=fields["recommended_answer"] if not done else "",
+        brief=fields["brief"] if done else "",
+        draft=fields["draft"] if done else "",
+        rejected=(),
         spend=meter.spend(),
     )

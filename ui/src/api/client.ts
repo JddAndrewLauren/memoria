@@ -63,6 +63,11 @@ export type AuditRunOut = components["schemas"]["AuditRunOut"];
 export type StyleRunOut = components["schemas"]["StyleRunOut"];
 export type SpendOut = components["schemas"]["SpendOut"];
 export type RejectionOut = components["schemas"]["RejectionOut"];
+export type SectionCreate = components["schemas"]["SectionCreate"];
+export type SectionCreated = components["schemas"]["SectionCreated"];
+export type GrillTurnIn = components["schemas"]["GrillTurnIn"];
+export type GrillRequest = components["schemas"]["GrillRequest"];
+export type GrillOut = components["schemas"]["GrillOut"];
 export type IngestionStatusOut = components["schemas"]["IngestionStatusOut"];
 export type UnitStatusOut = components["schemas"]["UnitStatusOut"];
 export type IngestionRunOut = components["schemas"]["IngestionRunOut"];
@@ -340,6 +345,19 @@ export function runAudit(
 
 export function runStyleAnalysis(): Promise<StyleRunOut> {
   return post(`/api/style/analyse`);
+}
+
+// A new section (ADR-0012): the dialog's one durable write - the prose and
+// the brief where the author wrote one, appended to a chapter and committed
+// as the author - and one interviewer turn of a grilling run directly. The
+// transcript travels whole with every grill request; the server keeps none
+// of it, and a 409 says direct runs are off.
+export function createSection(chapterId: string, body: SectionCreate): Promise<SectionCreated> {
+  return post(`/api/chapters/${encodeURIComponent(chapterId)}/sections`, body);
+}
+
+export function grill(request: GrillRequest): Promise<GrillOut> {
+  return post(`/api/grill`, request);
 }
 
 export { ApiError };

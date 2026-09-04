@@ -817,6 +817,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/chapters/{chapter_id}/sections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Section
+         * @description The author writing a new section from the dialog - "Write now", or
+         *     the draft a grilling ended in, edited and confirmed with a click.
+         *
+         *     Appended to ``chapter_id`` (position is the directory number; the
+         *     picker chooses a chapter and nothing finer, ADR-0012). Two files, two
+         *     commits through the single write path (ADR-0003's second door,
+         *     ``write.create``): the brief, then ``draft.md``. Commits as the author -
+         *     ``repository_actor``, never a name in the payload (ADR-0002) - because
+         *     the click is the act, the same as ``rewrite_paragraph``; a grilled
+         *     draft the author read and wrote is theirs, the same class of thing as
+         *     a rewrite they applied from Review. A brief the author did not write is
+         *     the prose's opening, marked unconfirmed (``brief_from_prose``).
+         *
+         *     **404** for a chapter no chapter carries, **409** for a file that
+         *     appeared underneath the create, **500** for a write that cannot be
+         *     attempted (no git identity), **422** for empty prose.
+         */
+        post: operations["create_section_api_chapters__chapter_id__sections_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/grill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Grill Turn
+         * @description One interviewer turn of the dialog's "Grill me", run here directly
+         *     (ADR-0010, ADR-0012): the client's whole transcript in, the next
+         *     question - or the brief and the draft, once the understanding is
+         *     shared - out. Nothing is stored between turns; nothing here writes a
+         *     file. The draft goes back to the author to edit and write through
+         *     ``create_section``. **404** for an unknown chapter or source, **409**
+         *     while direct runs are off (the detail names Settings > Model), **502**
+         *     when the provider fails.
+         */
+        post: operations["grill_turn_api_grill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1222,6 +1284,57 @@ export interface components {
             actor_name?: string | null;
             /** At */
             at?: string | null;
+        };
+        /**
+         * GrillOut
+         * @description The interviewer's turn. ``done`` false: ``question`` and
+         *     ``recommended_answer``; ``done`` true: ``brief`` and ``draft``, for the
+         *     author to edit and write. A reply the run could not use is the one
+         *     ``rejected`` item, and the author sends the transcript again.
+         */
+        GrillOut: {
+            /** Done */
+            done: boolean;
+            /** Question */
+            question: string;
+            /** Recommended Answer */
+            recommended_answer: string;
+            /** Brief */
+            brief: string;
+            /** Draft */
+            draft: string;
+            /** Rejected */
+            rejected: components["schemas"]["RejectionOut"][];
+            spend: components["schemas"]["SpendOut"];
+        };
+        /**
+         * GrillRequest
+         * @description One interviewer turn of a grilling about a new section of
+         *     ``chapter_id`` (ADR-0012), run directly. The transcript is the client's:
+         *     the whole of it comes with every request and none of it is kept.
+         *     ``source_ref`` is the source the dialog was opened from, if any, whose
+         *     text joins the interviewer's context.
+         */
+        GrillRequest: {
+            /** Chapter Id */
+            chapter_id: string;
+            /** Source Ref */
+            source_ref?: string | null;
+            /**
+             * Turns
+             * @default []
+             */
+            turns: components["schemas"]["GrillTurnIn"][];
+        };
+        /**
+         * GrillTurnIn
+         * @description One turn of the interview as the dialog holds it.
+         */
+        GrillTurnIn: {
+            /** Role */
+            role: string;
+            /** Text */
+            text: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1669,6 +1782,39 @@ export interface components {
             source_type: string;
             /** Snippet */
             snippet?: string | null;
+        };
+        /**
+         * SectionCreate
+         * @description The author writing a new section from the dialog: the prose, and the
+         *     brief where they wrote one. ``brief`` empty means none was written and
+         *     the prose's opening stands in, marked unconfirmed (CONTEXT.md's
+         *     *unconfirmed brief*), for the author to confirm or edit later.
+         */
+        SectionCreate: {
+            /**
+             * Brief
+             * @default
+             */
+            brief: string;
+            /** Draft */
+            draft: string;
+        };
+        /**
+         * SectionCreated
+         * @description The section that now exists: its stable id, where it landed
+         *     (appended to its chapter), and whether its brief awaits confirmation.
+         */
+        SectionCreated: {
+            /** Id */
+            id: string;
+            /** Chapter Id */
+            chapter_id: string;
+            /** Chapter Number */
+            chapter_number: number;
+            /** Section Number */
+            section_number: number;
+            /** Unconfirmed */
+            unconfirmed: boolean;
         };
         /**
          * SectionParagraphOut
@@ -3029,6 +3175,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StyleRunOut"];
+                };
+            };
+        };
+    };
+    create_section_api_chapters__chapter_id__sections_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chapter_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SectionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SectionCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    grill_turn_api_grill_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GrillRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrillOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

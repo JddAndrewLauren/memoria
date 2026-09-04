@@ -109,6 +109,22 @@ describe("the app shell on a fresh checkout", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Close settings" }));
     expect(screen.queryByRole("dialog", { name: "Settings" })).not.toBeInTheDocument();
   });
+
+  it("carries the floating New section button, which opens its dialog (ADR-0012)", async () => {
+    renderApp();
+    expect(screen.queryByRole("dialog", { name: "New section" })).not.toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "New section" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "New section" });
+    expect(within(dialog).getByRole("tab", { name: "Write now" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("tab", { name: "Grill me" })).toBeInTheDocument();
+    // A repository with no manuscript is an honest empty state here too.
+    expect(await within(dialog).findByText(/No manuscript yet/)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close new section" }));
+    expect(screen.queryByRole("dialog", { name: "New section" })).not.toBeInTheDocument();
+  });
 });
 
 describe("the app shell on a built but empty corpus", () => {

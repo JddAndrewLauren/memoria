@@ -52,7 +52,14 @@ from memoria.records import read as read_ref
 from memoria.records import read_raw_source as read_raw_source_core
 from memoria.records import real_paragraphs
 from memoria.records import reveal_original_source as reveal_original_source_core
-from memoria.manuscript import ManuscriptError
+from memoria.grill import GrillError
+from memoria.manuscript import (
+    ManuscriptError,
+    add_draft,
+    add_section,
+    brief_from_prose,
+    plan_section,
+)
 from memoria.repository import NoEvidenceRoot, Repository
 from memoria.review import (
     ReviewError,
@@ -92,6 +99,10 @@ from memoria.web.schemas import (
     AuditRunOut,
     AuditRunRequest,
     ExtractionRunOut,
+    GrillOut,
+    GrillRequest,
+    SectionCreate,
+    SectionCreated,
     ExtractionStatusOut,
     ModelSettingsOut,
     ModelSettingsUpdate,
@@ -1354,4 +1365,98 @@ def run_style_analysis(
         rejected=_rejections(report.rejected),
         spend=_spend(report.spend),
         style=_style_out(repository),
+    )
+
+
+# --- a new section (ADR-0012) --------------------------------------------------
+
+
+@router.post("/chapters/{chapter_id}/sections")
+def create_section(
+    chapter_id: str,
+    body: SectionCreate,
+    repository: Repository = Depends(get_repository),
+) -> SectionCreated:
+    """The author writing a new section from the dialog - "Write now", or
+    the draft a grilling ended in, edited and confirmed with a click.
+
+    Appended to ``chapter_id`` (position is the directory number; the
+    picker chooses a chapter and nothing finer, ADR-0012). Two files, two
+    commits through the single write path (ADR-0003's second door,
+    ``write.create``): the brief, then ``draft.md``. Commits as the author -
+    ``repository_actor``, never a name in the payload (ADR-0002) - because
+    the click is the act, the same as ``rewrite_paragraph``; a grilled
+    draft the author read and wrote is theirs, the same class of thing as
+    a rewrite they applied from Review. A brief the author did not write is
+    the prose's opening, marked unconfirmed (``brief_from_prose``).
+
+    **404** for a chapter no chapter carries, **409** for a file that
+    appeared underneath the create, **500** for a write that cannot be
+    attempted (no git identity), **422** for empty prose.
+    """
+    brief_text = body.brief.strip()
+    try:
+        actor = repository_actor(repository)
+        planned = plan_section(repository, chapter_id)
+        section = add_section(
+            repository,
+            planned,
+            brief_text or brief_from_prose(body.draft),
+            actor,
+            unconfirmed=not brief_text,
+        )
+        add_draft(repository, section, body.draft.strip() + "\n", actor)
+    except ManuscriptError as exc:
+        # `plan_section` names a chapter that is not there; the two creates
+        # name a file that appeared underneath them - the same class of
+        # outcome as a stale token, so the same status.
+        status = 404 if str(exc).startswith("no such chapter") else 409
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    except WriteError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return SectionCreated(
+        id=section.brief.id,
+        chapter_id=planned.chapter.brief.id,
+        chapter_number=planned.chapter.number,
+        section_number=section.number,
+        unconfirmed=section.brief.unconfirmed,
+    )
+
+
+@router.post("/grill")
+def grill_turn(
+    request: GrillRequest,
+    repository: Repository = Depends(get_repository),
+    session_id: str = Depends(get_session_id),
+) -> GrillOut:
+    """One interviewer turn of the dialog's "Grill me", run here directly
+    (ADR-0010, ADR-0012): the client's whole transcript in, the next
+    question - or the brief and the draft, once the understanding is
+    shared - out. Nothing is stored between turns; nothing here writes a
+    file. The draft goes back to the author to edit and write through
+    ``create_section``. **404** for an unknown chapter or source, **409**
+    while direct runs are off (the detail names Settings > Model), **502**
+    when the provider fails."""
+    model = _model(repository)
+    try:
+        report = drivers.run_grill(
+            repository,
+            model,
+            session_id,
+            chapter_id=request.chapter_id,
+            source_ref=request.source_ref,
+            turns=tuple(drivers.GrillTurn(role=t.role, text=t.text) for t in request.turns),
+        )
+    except GrillError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ModelError as exc:
+        raise _provider_failure(exc) from exc
+    return GrillOut(
+        done=report.done,
+        question=report.question,
+        recommended_answer=report.recommended_answer,
+        brief=report.brief,
+        draft=report.draft,
+        rejected=_rejections(report.rejected),
+        spend=_spend(report.spend),
     )

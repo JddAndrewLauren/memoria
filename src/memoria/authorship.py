@@ -435,3 +435,78 @@ def write_brief_from_conversation(
     if isinstance(result, Rejected):
         return Refused(f"{result.outcome}: {result.path} changed underneath the write", target)
     return Applied(path=relative, target=target, authorized_by=authorization.citation)
+
+
+# --- a new section from a grilling (ADR-0012) ------------------------------------
+
+
+@dataclass(frozen=True)
+class SectionWritten:
+    """A new section brought into being from a conversation: the brief and
+    the draft, each its own commit under its own authorization from the one
+    turn that concluded the interview."""
+
+    section_id: str
+    brief: Applied
+    draft: Applied
+
+
+def write_section_from_conversation(
+    repository: Repository,
+    chapter_id: str,
+    brief_text: str,
+    draft: str,
+    *,
+    session_id: str,
+    turn: int,
+) -> SectionWritten:
+    """The grilling's session-run write (ADR-0012): a section that did not
+    exist a moment ago, appended to ``chapter_id``, written by an AI from a
+    conversation the author answered and concluded in ``turn``.
+
+    Two authorizations from that one turn, never one: a brief is authorized
+    alone, one level below prose and never beside it (§19.3), so the brief
+    commits under ``BriefTarget`` and the draft under ``SectionTarget``, each
+    carrying ``authorized-by``/``authorized-scope`` trailers ``trace()``
+    walks back to the turn. The id is minted first (``manuscript.plan_section``)
+    because an authorization names its target. ``AuthorshipError`` for a
+    chapter no chapter carries, a session id that is not citable, or an
+    empty brief or draft - an interview that concluded in nothing has
+    nothing to authorize.
+    """
+    if not brief_text.strip():
+        raise AuthorshipError("a section written from a conversation needs its brief")
+    if not draft.strip():
+        raise AuthorshipError("a section written from a conversation needs its prose")
+    try:
+        planned = manuscript.plan_section(repository, chapter_id)
+    except manuscript.ManuscriptError as exc:
+        raise AuthorshipError(str(exc)) from exc
+
+    brief_target = BriefTarget(planned.brief_id)
+    brief_authorization = Authorization(session_id, turn, frozenset({brief_target}))
+    try:
+        section = manuscript.add_section(
+            repository,
+            planned,
+            brief_text.strip(),
+            WRITER,
+            trailers=_trailers(brief_authorization, brief_target),
+        )
+    except manuscript.ManuscriptError as exc:
+        raise AuthorshipError(str(exc)) from exc
+    brief_applied = Applied(
+        path=section.path.relative_to(repository.root).as_posix(),
+        target=brief_target,
+        authorized_by=brief_authorization.citation,
+    )
+
+    draft_authorization = Authorization(
+        session_id, turn, frozenset({SectionTarget(planned.brief_id)})
+    )
+    result = write_draft(repository, planned.brief_id, draft.strip() + "\n", draft_authorization)
+    if isinstance(result, Refused):
+        # Cannot happen for a section this call just created under a
+        # covering authorization it just built; said rather than swallowed.
+        raise AuthorshipError(f"the draft was refused after the brief was written: {result.reason}")
+    return SectionWritten(section_id=planned.brief_id, brief=brief_applied, draft=result)

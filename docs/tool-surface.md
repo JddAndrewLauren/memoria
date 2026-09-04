@@ -43,6 +43,7 @@ write, and they exist because there is nowhere else to put them.
 | `extraction_promote_cluster(cluster_id, subject_id, entry_slug)` | **Forced** — issue #17 |
 | `writing_style()`, `style_status()`, `style_brief()`, `style_record(observations)` | **Forced** — ADR-0009, below |
 | `model_status()`, `extraction_run(limit)`, `audit_run(...)`, `style_run()` | **Forced** — ADR-0010, below |
+| `grill_brief(chapter_id, source_ref)`, `section_create(chapter_id, brief, draft, turn)` | **Forced** — ADR-0012, below |
 
 The five #17 tools (`extraction_candidates`, `extraction_unplaced_forms`,
 `extraction_cluster` and the two `extraction_promote_*`) are the author's side of the
@@ -419,6 +420,49 @@ anchor a direct audit inlines where a session would `read(ref)` it.
 `POST /api/sections/{id}/audit` and `POST /api/style/analyse` call the same three,
 under one ledger session per server process, and answer 409 while direct runs
 are off.
+
+---
+
+## Grilling tools — forced, ADR-0012
+
+```
+grill_brief(chapter_id: str, source_ref: str | None = None) -> str
+section_create(chapter_id: str, brief: str, draft: str, turn: int) -> str
+```
+
+The writing interview that ends in a new section, in the serve/write shape.
+`grill_brief` serves the one rendering `memoria.grill.render_brief` makes —
+the interview prompt verbatim (a package constant, `GRILL_PROMPT`), the book's
+and the chapter's briefs, every section already in the chapter and whether it
+has prose, the writing style, and the source's text when the author opened
+the interview from one — and ledgers what it read as a `grill_brief` line
+with a `served` key, so the supplied-context account sees the source. The
+interview itself is this session's conversation with the author, driven by
+`.claude/skills/grill-writing/SKILL.md`: one question at a time, a recommended
+answer with each, facts looked up and only decisions asked.
+
+`section_create` writes what the author confirmed: the section is appended to
+`chapter_id` as two commits under two authorizations from `turn` — the
+author's confirming turn, hand-checked by number the way `/curation` checks
+its citations — the brief alone (`authorized-scope: SEC-nnnn brief`) and the
+prose (`SEC-nnnn draft`), each with `authorized-by: SES-…#Tnnn`
+(`memoria.authorship.write_section_from_conversation`). It refuses an unknown
+chapter, an empty brief or draft, and a turn below 1, and writes nothing then.
+
+**There is no `grill_run`.** Every other pass gains a `*_run` tool because a
+session can hand the loop to the server; the grilling's other party is the
+author, so its direct run (ADR-0010) exists only where the author is at a
+surface — the app's `New section` dialog, over `POST /api/grill`, one
+interviewer turn per call with the transcript held by the client — and a
+session is already the interviewer.
+
+### Reachable without the MCP server
+
+`memoria.drivers.run_grill` takes a `Repository`, a `ModelFn`, a session id,
+the chapter, the source and the transcript so far, and returns one turn. The
+app's `POST /api/grill` calls it and answers 409 while direct runs are off;
+the draft it ends in goes back to the author, who writes it through `POST
+/api/chapters/{id}/sections` as their own act.
 
 ---
 

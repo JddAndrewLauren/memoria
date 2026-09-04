@@ -71,8 +71,10 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 import memoria.audit as audit
+import memoria.authorship as authorship
 import memoria.drivers as drivers
 import memoria.extraction as extraction
+import memoria.grill as grill
 import memoria.human_touched as human_touched
 import memoria.record_extractor as record_extractor
 import memoria.style as style
@@ -89,6 +91,7 @@ from memoria.ledger import (
     append_extraction_batch,
     append_extraction_brief,
     append_extraction_summary_task,
+    append_grill_brief,
     append_read,
     append_search,
     append_search_global,
@@ -144,7 +147,11 @@ mcp = MCPServer(
         "says ready, extraction_run, audit_run and style_run execute a pass "
         "here against a metered API instead of this session reading the "
         "paragraphs itself - they still run only when the author asked. When "
-        "it is not ready, the skills drive the serve/record tools as before."
+        "it is not ready, the skills drive the serve/record tools as before. "
+        "grill_brief(chapter_id, source_ref) briefs a writing interview about "
+        "a new section - the `grill-writing` skill drives it, this session is "
+        "the interviewer - and section_create writes what the author confirmed, "
+        "citing their confirming turn; nothing writes a section before that."
     ),
 )
 
@@ -1579,3 +1586,75 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# --- the grilling (ADR-0012) -------------------------------------------------------
+#
+# A writing interview that ends in a new section. Two tools, the serve and
+# the write; the interview itself is this session's conversation with the
+# author, driven by `.claude/skills/grill-writing/SKILL.md`. There is no
+# `grill_run` here on purpose: the interview's other party is the author, so
+# a direct run (ADR-0010) exists only where the author is at a surface - the
+# app's dialog - and a session is already the interviewer.
+
+
+@mcp.tool()
+def grill_brief(chapter_id: str, source_ref: str | None = None) -> str:
+    """The briefing for a writing interview about a new section of
+    ``chapter_id``: fetch it once and hold it.
+
+    Carries the interview prompt verbatim, the book's and the chapter's
+    briefs, every section already in the chapter, the writing style, and -
+    when the author opened the interview from a source - that source's
+    text. Then interview the author as the prompt says, one question at a
+    time; nothing is written until they confirm and ``section_create`` is
+    called with their confirming turn.
+    """
+    try:
+        served = grill.brief(repository(), chapter_id, source_ref)
+    except grill.GrillError as exc:
+        raise ToolError(str(exc)) from exc
+    append_grill_brief(repository(), session_id(), served.served)
+    return grill.render_brief(served)
+
+
+@mcp.tool()
+def section_create(chapter_id: str, brief: str, draft: str, turn: int) -> str:
+    """Write the section a grilling ended in - **only after the author has
+    read the brief and the prose and confirmed them**.
+
+    ``turn`` is the number of the author's turn in this session that
+    confirmed - the turn in which they said to write it, hand-checked, never
+    an assistant turn. The section is appended to ``chapter_id`` as two
+    commits under two authorizations from that turn: the brief alone
+    (``authorized-scope: SEC-nnnn brief``) and the prose (``SEC-nnnn
+    draft``), each carrying ``authorized-by: SES-...#Tnnn``. ``trace()``
+    walks either back to the turn.
+    """
+    if turn < 1:
+        raise ToolError("turn is 1-based: cite the author's confirming turn")
+    try:
+        written = authorship.write_section_from_conversation(
+            repository(),
+            chapter_id,
+            brief,
+            draft,
+            session_id=session_id(),
+            turn=turn,
+        )
+    except authorship.AuthorshipError as exc:
+        raise ToolError(str(exc)) from exc
+    return render_section_written(written)
+
+
+def render_section_written(written: authorship.SectionWritten) -> str:
+    return "\n".join(
+        [
+            f"created {written.section_id}",
+            f"brief: {written.brief.path} - authorized by {written.brief.authorized_by} "
+            f"({written.brief.target.citation})",
+            f"draft: {written.draft.path} - authorized by {written.draft.authorized_by} "
+            f"({written.draft.target.citation})",
+            "The section is in the outline now; the author reads it under MANUSCRIPT.",
+        ]
+    )
