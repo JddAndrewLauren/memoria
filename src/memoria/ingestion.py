@@ -270,11 +270,20 @@ def unprocessed_units(repository: Repository) -> tuple[str, ...] | None:
     """The ids §47's "unprocessed source additions" names: ledgered units no
     record accounts for. ``None`` when no evidence corpus is configured.
     Owned here so the health report and the ingestion surface name the
-    same units for the same reason."""
-    status = ingestion_status(repository)
-    if status.units is None:
+    same units for the same reason - both derive the state from
+    ``_converted_state``. This reads only the ledger and the records that
+    state needs, not the index or extraction columns ``ingestion_status``
+    computes for its table, so the health report does not pay for a full
+    status derivation to filter three states."""
+    if repository.evidence_root is None:
         return None
-    return tuple(unit.id for unit in status.units if unit.converted in UNPROCESSED_STATES)
+    entries = load_manifest(repository.evidence_root / DEFAULT_MANIFEST_RELATIVE_PATH)
+    records = {record.id: record for record in read_all(repository)}
+    return tuple(
+        entry.id
+        for entry in entries
+        if _converted_state(entry, records.get(entry.id))[0] in UNPROCESSED_STATES
+    )
 
 
 # --- the two runs the web adapter may launch (ADR-0009) -------------------------
