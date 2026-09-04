@@ -36,7 +36,7 @@ interface Turn {
 }
 
 /**
- * New section (ADR-0011): the dialog the floating button opens. Where the
+ * New section (ADR-0012): the dialog the floating button opens. Where the
  * section goes (a chapter - appended; the current one when opened from a
  * section page), the source it was opened from (joins the interviewer's
  * context), and two ways to arrive at prose: **Write now**, a brief and the
@@ -315,7 +315,7 @@ function ModeTab({
 }
 
 /**
- * The interview (ADR-0011), the `/grilling` shape: one question at a time,
+ * The interview (ADR-0012), the `/grilling` shape: one question at a time,
  * a recommended answer with each, the author's decisions the author's.
  * Every answer is one POST carrying the whole transcript - the server keeps
  * none of it - and nothing runs until the author starts it (part 08 §12.1:

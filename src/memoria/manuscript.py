@@ -41,7 +41,7 @@ The ``create_*``/``write_brief``/``confirm_brief`` functions are the brief's
 own write path, built to issue #35's scope: **not** issue #66's single write
 coordinator - no staleness token, no commit - and kept for the legacy import
 and the gates that exercise the on-disk shape directly. ``plan_section`` and
-``add_section`` (ADR-0011) are the same creation put behind #66's mechanism:
+``add_section`` (ADR-0012) are the same creation put behind #66's mechanism:
 the brief's bytes go through ``memoria.write.create``, so a section an author
 adds from a surface is committed and attributed the moment it exists, and a
 section an AI writes from a conversation carries its authorization on the
@@ -386,7 +386,7 @@ def create_section(
     return SectionEntry(number=number, dir=path.parent, path=path, brief=brief)
 
 
-# --- creation through the write path (ADR-0011) ----------------------------
+# --- creation through the write path (ADR-0012) ----------------------------
 #
 # The author-facing create: a section added from a surface, or written by an
 # AI from a conversation the author answered. Two steps, so the caller can

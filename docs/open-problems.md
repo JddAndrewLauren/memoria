@@ -48,7 +48,7 @@ re-reads for a fresh token.
 
 Undecided, and cheap to leave undecided.
 
-**Note 2026-09-04** (`adr/0011-a-new-section-is-written-from-the-app-by-hand-or-from-a-grilling.md`):
+**Note 2026-09-04** (`adr/0012-a-new-section-is-written-from-the-app-by-hand-or-from-a-grilling.md`):
 the `New section` dialog is the app's first prose textarea, and it does not reopen this:
 it creates a `draft.md` that did not exist, through the write path's creation door, and
 edits nothing - so there is no file for an Obsidian edit to have moved underneath. The

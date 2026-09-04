@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from memoria import drivers
 from memoria.mcp import server
 from memoria.records import (
     NORMALIZED_RELATIVE_PATH,
@@ -54,8 +55,8 @@ ALLOWED_IMPORTS = {
     "memoria.style",  # ADR-0009: writing_style and the style_* analysis tools
     "memoria.model",  # ADR-0010: readiness, and the seam the *_run tools ask for a model at the point of use
     "memoria.drivers",  # ADR-0010: the four direct-run loops
-    "memoria.grill",  # ADR-0011: grill_brief, the writing interview's briefing
-    "memoria.authorship",  # ADR-0011: section_create, the interview's write under its authorization
+    "memoria.grill",  # ADR-0012: grill_brief, the writing interview's briefing
+    "memoria.authorship",  # ADR-0012: section_create, the interview's write under its authorization
 }
 
 FILE_OPENING_CALLS = {"open", "read_text", "read_bytes", "write_text", "write_bytes"}
@@ -92,6 +93,37 @@ def _repo_with_evidence(tmp_path):
         "The unnormalized text.\n", encoding="utf-8"
     )
     return Repository(root=tmp_path, evidence_root=evidence_root)
+
+
+def test_direct_run_rendering_stops_automatic_continuation_after_rejection():
+    rejection = (drivers.Rejection("src-000001-p1", "the model refused"),)
+    extraction_report = drivers.ExtractionRun(
+        phase="paragraphs",
+        paragraphs_read=1,
+        paragraphs_accepted=0,
+        paragraphs_remaining=1,
+        summaries_written=0,
+        summaries_remaining=0,
+        finished=False,
+        promotions=(),
+        rejected=rejection,
+        spend=drivers.Spend(calls=1),
+    )
+    audit_report = drivers.AuditRun(
+        accepted=0,
+        findings=0,
+        remaining=1,
+        rejected=rejection,
+        spend=drivers.Spend(calls=1),
+    )
+
+    extraction_rendered = server.render_extraction_run(extraction_report)
+    audit_rendered = server.render_audit_run(audit_report)
+
+    assert "call extraction_run again to continue" not in extraction_rendered
+    assert "call audit_run again to continue" not in audit_rendered
+    assert "wait for an explicit retry request" in extraction_rendered
+    assert "wait for an explicit retry request" in audit_rendered
 
 
 @pytest.fixture(autouse=True)
@@ -479,7 +511,7 @@ def test_the_tool_surface_is_the_read_tools_and_the_extraction_tools():
         "extraction_run",
         "audit_run",
         "style_run",
-        # ADR-0011: the grilling toward a new section - the briefing served
+        # ADR-0012: the grilling toward a new section - the briefing served
         # to this session as interviewer, and the write of what the author
         # confirmed, citing their turn. No grill_run: the interview's other
         # party is the author, so the direct run lives in the app's dialog.

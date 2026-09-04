@@ -24,7 +24,7 @@ export default function App() {
         </main>
         <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
         <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-        {/* ADR-0011: the floating `+ New section` and its dialog, from anywhere. */}
+        {/* ADR-0012: the floating `+ New section` and its dialog, from anywhere. */}
         <NewSectionButton onClick={() => setNewSectionOpen(true)} />
         <NewSectionDialog open={newSectionOpen} onClose={() => setNewSectionOpen(false)} />
       </div>

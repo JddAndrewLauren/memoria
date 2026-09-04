@@ -198,7 +198,7 @@ switched on by the author under Settings > Model (ADR-0010). Still author-launch
 from a button or a tool call; bounded per call and resumable; every model call a
 ledger line the author can count. The prompts, the validation and what is stored
 are exactly a session run's. The [[grilling]] is the one pass whose direct run lives
-only in the app: its other party is the author at a surface (ADR-0011).
+only in the app: its other party is the author at a surface (ADR-0012).
 _Avoid_: API mode, autopilot, background pass, headless run, model-driving service
 
 ### Author knowledge
@@ -278,7 +278,7 @@ keep references intact. There is no outline file.
 _Avoid_: outline.md, table of contents, structure document
 
 **Grilling**:
-The writing interview a new section can begin with (ADR-0011): relentless, one
+The writing interview a new section can begin with (ADR-0012): relentless, one
 question at a time, a recommended answer with each, facts looked up in the chapter and
 the source rather than asked, the decisions the author's — until the two share what
 the section says, and it is drafted as a [[brief]] and prose. The "AI writes it from a
@@ -328,6 +328,18 @@ The thing that receives a `SRC-` ID and becomes one normalized record — a file
 message inside an email export. Numbered once by the manifest ledger on first sight and
 never renumbered.
 _Avoid_: Source file, document, input, item
+
+**Ingestion status**:
+What the ledger, the normalized records and the index say about each [[raw unit]],
+read together: whether it was converted (current, out of date, not yet converted, failed
+with the converter's reason, no converter for its format, an email export's own reserved
+number, a stub with no paragraphs, or deleted with its number kept), whether the index
+holds its paragraphs, and how many of them the [[extraction]] has read under the current
+subject prompts. Derived on every read and never recorded — the record is the state —
+and computed without a model, so it is safe at any time. Served by `memoria sources`,
+`GET /api/ingestion` and the `/ingestion` page, which is the one place a raw unit that
+never became a record is visible at all.
+_Avoid_: Pipeline state, sync status, ingest log, processing queue, stale, pending
 
 **Authorization**:
 What an AI manuscript write must have before it applies: the session turn in

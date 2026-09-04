@@ -1,4 +1,4 @@
-"""The grilling's session run (ADR-0011): ``grill_brief`` and
+"""The grilling's session run (ADR-0012): ``grill_brief`` and
 ``section_create`` on the MCP server, and the ``grill-writing`` skill that
 drives them - exercised through the server's own tool functions the way
 ``test_style_tools`` does."""

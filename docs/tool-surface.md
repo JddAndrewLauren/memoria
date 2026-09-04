@@ -43,9 +43,11 @@ write, and they exist because there is nowhere else to put them.
 | `extraction_promote_cluster(cluster_id, subject_id, entry_slug)` | **Forced** — issue #17 |
 | `writing_style()`, `style_status()`, `style_brief()`, `style_record(observations)` | **Forced** — ADR-0009, below |
 | `model_status()`, `extraction_run(limit)`, `audit_run(...)`, `style_run()` | **Forced** — ADR-0010, below |
-| `grill_brief(chapter_id, source_ref)`, `section_create(chapter_id, brief, draft, turn)` | **Forced** — ADR-0011, below |
+| `grill_brief(chapter_id, source_ref)`, `section_create(chapter_id, brief, draft, turn)` | **Forced** — ADR-0012, below |
 
-The last five are the author's side of the pass rather than the pass itself.
+The five #17 tools (`extraction_candidates`, `extraction_unplaced_forms`,
+`extraction_cluster` and the two `extraction_promote_*`) are the author's side of the
+pass rather than the pass itself.
 #17 keeps rejected candidates and unplaced forms *enumerable* and offers
 promotion as a one-key act; the three list tools are the enumeration, and the
 two promote tools are the key. They exist on the server for the same reason
@@ -303,12 +305,17 @@ anything. The `writing-style` skill drives them.
 
 ### What the model sends back
 
-`style_record` takes a list of `RecordedObservation`, each an `aspect`, an
-`observation` phrased as a directive, and an `example`. The core refuses an
-element whose example does not occur verbatim (whitespace-normalized) in the
-samples the brief served: an observation that cannot point at the author's own
-words is not one the author should be asked to confirm. Batch in, per-element
-out, as `extraction_record`.
+`style_record` takes a list of `RecordedObservation` - each an `aspect`, an
+`observation` phrased as a directive, and an `example` - and the analysis
+`key` the brief served. The key binds the batch to the samples the model read:
+if the author changed the sources or uploads in between, the served key no
+longer matches and the whole batch is refused, the way `extraction_record_summary`
+refuses a re-clustered membership. With the key confirmed, the core refuses any
+element whose example does not occur verbatim (whitespace-normalized) within a
+single served sample - not merely somewhere across them concatenated, which
+would let a quote straddle two samples: an observation that cannot point at the
+author's own words is not one the author should be asked to confirm. Batch in,
+per-element out, as `extraction_record`.
 
 ### What it records, and what it does not
 
@@ -416,7 +423,7 @@ are off.
 
 ---
 
-## Grilling tools — forced, ADR-0011
+## Grilling tools — forced, ADR-0012
 
 ```
 grill_brief(chapter_id: str, source_ref: str | None = None) -> str

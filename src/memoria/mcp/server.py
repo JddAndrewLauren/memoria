@@ -599,40 +599,7 @@ def render_audit_tasks(
             "A proposed rewrite (a finding's patch) follows this writing style.\n\n"
             + writing_style
         )
-    for task in tasks:
-        lines = [
-            f"anchor: {task.anchor}",
-            f"kind: {task.kind}",
-            f"not current because: {task.cause}",
-            "---",
-            "paragraph:",
-            task.paragraph_text,
-            "",
-            f"entry ({task.entry_id}) audit-visible body:",
-            task.entry_audit_visible_body,
-        ]
-        if task.kind == "engagement":
-            lines += [
-                "",
-                "Does this paragraph engage this entry at all? Answer with "
-                "engages (yes/no) and a short note on how.",
-                "",
-                f"subject: {task.subject_prompt}",
-            ]
-        else:
-            lines += [
-                "",
-                "Audit questions:",
-                task.subject_prompt,
-            ]
-            if task.gathered_anchors:
-                lines += [
-                    "",
-                    "gathered evidence - read each with read(ref) before answering:",
-                    *[f"- {a}" for a in task.gathered_anchors],
-                ]
-            lines += ["", audit.AUTHOR_TESTIMONY_POLICY]
-        blocks.append("\n".join(lines))
+    blocks += [audit.render_task(task) for task in tasks]
     return (
         "\n\n===\n\n".join(blocks)
         + f"\n\nawaiting audit: {remaining} (including this batch)"
@@ -779,44 +746,45 @@ def style_brief() -> str:
 
 def render_style_brief(result: style.Brief) -> str:
     """The prompt, then each sample contiguous and unmodified - the same
-    contract ``read`` keeps for evidence."""
-    lines = [result.prompt, "", "## What the style already says", ""]
-    current = style.writing_style_prompt(result.current)
-    if current is None:
-        lines.append("Nothing yet - every observation is new.")
-    else:
-        lines += [
-            "Do not repeat these; propose only what they do not already say.",
+    contract ``read`` keeps for evidence. Both halves are the core's
+    renderings; a direct run serves the same two as its system and user
+    blocks. Between them, the analysis key - a session echoes it back to
+    ``style_record``; a direct run passes it on itself."""
+    key = "\n".join(
+        [
+            "## The analysis key",
             "",
-            current,
+            "Pass this back to `style_record` as `key`; it binds the record to the "
+            "samples below, and a batch is refused if they change in between:",
+            result.analysis_key,
         ]
-    lines += ["", f"## The samples ({len(result.samples)})", ""]
-    for sample in result.samples:
-        lines += [f"### {sample.ref} - {sample.title}", ""]
-        if sample.truncated:
-            lines += [
-                f"(the first {style.SAMPLE_PARAGRAPH_LIMIT} paragraphs; the source runs longer)",
-                "",
-            ]
-        lines += [sample.text, ""]
-    return "\n".join(lines).rstrip("\n")
+    )
+    return "\n\n".join(
+        [style.render_brief_prompt(result), key, style.render_brief_samples(result)]
+    )
 
 
 @mcp.tool()
-def style_record(observations: list[style.RecordedObservation]) -> str:
+def style_record(observations: list[style.RecordedObservation], key: str) -> str:
     """Record one batch of proposed observations for the author to confirm.
+
+    ``key`` is the analysis key ``style_brief`` served; it binds the record
+    to the samples the brief carried, and the whole batch is refused if the
+    author changed the samples in between.
 
     Send the whole batch in one call. Each element is accepted or rejected
     on its own: an observation whose ``example`` does not occur verbatim in
-    the samples served is refused and names why, and the rest are kept.
-    Re-send only what was rejected, corrected. Nothing here writes the
-    style: the author confirms, changes or discards each observation under
-    Settings > Writing style.
+    a served sample is refused and names why, and the rest are kept. To
+    retry, correct the rejected ones and re-send the **whole batch** - the
+    accepted elements alongside the corrected ones - because a second batch
+    under the same key replaces the first, so any element left out is
+    dropped. Nothing here writes the style: the author confirms, changes or
+    discards each observation under Settings > Writing style.
     """
     if not observations:
         raise ToolError("no observations to record")
     try:
-        outcome = style.record_observations(repository(), observations)
+        outcome = style.record_observations(repository(), observations, key)
     except style.StyleError as exc:
         raise ToolError(str(exc)) from exc
     return render_style_outcome(outcome, len(observations))
@@ -901,8 +869,10 @@ def extraction_run(limit: int = 20) -> str:
     Reads up to ``limit`` paragraphs (one metered call each) and records
     them; once every paragraph is read, closes the pass and writes up to
     ``limit`` cluster summaries, leaves first. Call it again until it says
-    ``done``; nothing is lost between calls and nothing repeats. The
-    report names every item the model refused or the core rejected.
+    ``done`` unless a report contains a rejection; then stop and wait for
+    the author to request a retry. Nothing is lost between calls and nothing
+    repeats. The report names every item the model refused or the core
+    rejected.
     """
     if limit < 1:
         raise ToolError("limit must be at least 1")
@@ -932,7 +902,12 @@ def render_extraction_run(report: drivers.ExtractionRun) -> str:
         )
     lines += render_rejections(report.rejected)
     lines.append(render_spend(report.spend))
-    if report.phase == "done":
+    if report.rejected:
+        lines.append(
+            "stopped after rejection(s); report them to the author and wait for "
+            "an explicit retry request"
+        )
+    elif report.phase == "done":
         lines.append(
             "The extraction asserted nothing. Every candidate is a proposal; "
             "match terms decide what is placed."
@@ -955,7 +930,9 @@ def audit_run(
 
     Answers up to ``limit`` of the target's not-current judgements, one
     metered call each, and records them exactly as ``audit_record`` would.
-    Call it again while it reports judgements remaining.
+    Call it again while it reports judgements remaining unless a report
+    contains a rejection; then stop and wait for the author to request a
+    retry.
     """
     if limit < 1:
         raise ToolError("limit must be at least 1")
@@ -982,7 +959,12 @@ def render_audit_run(report: drivers.AuditRun) -> str:
     ]
     lines += render_rejections(report.rejected)
     lines.append(render_spend(report.spend))
-    if report.remaining:
+    if report.rejected:
+        lines.append(
+            "stopped after rejection(s); report them to the author and wait for "
+            "an explicit retry request"
+        )
+    elif report.remaining:
         lines.append("call audit_run again to continue")
     return "\n".join(lines)
 
@@ -1039,26 +1021,10 @@ def extraction_brief() -> str:
 
 
 def render_brief(result: extraction.Brief) -> str:
-    lines = [result.extraction_prompt, "", "## The subjects", ""]
-    for subject in result.subjects:
-        lines += [
-            f"### {subject.id}",
-            "",
-            f"Match: {subject.match}",
-            f"Hazards: {subject.hazards}",
-            f"auto-promote: {'yes' if subject.auto_promote else 'no'}",
-            "",
-        ]
-    lines += ["## The entries that exist", ""]
-    if result.entry_names:
-        lines += [f"- {entry_id} ({name})" for entry_id, name in result.entry_names]
-    else:
-        lines.append(
-            "None yet. Every mention is an unplaced surface form, which is the "
-            "expected state of a fresh archive."
-        )
-    lines += ["", f"paragraphs awaiting extraction: {result.pending}"]
-    return "\n".join(lines)
+    return (
+        extraction.render_brief(result)
+        + f"\n\nparagraphs awaiting extraction: {result.pending}"
+    )
 
 
 @mcp.tool()
@@ -1200,23 +1166,11 @@ def render_summary_task(
     lines = [
         prompt,
         "",
-        f"cluster: {task.cluster_id}",
-        f"level: {task.level}",
         f"membership: {task.memo_key}",
-        f"defined by: {task.label}",
         f"remaining: {remaining}",
         "",
+        extraction.render_summary_task(task),
     ]
-    if task.child_summaries:
-        lines.append("## Its child clusters' summaries")
-        lines.append("")
-        lines += [f"- {summary}" for summary in task.child_summaries]
-    else:
-        lines.append("## Its member paragraphs")
-        lines.append("")
-        lines += [f"- {anchor}" for anchor in task.member_anchors]
-        lines.append("")
-        lines.append("Read them with read(ref) before writing.")
     return "\n".join(lines)
 
 
@@ -1634,7 +1588,7 @@ if __name__ == "__main__":
     sys.exit(main())
 
 
-# --- the grilling (ADR-0011) -------------------------------------------------------
+# --- the grilling (ADR-0012) -------------------------------------------------------
 #
 # A writing interview that ends in a new section. Two tools, the serve and
 # the write; the interview itself is this session's conversation with the

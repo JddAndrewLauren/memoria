@@ -43,6 +43,12 @@ an engine underneath and a per-subject `auto-promote` switch.
    maintainer, were both rejected: the first is the first unasked model and the first
    metered spend, the second lowers extraction quality where part 05 §7 punishes it.
 
+   > **Amended 2026-09-04** (`0010-model-calls-enter-by-choice-and-the-session-stays-the-default.md`):
+   > the API fallback is reopened as a **direct run** - the same pass with the backend
+   > or the MCP server holding the model's end - off by default and switched on by the
+   > author under Settings > Model. Still never scheduled and never unasked; every
+   > metered call is a `model_call` ledger line. The session run stays the default.
+
 4. **Identity: the model proposes, match terms decide.** The extractor is handed the
    subject prompts (with their hazards) and the promoted entries' names, and records per
    paragraph which entries it believes are mentioned (**placements**), which surface

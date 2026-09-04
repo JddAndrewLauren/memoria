@@ -84,11 +84,18 @@ ALLOWED_IMPORTS = {
     "memoria.model",
     "memoria.drivers",
     "memoria.extraction",
-    # ADR-0011: the grilling's error type, so an unknown chapter or source
+    # ADR-0012: the grilling's error type, so an unknown chapter or source
     # in a `/grill` request is a 404 the way a `ManuscriptError` is. The
     # driver does the work; the adapter maps the outcome.
     "memoria.grill",
     "memoria.ledger",
+    # The ingestion surface (ADR-0011): a derived, model-free status the
+    # core computes and two local-only runs the adapter forwards to it. The
+    # adapter shapes the status and maps the runs' outcomes - a held lock
+    # becomes a 409, a missing corpus a 404 - and computes no state, opens
+    # no database and touches no file itself; the two tests below still
+    # hold.
+    "memoria.ingestion",
 }
 
 FILE_OPENING_CALLS = {"open", "read_text", "read_bytes", "write_text", "write_bytes"}
@@ -1312,7 +1319,7 @@ def test_nothing_but_the_match_terms_route_writes(tmp_path):
     )
     assert write_methods
     assert paths == [
-        # ADR-0011: the author writing a new section from the dialog - the
+        # ADR-0012: the author writing a new section from the dialog - the
         # brief and the prose, two commits through the write path's
         # creation door, committed as the author because the click is the act.
         "/chapters/{chapter_id}/sections",
@@ -1321,10 +1328,17 @@ def test_nothing_but_the_match_terms_route_writes(tmp_path):
         # session's extraction_record does - and a 409 until the author
         # switched direct runs on.
         "/extraction/run",
-        # ADR-0011: one interviewer turn of a grilling, run directly. Not a
+        # ADR-0012: one interviewer turn of a grilling, run directly. Not a
         # write at all - the transcript is the client's and the draft goes
         # back to the author - and a 409 until direct runs are on.
         "/grill",
+        # ADR-0011: the two model-free derived-state passes the adapter may
+        # launch on the author's own machine. Neither is a durable write -
+        # normalized records and the index are Derived (§42), outside the
+        # write path - and neither computes anything here: the core runs
+        # the pass and this forwards its report.
+        "/ingestion/normalize",
+        "/ingestion/rebuild",
         # ADR-0010: Settings > Model - the switch, the model id and the
         # stored key, in the machine-local settings file beside the index;
         # the one write here that is neither durable nor through
@@ -1963,11 +1977,12 @@ def test_a_sample_source_that_names_no_record_is_a_400(tmp_path):
 
 
 def _propose(repository, *observations):
-    from memoria.style import RecordedObservation, record_observations
+    from memoria.style import RecordedObservation, brief, record_observations
 
     record_observations(
         repository,
         [RecordedObservation("rhythm", text, "Nobody dared touch it.") for text in observations],
+        brief(repository).analysis_key,
     )
 
 

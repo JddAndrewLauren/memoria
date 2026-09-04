@@ -45,6 +45,12 @@ PARAGRAPHS = [
 ]
 
 
+def _record(repository, observations):
+    """``record_observations`` bound to the key the brief currently serves -
+    the skill echoes it, and the tests here never change samples mid-batch."""
+    return record_observations(repository, observations, brief(repository).analysis_key)
+
+
 def _git(cwd, *args):
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
@@ -274,7 +280,7 @@ def test_recording_keeps_the_honest_and_refuses_the_rest(tmp_path):
     repository = _repo(tmp_path)
     set_style(repository, _style(observations=()), None, AUTHOR)
 
-    outcome = record_observations(
+    outcome = _record(
         repository,
         [
             RecordedObservation("rhythm", "Keep sentences short.", "Nobody dared touch it."),
@@ -287,25 +293,57 @@ def test_recording_keeps_the_honest_and_refuses_the_rest(tmp_path):
 
     assert len(outcome.accepted) == 2
     assert [ordinal for ordinal, _ in outcome.rejected] == [2, 3]
-    assert "not in the samples verbatim" in outcome.rejected[1][1]
+    assert "not in a sample verbatim" in outcome.rejected[1][1]
     pending = pending_observations(repository)
     assert [o.observation for o in pending] == ["Keep sentences short.", "Use dashes."]
     assert all(o.status == "proposed" for o in pending)
 
 
+def test_a_quote_that_spans_two_samples_is_refused(tmp_path):
+    repository = _repo(tmp_path)
+    set_style(repository, _style(observations=()), None, AUTHOR)
+    add_sample(repository, "letter.txt", b"Dear Bob,\n\nNo.", AUTHOR)
+
+    # The words run from the source's last sentence into the uploaded one:
+    # contiguous once every sample is concatenated, contiguous in neither.
+    outcome = _record(
+        repository,
+        [RecordedObservation("splice", "Do not.", "heard nothing. Dear Bob,")],
+    )
+
+    assert outcome.accepted == ()
+    assert "not in a sample verbatim" in outcome.rejected[0][1]
+
+
+def test_a_batch_is_refused_when_the_samples_changed_since_the_brief(tmp_path):
+    repository = _repo(tmp_path)
+    set_style(repository, _style(observations=()), None, AUTHOR)
+    served = brief(repository).analysis_key
+
+    add_sample(repository, "extra.txt", b"Another voice entirely.", AUTHOR)
+
+    with pytest.raises(StyleError, match="samples changed"):
+        record_observations(
+            repository,
+            [RecordedObservation("a", "Say no.", "Nobody dared touch it.")],
+            served,
+        )
+    assert pending_observations(repository) == []
+
+
 def test_a_second_batch_over_the_same_samples_replaces_the_proposed_rows(tmp_path):
     repository = _repo(tmp_path)
     set_style(repository, _style(observations=()), None, AUTHOR)
-    record_observations(
+    _record(
         repository, [RecordedObservation("a", "First opinion.", "Nobody dared touch it.")]
     )
     (first,) = pending_observations(repository)
     discard_observation(repository, first.id)
-    record_observations(
+    _record(
         repository, [RecordedObservation("a", "Kept.", "Nobody dared touch it.")]
     )
 
-    record_observations(
+    _record(
         repository, [RecordedObservation("a", "Second opinion.", "Nobody dared touch it.")]
     )
 
@@ -316,7 +354,7 @@ def test_a_second_batch_over_the_same_samples_replaces_the_proposed_rows(tmp_pat
 def test_confirming_writes_the_style_first_and_marks_the_row_only_on_success(tmp_path):
     repository = _repo(tmp_path)
     set_style(repository, _style(observations=()), None, AUTHOR)
-    record_observations(
+    _record(
         repository, [RecordedObservation("a", "As proposed.", "Nobody dared touch it.")]
     )
     (proposed,) = pending_observations(repository)
@@ -341,7 +379,7 @@ def test_confirming_writes_the_style_first_and_marks_the_row_only_on_success(tmp
 def test_confirming_with_no_style_file_yet_creates_one(tmp_path):
     repository = _repo(tmp_path)
     add_sample(repository, "letter.txt", b"Dear Bob,\n\nNo.", AUTHOR)
-    record_observations(repository, [RecordedObservation("a", "Say no.", "No.")])
+    _record(repository, [RecordedObservation("a", "Say no.", "No.")])
     (proposed,) = pending_observations(repository)
 
     assert isinstance(confirm_observation(repository, proposed.id, None, None, AUTHOR), Written)
@@ -351,7 +389,7 @@ def test_confirming_with_no_style_file_yet_creates_one(tmp_path):
 def test_discarding_writes_nothing_durable(tmp_path):
     repository = _repo(tmp_path)
     add_sample(repository, "letter.txt", b"Dear Bob,\n\nNo.", AUTHOR)
-    record_observations(repository, [RecordedObservation("a", "Say no.", "No.")])
+    _record(repository, [RecordedObservation("a", "Say no.", "No.")])
     (proposed,) = pending_observations(repository)
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True, capture_output=True, text=True
@@ -371,7 +409,7 @@ def test_discarding_writes_nothing_durable(tmp_path):
 def test_a_rebuild_keeps_the_proposed_rows(tmp_path):
     repository = _repo(tmp_path)
     add_sample(repository, "letter.txt", b"Dear Bob,\n\nNo.", AUTHOR)
-    record_observations(repository, [RecordedObservation("a", "Say no.", "No.")])
+    _record(repository, [RecordedObservation("a", "Say no.", "No.")])
 
     build_index(repository, [])
     assert [o.observation for o in pending_observations(repository)] == ["Say no."]
@@ -385,7 +423,7 @@ def test_the_status_counts_everything_the_surfaces_need(tmp_path):
     assert style.status(repository).exists is False
     set_style(repository, _style(), None, AUTHOR)
     add_sample(repository, "letter.txt", b"Dear Bob,\n\nNo.", AUTHOR)
-    record_observations(repository, [RecordedObservation("a", "Say no.", "No.")])
+    _record(repository, [RecordedObservation("a", "Say no.", "No.")])
 
     state = style.status(repository)
 

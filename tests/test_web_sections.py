@@ -1,4 +1,4 @@
-"""The dialog's two routes (ADR-0011) through the FastAPI adapter: a new
+"""The dialog's two routes (ADR-0012) through the FastAPI adapter: a new
 section written as the author, and one interviewer turn of a grilling run
 directly - a 409 until the author switches direct runs on, the seam a
 scripted fake once they have.

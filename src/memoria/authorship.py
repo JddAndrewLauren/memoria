@@ -437,7 +437,7 @@ def write_brief_from_conversation(
     return Applied(path=relative, target=target, authorized_by=authorization.citation)
 
 
-# --- a new section from a grilling (ADR-0011) ------------------------------------
+# --- a new section from a grilling (ADR-0012) ------------------------------------
 
 
 @dataclass(frozen=True)
@@ -460,7 +460,7 @@ def write_section_from_conversation(
     session_id: str,
     turn: int,
 ) -> SectionWritten:
-    """The grilling's session-run write (ADR-0011): a section that did not
+    """The grilling's session-run write (ADR-0012): a section that did not
     exist a moment ago, appended to ``chapter_id``, written by an AI from a
     conversation the author answered and concluded in ``turn``.
 

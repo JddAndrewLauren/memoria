@@ -1,5 +1,5 @@
 /**
- * The floating `+ New section` button (ADR-0011): the one affordance for
+ * The floating `+ New section` button (ADR-0012): the one affordance for
  * starting a piece of manuscript from anywhere in the app. Fixed to the
  * bottom-right corner, under the overlays (`z-30`; a dialog's scrim is
  * `z-50`), so it never sits on top of one. Design tokens only.

@@ -544,6 +544,35 @@ def brief(repository: Repository) -> Brief:
     )
 
 
+def render_brief_prompt(served: Brief) -> str:
+    """The instruction half of a brief: the analysis prompt verbatim, then
+    what the style already says so nothing is proposed twice. The one
+    rendering (ADR-0004, ADR-0009) the ``style_brief`` tool and a direct
+    run's system block both serve."""
+    lines = [served.prompt, "", "## What the style already says", ""]
+    current = writing_style_prompt(served.current)
+    if current is None:
+        lines.append("Nothing yet - every observation is new.")
+    else:
+        lines += ["Do not repeat these; propose only what they do not already say.", "", current]
+    return "\n".join(lines)
+
+
+def render_brief_samples(served: Brief) -> str:
+    """The sample half of a brief: every sample contiguous and unmodified,
+    the same contract ``read`` keeps for evidence."""
+    lines = [f"## The samples ({len(served.samples)})", ""]
+    for sample in served.samples:
+        lines += [f"### {sample.ref} - {sample.title}", ""]
+        if sample.truncated:
+            lines += [
+                f"(the first {SAMPLE_PARAGRAPH_LIMIT} paragraphs; the source runs longer)",
+                "",
+            ]
+        lines += [sample.text, ""]
+    return "\n".join(lines).rstrip("\n")
+
+
 @dataclass
 class RecordedObservation:
     """One observation as the model sends it back."""
@@ -579,14 +608,21 @@ def _now() -> str:
 
 
 def record_observations(
-    repository: Repository, results: list[RecordedObservation]
+    repository: Repository, results: list[RecordedObservation], key: str
 ) -> RecordOutcome:
-    """Record one batch of proposed observations against the current samples.
+    """Record one batch of proposed observations against the served brief.
 
-    Each element is accepted or rejected on its own. An element is refused
-    for an empty field, or for an ``example`` that does not occur verbatim
-    (whitespace-normalized) in the samples the brief served - the type
-    cannot hold that rule, so the core does.
+    ``key`` is the ``analysis_key`` ``brief`` served. Between serving the
+    brief and recording against it the author may have changed the chosen
+    sources or uploaded a sample; the whole batch is refused when the key no
+    longer matches, because the examples were checked and the rows would be
+    filed against samples the model never read. The skill fetches the brief
+    afresh and analyses the new samples.
+
+    With the key confirmed, each element is accepted or rejected on its own.
+    An element is refused for an empty field, or for an ``example`` that does
+    not occur verbatim (whitespace-normalized) within a single served sample
+    - the type cannot hold that rule, so the core does.
 
     A batch replaces the still-proposed rows under the same analysis key:
     running the analysis twice over the same samples is a second opinion,
@@ -594,7 +630,12 @@ def record_observations(
     kept under any key.
     """
     served = brief(repository)
-    corpus = _one_line("\n".join(sample.text for sample in served.samples))
+    if key != served.analysis_key:
+        raise StyleError(
+            "the samples changed since the brief was served: fetch style_brief "
+            "again and analyse what it serves"
+        )
+    samples = [_one_line(sample.text) for sample in served.samples]
     accepted_rows: list[tuple[int, RecordedObservation]] = []
     rejected: list[tuple[int, str]] = []
     for ordinal, result in enumerate(results, start=1):
@@ -604,9 +645,9 @@ def record_observations(
         if not aspect or not observation or not example:
             rejected.append((ordinal, "aspect, observation and example are all required"))
             continue
-        if example not in corpus:
+        if not any(example in sample for sample in samples):
             rejected.append(
-                (ordinal, f"example is not in the samples verbatim: {example[:60]!r}")
+                (ordinal, f"example is not in a sample verbatim: {example[:60]!r}")
             )
             continue
         accepted_rows.append((ordinal, RecordedObservation(aspect, observation, example)))

@@ -110,7 +110,7 @@ describe("the app shell on a fresh checkout", () => {
     expect(screen.queryByRole("dialog", { name: "Settings" })).not.toBeInTheDocument();
   });
 
-  it("carries the floating New section button, which opens its dialog (ADR-0011)", async () => {
+  it("carries the floating New section button, which opens its dialog (ADR-0012)", async () => {
     renderApp();
     expect(screen.queryByRole("dialog", { name: "New section" })).not.toBeInTheDocument();
 

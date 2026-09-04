@@ -293,7 +293,7 @@ def test_style_run_proposes_observations_for_settings(tmp_path, monkeypatch):
     )
     rendered = server.style_run()
     assert rendered.startswith("observations proposed: 1 - awaiting the author in Settings")
-    assert "rejected 2 - example is not in the samples verbatim" in rendered
+    assert "rejected 2 - example is not in a sample verbatim" in rendered
     assert len(style.pending_observations(repository)) == 1
 
 

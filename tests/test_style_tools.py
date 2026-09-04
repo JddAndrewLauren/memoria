@@ -156,6 +156,8 @@ def test_style_brief_serves_the_prompt_the_samples_and_ledgers_them(tmp_path):
     assert "### SRC-000001 - Journal I" in served
     assert "The deck went up unchanged.\n\nNobody dared touch it." in served
     assert "### style/samples/letter.md - letter" in served
+    # The analysis key is served so the skill can echo it to style_record.
+    assert style.brief(repository).analysis_key in served
     (line,) = _ledger(repository)
     assert line["tool"] == "style_brief"
     assert line["served"] == ["SRC-000001", "style/samples/letter.md"]
@@ -164,27 +166,39 @@ def test_style_brief_serves_the_prompt_the_samples_and_ledgers_them(tmp_path):
 def test_style_record_reports_per_element_and_writes_no_style(tmp_path):
     repository = _serve(tmp_path)
     _set_style(repository)
+    key = style.brief(repository).analysis_key
 
     outcome = server.style_record(
         [
             style.RecordedObservation("rhythm", "Keep it short.", "Nobody dared touch it."),
             style.RecordedObservation("rhythm", "Made up.", "With love, as ever."),
-        ]
+        ],
+        key,
     )
 
     assert outcome.splitlines()[0] == "accepted 1 of 2 - awaiting the author in Settings"
-    assert "rejected #2 - example is not in the samples verbatim" in outcome
+    assert "rejected #2 - example is not in a sample verbatim" in outcome
     assert style.load_style(repository).observations == ()
     assert [o.observation for o in style.pending_observations(repository)] == ["Keep it short."]
     assert "observations proposed, awaiting the author: 1" in server.style_status()
 
 
+def test_style_record_refuses_a_stale_key(tmp_path):
+    repository = _serve(tmp_path)
+    _set_style(repository)
+    key = style.brief(repository).analysis_key
+    style.add_sample(repository, "extra.txt", b"Another voice.", AUTHOR)
+
+    with pytest.raises(ToolError, match="samples changed"):
+        server.style_record([style.RecordedObservation("a", "Say no.", "No.")], key)
+
+
 def test_style_record_refuses_an_empty_batch_and_nothing_chosen(tmp_path):
     _serve(tmp_path)
     with pytest.raises(ToolError, match="no observations"):
-        server.style_record([])
+        server.style_record([], "any-key")
     with pytest.raises(ToolError, match="choose sources or upload"):
-        server.style_record([style.RecordedObservation("a", "b", "c")])
+        server.style_record([style.RecordedObservation("a", "b", "c")], "any-key")
 
 
 # --- the skill ----------------------------------------------------------------

@@ -49,6 +49,15 @@ count badge (`12`). Selection is a 3px maroon left bar plus a sand background.
 **Footer** — `⚙ Settings`, `✉ Feedback`, and a green status dot reading
 **"Curator idle · last pass 09:41"**.
 
+*Adopted 2026-09-03:* each `SOURCES` row carries a glyph for its raw unit's conversion
+state (converted · out of date · no paragraphs, and so on), and the tree's foot links to
+an **Ingestion** page (`/ingestion`) listing every raw unit in the ledger — the failed
+and unconvertible ones included, which have no record and so no row in the tree — with
+whether each was converted, is in the index, and how much of it the extraction has read.
+On a local connection the page offers **Normalize** and **Rebuild index** (ADR-0011);
+the extraction is never launched from it. The status is derived, never stored (part 05
+§5.4).
+
 ---
 
 ## 19.2 Ask Memoria
@@ -361,7 +370,7 @@ commit d41f2a9            the git commit for an author edit
   durable file the dialog edits through the write path. **Its second row, the same
   day** (ADR-0010): Model — the switch for direct runs, the model id and the API key,
   machine-local and never a durable file. `Feedback` stays unresolved.
-- A floating `+ New section` button. **Adopted 2026-09-04** (ADR-0011), on every page:
+- A floating `+ New section` button. **Adopted 2026-09-04** (ADR-0012), on every page:
   its dialog appends a section to a chosen chapter (the current one, from a section
   page), by **Write now** — prose, and a brief where the author wrote one — or by
   **Grill me**, the writing interview, run directly when Settings > Model is ready and

@@ -76,7 +76,7 @@ import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Iterator, Literal
+from typing import Iterator, Literal, Mapping
 
 from memoria.index import connect, gather
 from memoria.manuscript import list_chapters, list_sections
@@ -971,6 +971,48 @@ class AuditTask:
     entry_audit_visible_body: str
     subject_prompt: str
     gathered_anchors: tuple[str, ...] = ()
+
+
+def render_task(task: AuditTask, gathered: Mapping[str, str] | None = None) -> str:
+    """One task as text, the one rendering (ADR-0004) the session's
+    ``audit_pending`` and a direct run both serve: the paragraph, the
+    entry's audit-visible body, then the question - engagement, or the
+    subject's audit questions with the gathered evidence and the testimony
+    policy. Evidence is named for ``read(ref)`` when ``gathered`` is
+    ``None`` (a session), or inlined from ``gathered`` (a direct run)."""
+    lines = [
+        f"anchor: {task.anchor}",
+        f"kind: {task.kind}",
+        f"not current because: {task.cause}",
+        "---",
+        "paragraph:",
+        task.paragraph_text,
+        "",
+        f"entry ({task.entry_id}) audit-visible body:",
+        task.entry_audit_visible_body,
+    ]
+    if task.kind == "engagement":
+        lines += [
+            "",
+            "Does this paragraph engage this entry at all? Answer with "
+            "engages (yes/no) and a short note on how.",
+            "",
+            f"subject: {task.subject_prompt}",
+        ]
+    else:
+        lines += ["", "Audit questions:", task.subject_prompt]
+        if task.gathered_anchors and gathered is None:
+            lines += [
+                "",
+                "gathered evidence - read each with read(ref) before answering:",
+                *[f"- {a}" for a in task.gathered_anchors],
+            ]
+        elif task.gathered_anchors:
+            lines += ["", "gathered evidence:"]
+            for anchor in task.gathered_anchors:
+                lines += ["", f"### {anchor}", "", gathered[anchor]]
+        lines += ["", AUTHOR_TESTIMONY_POLICY]
+    return "\n".join(lines)
 
 
 def audit_tasks_for_target(

@@ -1,4 +1,4 @@
-"""The grilling: a writing interview that ends in a new section (ADR-0011).
+"""The grilling: a writing interview that ends in a new section (ADR-0012).
 
 The ``/grilling`` skill's shape - interview relentlessly, one question at a
 time, a recommended answer with each, look facts up rather than ask, the

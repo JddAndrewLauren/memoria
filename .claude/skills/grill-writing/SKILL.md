@@ -1,6 +1,6 @@
 ---
 name: grill-writing
-description: Interview the author about a new section of their manuscript until the two of you share what it says, then write it - the grilling repurposed for writing (ADR-0011). Use when the author says "grill me about this section", "interview me before I write", "let's write a new section", or invokes /grill-writing, optionally with a chapter id (CHP-nnnn) and a source id (SRC-nnnnnn) the app's New section dialog printed. Not for editing prose that exists - that is a rewrite under an authorization.
+description: Interview the author about a new section of their manuscript until the two of you share what it says, then write it - the grilling repurposed for writing (ADR-0012). Use when the author says "grill me about this section", "interview me before I write", "let's write a new section", or invokes /grill-writing, optionally with a chapter id (CHP-nnnn) and a source id (SRC-nnnnnn) the app's New section dialog printed. Not for editing prose that exists - that is a rewrite under an authorization.
 ---
 
 # Grilling toward a new section

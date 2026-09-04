@@ -907,7 +907,7 @@ class StyleRunOut(BaseModel):
     style: StyleOut
 
 
-# --- a new section (ADR-0011) --------------------------------------------------
+# --- a new section (ADR-0012) --------------------------------------------------
 
 
 class SectionCreate(BaseModel):
@@ -940,7 +940,7 @@ class GrillTurnIn(BaseModel):
 
 class GrillRequest(BaseModel):
     """One interviewer turn of a grilling about a new section of
-    ``chapter_id`` (ADR-0011), run directly. The transcript is the client's:
+    ``chapter_id`` (ADR-0012), run directly. The transcript is the client's:
     the whole of it comes with every request and none of it is kept.
     ``source_ref`` is the source the dialog was opened from, if any, whose
     text joins the interviewer's context."""
@@ -963,3 +963,54 @@ class GrillOut(BaseModel):
     draft: str
     rejected: list[RejectionOut]
     spend: SpendOut
+
+
+# --- the ingestion surface (ADR-0011) --------------------------------------------
+
+
+class UnitStatusOut(BaseModel):
+    """One raw unit's ingestion row (``memoria.ingestion.UnitStatus``).
+
+    ``converted`` is one of ``current``, ``out_of_date``,
+    ``not_yet_converted``, ``failed``, ``unconvertible``, ``container``,
+    ``stub`` or ``deleted``; a consumer renders whatever value is present
+    rather than assuming that list is closed, the posture
+    ``SourceSummary.source_type`` already takes. The three ``None``-able
+    counts mean "not checked" - no record, or no index built - never zero.
+    """
+
+    id: str
+    path: str
+    deleted: bool
+    converted: str
+    failure_reason: str | None
+    record_paragraphs: int | None
+    indexed_paragraphs: int | None
+    extracted_paragraphs: int | None
+    email_message_index: int | None
+
+
+class IngestionStatusOut(BaseModel):
+    """Every raw unit in the ledger with its conversion, index and
+    extraction state, and the tallies over them.
+
+    ``units`` is ``None`` when no evidence corpus is configured - "not
+    checked", the same distinction ``memoria.health`` draws - and an empty
+    list when the ledger is empty. ``is_normalized`` and ``is_indexed`` are
+    the build signals the empty states branch on (#157).
+    """
+
+    units: list[UnitStatusOut] | None
+    counts: dict[str, int]
+    is_normalized: bool
+    is_indexed: bool
+    generated_at: str
+
+
+class IngestionRunOut(BaseModel):
+    """What one launched pass did (ADR-0011): ``kind`` is ``normalize`` or
+    ``rebuild``, ``summary`` the counts that pass's own report carries."""
+
+    kind: str
+    summary: dict[str, int]
+    elapsed_seconds: float

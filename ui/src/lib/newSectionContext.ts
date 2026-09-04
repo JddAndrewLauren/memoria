@@ -14,7 +14,7 @@ export interface NewSectionContext {
 }
 
 /**
- * What the New section dialog assumes from where it was opened (ADR-0011):
+ * What the New section dialog assumes from where it was opened (ADR-0012):
  * on a section page (or Review, or supplied context), the same chapter; on
  * a source page, that source in the interview's context. Anywhere else,
  * nothing. Read off the route, not passed down, so the floating button

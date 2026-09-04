@@ -162,6 +162,16 @@ The record is the state — there is no second store of what was done. Over unch
 input a run produces no diff, which is the idempotence check; after a new export it
 produces only new records, because the ID ledger renumbers nothing.
 
+**Status is read off the three stores, never kept.** (Amended 2026-09-03.) Whether a
+raw unit was converted, is in the index, and has been read by the extraction is derived
+on every read from the manifest ledger, the record's own frontmatter and the index —
+there is no ingestion-status file, no run log consulted after the run, and nothing a
+second normalize could leave stale. The manifest's failure marker (reason, converter pin,
+raw hash) is the one durable trace of a failed unit, and it is bookkeeping the next run
+clears, not a status. `memoria sources`, `GET /api/ingestion` and the `/ingestion` page
+all draw the same derivation (`memoria.ingestion`), and the health report's "unprocessed
+source additions" (part 15 §47) is a filter over it.
+
 **Converter drift is a priced event.** The paragraph hash is the extraction's memo key
 (part 06 §8.12), so converter output that shifts by a space invalidates a model read.
 Converter versions are pinned and recorded in the manifest, and a version bump is an

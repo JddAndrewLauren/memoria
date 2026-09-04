@@ -1,4 +1,4 @@
-"""A new section from the app or from a grilling (ADR-0011): the committed
+"""A new section from the app or from a grilling (ADR-0012): the committed
 creation in ``memoria.manuscript``, the briefing ``memoria.grill`` serves,
 the direct run in ``memoria.drivers`` against a scripted fake, and the
 session run's write in ``memoria.authorship`` under two authorizations

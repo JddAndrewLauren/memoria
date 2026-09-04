@@ -210,6 +210,18 @@ editor or file manager (#65). Reveal makes the same locality check itself and
 refuses a non-local request with a 403 whatever the UI showed, which is what
 keeps it purely additive (`docs/adr/0002-ui-is-a-react-client.md`).
 
+The ingestion status (`GET /api/ingestion`) lists every raw unit in the
+manifest ledger with whether it was converted (current, out of date, not yet
+converted, failed with the converter's reason, no converter, an email export's
+own number, a stub, or deleted), whether the index holds its paragraphs, and
+how many of them the extraction has read - derived from the ledger, the
+records and the index on every read, never stored (part 05 §5.4). `memoria
+sources` prints the same table. Beside it are the two passes a local client
+may launch (`docs/adr/0011-the-web-adapter-may-launch-a-model-free-pass.md`):
+`POST /api/ingestion/normalize` and `POST /api/ingestion/rebuild`, the same
+runs as the CLI commands but with no embedder, refused for a non-local peer
+with a 403 and answered with a 409 while another pass is running.
+
 ### The one write
 
 `PUT /api/subjects/{id}/entries/{slug}/match-terms` is the only route in the
@@ -293,7 +305,7 @@ Section view gain *Run audit*, and every run reports what it metered. Nothing
 under `ui/` reaches a model: each button posts to the API.
 
 A floating `+ New section` button on every page opens the **New section**
-dialog (`docs/adr/0011-…`): pick the chapter it is appended to (the current
+dialog (`docs/adr/0012-…`): pick the chapter it is appended to (the current
 one, from a section page), then either **Write now** — the prose, and a brief
 where you write one; left empty, the prose's opening stands in as an
 unconfirmed brief — or **Grill me**, the writing interview: one question at a
@@ -334,6 +346,7 @@ test` respectively.
 .venv/bin/memoria rebuild
 .venv/bin/memoria rebuild --recurrence-threshold 3
 .venv/bin/memoria rebuild --reset-cache
+.venv/bin/memoria sources
 .venv/bin/memoria checkpoint
 .venv/bin/memoria seed-subjects
 ```

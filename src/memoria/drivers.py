@@ -21,8 +21,9 @@ or a tool can loop and show progress, a capacity limit leaves nothing
 half-done, and "what is left" stays a query over what is absent (the
 extraction's own rule). An item the model refused, truncated or answered
 with something the core rejects is one ``Rejection`` in the report; the
-run goes on. A provider failure (``ModelError``) stops the run where it
-is, and what was recorded before it stays recorded.
+bounded step goes on, but its caller stops continuation when the report
+contains a rejection. A provider failure (``ModelError``) stops the run
+where it is, and what was recorded before it stays recorded.
 
 **Metered spend is ledgered per call** (``ledger.append_model_call``), and
 what entered the model's context is ledgered by the same lines a session's
@@ -39,7 +40,7 @@ import json
 from dataclasses import dataclass, field
 
 from memoria import audit, extraction, grill, ledger, records, style
-from memoria.model import ModelFn, ModelReply, ModelRequest
+from memoria.model import ModelError, ModelFn, ModelReply, ModelRequest
 from memoria.repository import Repository
 
 PASS_EXTRACTION = "extraction"
@@ -250,7 +251,7 @@ class GrillTurn:
 
 @dataclass(frozen=True)
 class GrillRun:
-    """One interviewer turn (ADR-0011). While ``done`` is false it is the
+    """One interviewer turn (ADR-0012). While ``done`` is false it is the
     next ``question`` with its ``recommended_answer``; once true it is the
     ``brief`` and the ``draft``, for the author to edit and write. A reply
     the driver could not use is the one ``rejected`` item, and every other
@@ -301,8 +302,27 @@ def _call(
     anchor: str | None = None,
 ) -> ModelReply:
     """One model call, ledgered whatever it returned - a refusal was billed
-    for its input, so it is spend too."""
-    reply = model(request)
+    for its input, so it is spend too. A call the provider failed is
+    ledgered as well, with ``stop_reason`` ``error`` and no usage figures
+    (the provider reported none), so a billed-then-failed call is never a
+    call the ledger does not know about; the ``ModelError`` then goes on
+    to stop the run."""
+    try:
+        reply = model(request)
+    except ModelError as exc:
+        ledger.append_model_call(
+            repository,
+            session_id,
+            pass_name=request.pass_name,
+            provider=provider,
+            model="",
+            input_tokens=0,
+            output_tokens=0,
+            stop_reason="error",
+            anchor=anchor,
+            error=str(exc),
+        )
+        raise
     usage = reply.usage
     ledger.append_model_call(
         repository,
@@ -364,34 +384,16 @@ def _rows(value: dict, key: str, fields: tuple[str, ...]) -> list[dict]:
 
 
 def extraction_system_text(brief: extraction.Brief) -> str:
-    """The brief as a session sees it (``mcp.server.render_brief``): the
-    prompt verbatim, every subject's match and hazards, the entries that
-    exist. Identical across every call of a run, hence the system block."""
-    lines = [brief.extraction_prompt, "", "## The subjects", ""]
-    for subject in brief.subjects:
-        lines += [
-            f"### {subject.id}",
-            "",
-            f"Match: {subject.match}",
-            f"Hazards: {subject.hazards}",
-            f"auto-promote: {'yes' if subject.auto_promote else 'no'}",
-            "",
-        ]
-    lines += ["## The entries that exist", ""]
-    if brief.entry_names:
-        lines += [f"- {entry_id} ({name})" for entry_id, name in brief.entry_names]
-    else:
-        lines.append(
-            "None yet. Every mention is an unplaced surface form, which is the "
-            "expected state of a fresh archive."
-        )
-    lines += [
-        "",
-        "You will be given one paragraph at a time. Read it alone - carry "
+    """The brief as a session sees it - the core's own rendering, the one
+    ``extraction_brief`` serves - plus how to answer. Identical across every
+    call of a run, hence the system block."""
+    return (
+        extraction.render_brief(brief)
+        + "\n\n"
+        + "You will be given one paragraph at a time. Read it alone - carry "
         "nothing over from any other paragraph - and answer with its "
-        "placements, its unplaced surface forms and its relations, as JSON.",
-    ]
-    return "\n".join(lines)
+        "placements, its unplaced surface forms and its relations, as JSON."
+    )
 
 
 def _paragraph_user_text(paragraph: extraction.PendingParagraph) -> str:
@@ -417,23 +419,10 @@ def _reading(anchor: str, value: dict) -> extraction.RecordedParagraph:
 
 
 def summary_user_text(task: extraction.PendingSummary, texts: dict[str, str]) -> str:
-    """The summary task as a session sees it (``render_summary_task``),
-    with a leaf's member paragraphs inlined - a session would ``read(ref)``
+    """The summary task as a session sees it - the core's own rendering -
+    with a leaf's member paragraphs inlined: a session would ``read(ref)``
     each; here they are served in the same call."""
-    lines = [
-        f"cluster: {task.cluster_id}",
-        f"level: {task.level}",
-        f"defined by: {task.label}",
-        "",
-    ]
-    if task.child_summaries:
-        lines += ["## Its child clusters' summaries", ""]
-        lines += [f"- {summary}" for summary in task.child_summaries]
-    else:
-        lines += ["## Its member paragraphs", ""]
-        for anchor in task.member_anchors:
-            lines += [f"### {anchor}", "", texts.get(anchor, ""), ""]
-    return "\n".join(lines).rstrip("\n")
+    return extraction.render_summary_task(task, texts)
 
 
 def run_extraction(
@@ -457,15 +446,20 @@ def run_extraction(
     if limit < 1:
         raise ValueError("limit must be at least 1")
     meter = _Meter()
-    brief = extraction.brief(repository)
-    ledger.append_extraction_brief(repository, session_id, [s.id for s in brief.subjects])
-    system = extraction_system_text(brief)
-
     pending = extraction.pending_paragraphs(repository, limit=limit)
     if pending:
-        ledger.append_extraction_batch(repository, session_id, [p.anchor for p in pending])
+        brief = extraction.brief(repository)
+        system = extraction_system_text(brief)
         results: list[tuple[str, extraction.ParagraphExtraction]] = []
         for paragraph in pending:
+            # Each paragraph is a separate model context. Ledger only the
+            # brief and paragraph that are about to enter this call; if a
+            # provider failure stops the loop, untouched anchors never read
+            # as supplied.
+            ledger.append_extraction_brief(
+                repository, session_id, [subject.id for subject in brief.subjects]
+            )
+            ledger.append_extraction_batch(repository, session_id, [paragraph.anchor])
             reply = _call(
                 repository,
                 session_id,
@@ -551,9 +545,11 @@ def run_extraction(
 
 
 def audit_system_text(repository: Repository) -> str:
-    """What a session's ``audit_pending`` prints once above a batch: the
-    author's writing style (a finding's patch is manuscript prose) and the
-    testimony policy, plus how to answer."""
+    """What a session's ``audit_pending`` prints once above a batch - the
+    author's writing style, because a finding's patch is manuscript prose -
+    plus how to answer as JSON. The testimony policy is not here: each
+    audit-verdict task carries it, as the core renders it, and an
+    engagement task does not."""
     lines = [
         "You are auditing manuscript prose against the entries it draws on. "
         "Each task is one paragraph and one entry. Answer as JSON.",
@@ -569,8 +565,6 @@ def audit_system_text(repository: Repository) -> str:
         "they disagree, a confidence (low, moderate or high), and a patch "
         "holding a proposed rewrite of the paragraph, or empty if you "
         "propose none.",
-        "",
-        audit.AUTHOR_TESTIMONY_POLICY,
     ]
     rendered = style.writing_style_prompt(style.load_style(repository))
     if rendered is not None:
@@ -584,29 +578,10 @@ def audit_system_text(repository: Repository) -> str:
 
 
 def audit_user_text(task: audit.AuditTask, gathered: dict[str, str]) -> str:
-    """One task as ``render_audit_tasks`` prints it, with each gathered
-    anchor's text inlined where a session would ``read(ref)`` it."""
-    lines = [
-        f"anchor: {task.anchor}",
-        f"kind: {task.kind}",
-        f"not current because: {task.cause}",
-        "---",
-        "paragraph:",
-        task.paragraph_text,
-        "",
-        f"entry ({task.entry_id}) audit-visible body:",
-        task.entry_audit_visible_body,
-        "",
-    ]
-    if task.kind == "engagement":
-        lines.append(f"subject: {task.subject_prompt}")
-    else:
-        lines += ["Audit questions:", task.subject_prompt]
-        if task.gathered_anchors:
-            lines += ["", "gathered evidence:"]
-            for anchor in task.gathered_anchors:
-                lines += ["", f"### {anchor}", "", gathered.get(anchor, "")]
-    return "\n".join(lines)
+    """One task as ``audit_pending`` prints it - the core's own rendering -
+    with each gathered anchor's text inlined where a session would
+    ``read(ref)`` it."""
+    return audit.render_task(task, gathered)
 
 
 def _audit_item(task: audit.AuditTask, value: dict) -> audit.RecordedAuditItem:
@@ -669,16 +644,31 @@ def run_audit(
     if tasks:
         system = audit_system_text(repository)
         gathered: dict[str, str] = {}
+        gathered_failures: dict[str, str] = {}
         for task in tasks:
+            unreadable: list[tuple[str, str]] = []
             for anchor in task.gathered_anchors:
                 if anchor in gathered:
                     continue
+                if anchor in gathered_failures:
+                    unreadable.append((anchor, gathered_failures[anchor]))
+                    continue
                 try:
                     served = records.read(repository, anchor)
-                except records.ReadError:
+                except records.ReadError as exc:
+                    gathered_failures[anchor] = str(exc)
+                    unreadable.append((anchor, str(exc)))
                     continue
                 gathered[anchor] = served.text
                 ledger.append_read(repository, session_id, served)
+            if unreadable:
+                details = "; ".join(
+                    f"{anchor} could not be read: {reason}" for anchor, reason in unreadable
+                )
+                meter.rejected.append(
+                    Rejection(task.anchor, f"gathered evidence {details}")
+                )
+                continue
             reply = _call(
                 repository,
                 session_id,
@@ -729,30 +719,20 @@ def run_audit(
 
 
 def style_system_text(served: style.Brief) -> str:
-    """The prompt and what the style already says - the half of
-    ``render_style_brief`` that is instruction rather than sample."""
-    lines = [served.prompt, "", "## What the style already says", ""]
-    current = style.writing_style_prompt(served.current)
-    if current is None:
-        lines.append("Nothing yet - every observation is new.")
-    else:
-        lines += ["Do not repeat these; propose only what they do not already say.", "", current]
-    lines += ["", "Answer as JSON: a list of observations, each with its aspect, the observation and its example."]
-    return "\n".join(lines)
+    """The prompt and what the style already says - the instruction half of
+    the brief, as the core renders it for ``style_brief`` - plus how to
+    answer."""
+    return (
+        style.render_brief_prompt(served)
+        + "\n\nAnswer as JSON: a list of observations, each with its aspect, "
+        "the observation and its example."
+    )
 
 
 def style_user_text(served: style.Brief) -> str:
-    """Every sample contiguous and unmodified - the other half."""
-    lines = [f"## The samples ({len(served.samples)})", ""]
-    for sample in served.samples:
-        lines += [f"### {sample.ref} - {sample.title}", ""]
-        if sample.truncated:
-            lines += [
-                f"(the first {style.SAMPLE_PARAGRAPH_LIMIT} paragraphs; the source runs longer)",
-                "",
-            ]
-        lines += [sample.text, ""]
-    return "\n".join(lines).rstrip("\n")
+    """Every sample contiguous and unmodified - the other half, as the core
+    renders it."""
+    return style.render_brief_samples(served)
 
 
 def run_style(
@@ -797,7 +777,9 @@ def run_style(
             rejected=(Rejection("analysis", "the model proposed no observations"),),
             spend=meter.spend(),
         )
-    outcome = style.record_observations(repository, observations)
+    # The key the brief served, as a session echoes it back to style_record:
+    # the record is bound to the samples the model read.
+    outcome = style.record_observations(repository, observations, served.analysis_key)
     return StyleRun(
         accepted=len(outcome.accepted),
         rejected=tuple(Rejection(str(ordinal), reason) for ordinal, reason in outcome.rejected),
@@ -848,7 +830,7 @@ def run_grill(
     provider: str = "anthropic",
 ) -> GrillRun:
     """One interviewer turn of a grilling about a new section of
-    ``chapter_id`` (ADR-0011): the briefing as the system text, the
+    ``chapter_id`` (ADR-0012): the briefing as the system text, the
     client's transcript as the user text, one metered call. Stateless -
     nothing is kept between calls but what the client sends back. The
     briefing is ledgered as served every call, since every call serves it.

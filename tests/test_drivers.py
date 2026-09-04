@@ -18,7 +18,12 @@ from memoria.index import build_index, gather
 from memoria.ledger import event_path
 from memoria.manuscript import create_chapter, create_section
 from memoria.model import ModelError, ModelReply, ModelRequest, ModelUsage
-from memoria.records import NORMALIZED_RELATIVE_PATH, NormalizedRecord, write_normalized_records
+from memoria.records import (
+    NORMALIZED_RELATIVE_PATH,
+    NormalizedRecord,
+    record_path,
+    write_normalized_records,
+)
 from memoria.repository import Repository
 from memoria.subjects import Entry, entry_to_markdown, write_builtin_subjects
 from memoria.write import Actor
@@ -183,9 +188,20 @@ def test_every_call_is_ledgered_as_spend_beside_what_was_served(tmp_path):
     events = _ledger(repository)
     tools = [event["tool"] for event in events]
     assert tools[:2] == ["extraction_brief", "extraction_next_paragraphs"]
+    assert tools[:6] == [
+        "extraction_brief",
+        "extraction_next_paragraphs",
+        "model_call",
+        "extraction_brief",
+        "extraction_next_paragraphs",
+        "model_call",
+    ]
     assert tools.count("model_call") == 2
     served = [event for event in events if event["tool"] == "extraction_next_paragraphs"]
-    assert served[0]["served"] == ["src-000001-p1", "src-000001-p2"]
+    assert [event["served"] for event in served] == [
+        ["src-000001-p1"],
+        ["src-000001-p2"],
+    ]
 
     call = _model_calls(repository)[0]
     assert call["pass"] == "extraction"
@@ -272,8 +288,33 @@ def test_a_provider_failure_stops_the_run_and_keeps_what_was_recorded(tmp_path):
     # again next time, at one call's price.
     with pytest.raises(ModelError):
         drivers.run_extraction(repository, FakeModel(handler), SESSION, limit=3)
-    assert len(_model_calls(repository)) == 1
+    # The failed call is ledgered too - the author may have been billed for
+    # it - as an error line with no usage figures, and the run stops there.
+    calls = _model_calls(repository)
+    assert [c["stop_reason"] for c in calls] == ["end_turn", "error"]
+    assert calls[1]["error"] == "rate-limited"
+    assert calls[1]["input_tokens"] == 0 and calls[1]["model"] == ""
+    served = [
+        event["served"]
+        for event in _ledger(repository)
+        if event["tool"] == "extraction_next_paragraphs"
+    ]
+    assert served == [["src-000001-p1"], ["src-000001-p2"]]
     assert len(ex.pending_paragraphs(repository)) == 3
+
+
+def test_summary_and_done_phases_do_not_ledger_an_unsent_extraction_brief(tmp_path):
+    repository = _repo(tmp_path, ["Bob and the acquisition.", "Bob again."])
+    model = FakeModel(_summary_or_reading)
+    drivers.run_extraction(repository, model, SESSION, limit=10, recurrence_threshold=1)
+    brief_count = sum(event["tool"] == "extraction_brief" for event in _ledger(repository))
+
+    drivers.run_extraction(repository, model, SESSION, limit=10, recurrence_threshold=1)
+    drivers.run_extraction(repository, model, SESSION, limit=10, recurrence_threshold=1)
+
+    assert sum(
+        event["tool"] == "extraction_brief" for event in _ledger(repository)
+    ) == brief_count
 
 
 def test_a_limit_below_one_is_refused(tmp_path):
@@ -382,13 +423,37 @@ def test_the_audit_serves_the_policy_the_entry_and_the_gathered_evidence(tmp_pat
 
     verdicts = [r for r in model.requests if "kind: audit_verdict" in r.user]
     assert verdicts
-    assert audit.AUTHOR_TESTIMONY_POLICY in verdicts[0].system
+    # The policy rides on each verdict task, as audit_pending serves it - and
+    # on no engagement task, which a session never sees it on either.
+    assert audit.AUTHOR_TESTIMONY_POLICY in verdicts[0].user
+    assert audit.AUTHOR_TESTIMONY_POLICY not in verdicts[0].system
+    engagements = [r for r in model.requests if "kind: engagement" in r.user]
+    assert engagements
+    assert all(audit.AUTHOR_TESTIMONY_POLICY not in r.user for r in engagements)
     assert "Bob is tall." in verdicts[0].user
     assert "Bob went to town." in verdicts[0].user
     assert "gathered evidence:" in verdicts[0].user
     assert "Bob went to market." in verdicts[0].user, "a session would read(ref) it; the driver inlines it"
     reads = [e for e in _ledger(repository) if e["tool"] == "read"]
     assert reads and reads[0]["ref"] == "src-000001-p1"
+
+
+def test_the_audit_rejects_a_verdict_when_its_gathered_evidence_cannot_be_read(tmp_path):
+    repository, chapter, section = _manuscript(tmp_path)
+    assert gather(repository, "SUB-people/bob"), "the stale index must still name the source"
+    record_path(repository, "SRC-000001").unlink()
+    model = FakeModel(_answer_audit)
+
+    report = drivers.run_audit(
+        repository, model, SESSION, chapter_number=chapter.number, section_number=section.number
+    )
+
+    assert report.accepted == 1, "the evidence-free engagement judgement can still be recorded"
+    assert report.remaining == 1
+    assert len(report.rejected) == 1
+    assert "src-000001-p1" in report.rejected[0].reason
+    assert "could not be read" in report.rejected[0].reason
+    assert not any("kind: audit_verdict" in request.user for request in model.requests)
 
 
 def test_the_audit_puts_the_writing_style_above_a_verdict(tmp_path):
@@ -485,7 +550,7 @@ def test_the_style_analysis_records_what_quotes_the_samples_and_refuses_what_doe
     assert report.accepted == 1
     assert len(report.rejected) == 1
     assert report.rejected[0].anchor == "2"
-    assert "not in the samples verbatim" in report.rejected[0].reason
+    assert "not in a sample verbatim" in report.rejected[0].reason
     pending = style.pending_observations(repository)
     assert [o.observation for o in pending] == ["End on the noun."]
     events = _ledger(repository)
