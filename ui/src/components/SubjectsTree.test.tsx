@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SubjectsTree } from "./SubjectsTree";
+import { NewItemsContext } from "../lib/newItemsContext";
 
 /**
  * The `SUBJECTS` tree's entry rows, after #26 gave entries a view of their
@@ -34,14 +35,19 @@ describe("the SUBJECTS tree's entry rows (#148, #26)", () => {
       const url = String(input);
       if (url.includes("/api/subjects/SUB-people/entries")) {
         return new Response(
-          JSON.stringify({ items: [{ id: "SUB-people/bob", match_terms: ["Bob", "Robert"] }] }),
+          JSON.stringify({
+            items: [{ id: "SUB-people/bob", match_terms: ["Bob", "Robert"] }],
+          }),
           { status: 200 },
         );
       }
       if (url.includes("/api/subjects")) {
-        return new Response(JSON.stringify({ items: [{ id: "SUB-people", entry_count: 1 }] }), {
-          status: 200,
-        });
+        return new Response(
+          JSON.stringify({ items: [{ id: "SUB-people", entry_count: 1 }] }),
+          {
+            status: 200,
+          },
+        );
       }
       return new Response(JSON.stringify({}), { status: 200 });
     });
@@ -71,5 +77,41 @@ describe("the SUBJECTS tree's entry rows (#148, #26)", () => {
       String(input).includes("/entries/bob"),
     );
     expect(read).toBe(false);
+  });
+});
+
+describe("the SUBJECTS tree's create row (ADR-0014)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("opens the New subject dialog through the app's context", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ items: [], is_built: false }), {
+            status: 200,
+          }),
+      ),
+    );
+    const openNewSubject = vi.fn();
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <NewItemsContext.Provider
+            value={{ openNewSection: vi.fn(), openNewSubject }}
+          >
+            <SubjectsTree />
+          </NewItemsContext.Provider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "+ New subject…" }));
+    expect(openNewSubject).toHaveBeenCalled();
+    // The empty state names the button before the CLI.
+    expect(await screen.findByText(/Add one above/)).toBeInTheDocument();
   });
 });

@@ -36,7 +36,8 @@ from memoria.model import (
     save_settings,
 )
 from memoria.index import IndexBuildError, IndexSchemaError, SearchFilters
-from memoria.ingestion import RunInProgress, ingestion_status
+from memoria.ingestion import RawUnitError, RawUnitExists, RunInProgress, ingestion_status
+from memoria.ingestion import add_raw_unit as add_raw_unit_core
 from memoria.ingestion import run_normalize as run_normalize_core
 from memoria.ingestion import run_rebuild as run_rebuild_core
 from memoria.index import appearances_supported
@@ -86,6 +87,7 @@ from memoria.subjects import (
     Entry,
     OverlayAct,
     SubjectError,
+    add_subject,
     is_seeded,
     load_all_entries,
     load_all_subjects,
@@ -131,6 +133,8 @@ from memoria.web.schemas import (
     MatchTermsUpdate,
     NotCurrentOut,
     ObservationResolution,
+    RawUnitOut,
+    RawUnitUpload,
     SampleUpload,
     StyleObservationOut,
     StyleOut,
@@ -158,6 +162,8 @@ from memoria.web.schemas import (
     SourceListResponse,
     SourceSummary,
     StatementOut,
+    SubjectCreate,
+    SubjectCreated,
     SubjectListResponse,
     SubjectSummary,
     SuppliedContextOut,
@@ -292,6 +298,7 @@ def ingestion(repository: Repository = Depends(get_repository)) -> IngestionStat
             ]
         ),
         counts=dict(status.counts),
+        unnumbered=None if status.unnumbered is None else list(status.unnumbered),
         is_normalized=status.is_normalized,
         is_indexed=status.is_indexed,
         generated_at=status.generated_at,
@@ -339,6 +346,30 @@ def ingestion_rebuild(
     return IngestionRunOut(
         kind=outcome.kind, summary=outcome.summary, elapsed_seconds=outcome.elapsed_seconds
     )
+
+
+@router.post("/ingestion/units")
+def ingestion_add_unit(
+    upload: RawUnitUpload, repository: Repository = Depends(get_repository)
+) -> RawUnitOut:
+    """Place one raw unit's bytes under ``raw/`` (ADR-0013). Not local-only:
+    the bytes travel, so this works hosted; only the normalize that numbers
+    the unit is local. Mints nothing - the next normalize does (ADR-0006).
+    **409** for a path already taken (nothing overwritten), **400** for a
+    path that is absolute, climbs out of ``raw/`` or names a dotfile,
+    **404** when no evidence corpus is configured."""
+    try:
+        added = add_raw_unit_core(repository, upload.path, bytes(upload.content))
+    except NoEvidenceRoot as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RawUnitError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RawUnitExists as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{exc.path} already exists - nothing was written. Rename the file and try again.",
+        ) from exc
+    return RawUnitOut(path=added.path, size=added.size)
 
 
 @router.get("/locality")
@@ -481,6 +512,38 @@ def list_subjects(repository: Repository = Depends(get_repository)) -> SubjectLi
         ],
         is_built=is_seeded(repository),
     )
+
+
+@router.post("/subjects")
+def create_subject(
+    body: SubjectCreate, repository: Repository = Depends(get_repository)
+) -> SubjectCreated:
+    """The author adding a subject from the dialog - ``+ New subject``
+    (ADR-0014). One file, ``subjects/<slug>/_subject.md``, one commit
+    through the write path's creation door, committed as the author -
+    ``repository_actor``, never a name in the payload (ADR-0002) - because
+    the click is the act, as it is for ``create_section``.
+
+    **409** for a subject already there (nothing written), **422** for a
+    name that makes no id, **500** for a write that cannot be attempted
+    (no git identity).
+    """
+    try:
+        subject = add_subject(
+            repository,
+            body.name,
+            match=body.match,
+            hazards=body.hazards,
+            audit_questions=body.audit_questions,
+            auto_promote=body.auto_promote,
+            actor=repository_actor(repository),
+        )
+    except SubjectError as exc:
+        status = 409 if "already exists" in str(exc) else 422
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    except WriteError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return SubjectCreated(id=subject.id)
 
 
 @router.get("/subjects/{subject_id}/entries")

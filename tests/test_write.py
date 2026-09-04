@@ -512,6 +512,12 @@ ALLOWED_WRITERS = {
     # gitignored, written 0600 and never a durable file a commit closes,
     # which is exactly why it must not go through `memoria.write`.
     "model.py",
+    # ADR-0013: one raw unit's bytes placed under the evidence root's `raw/`
+    # from the app. Original state, not in DURABLE_PATHS, in a tree that may
+    # sit outside the repository altogether, and never committed - the same
+    # ground `normalize` already writes there on when it materializes an
+    # email attachment. The ledger, not this, numbers it (ADR-0006).
+    "ingestion.py",
 }
 FILE_WRITING_CALLS = {
     "write_text", "write_bytes",

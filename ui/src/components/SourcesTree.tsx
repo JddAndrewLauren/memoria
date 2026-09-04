@@ -4,6 +4,7 @@ import { listAllSources, readIngestionStatus, type SourceSummary } from "../api/
 import { drawState, indexByUnitId } from "../lib/ingestion";
 import { groupSourcesByType } from "../lib/sourceGroups";
 import { TreeSection } from "./TreeSection";
+import { useOpenAddRawUnits } from "../lib/addRawUnitsContext";
 
 // The glyph's colour by state tone - the same tokens `Badge` uses, without
 // the chip around them, since a tree row has no room for one.
@@ -30,9 +31,19 @@ export function SourcesTree() {
     queryFn: readIngestionStatus,
   });
   const states = indexByUnitId(ingestion);
+  const openAddRawUnits = useOpenAddRawUnits();
 
   return (
-    <TreeSection label="Sources">
+    <TreeSection label="Sources" to="/sources">
+      {/* ADR-0013: adding raw units from the app - files, a folder, or a
+          drop anywhere in the window. */}
+      <button
+        type="button"
+        onClick={() => openAddRawUnits()}
+        className="mb-1 block w-full rounded px-2 py-1 text-left text-xs text-secondary hover:bg-hover hover:text-ink"
+      >
+        + Add sources…
+      </button>
       {isLoading && <p className="px-2 py-2 text-xs text-muted">Loading…</p>}
       {isError && <p className="px-2 py-2 text-xs text-muted">Sources could not be loaded.</p>}
       {data && groups.length === 0 && (
@@ -50,8 +61,9 @@ export function SourcesTree() {
         <p className="px-2 py-2 text-xs text-muted">
           {!data.is_built ? (
             <>
-              No sources yet. Run <code className="font-mono">memoria normalize</code> against
-              an evidence root, then <code className="font-mono">memoria rebuild</code>.
+              No sources yet. Add some above, or run{" "}
+              <code className="font-mono">memoria normalize</code> against an evidence root,
+              then <code className="font-mono">memoria rebuild</code>.
             </>
           ) : data.items.length === 0 ? (
             <>
@@ -71,21 +83,21 @@ export function SourcesTree() {
           states={states}
         />
       ))}
-      <NavLink
-        to="/ingestion"
-        className={({ isActive }) =>
-          `mt-1 block rounded px-2 py-1 text-xs ${
-            isActive ? "bg-hover text-ink" : "text-secondary hover:bg-hover hover:text-ink"
-          }`
-        }
-      >
-        Ingestion status
-        {ingestion?.units && ingestion.counts.failed > 0 && (
-          <span className="ml-1 font-mono text-[11px] text-manuscript">
-            · {ingestion.counts.failed} failed
-          </span>
-        )}
-      </NavLink>
+      {/* What the tree cannot show - a file the ledger has not numbered, a
+          unit that failed - flagged here, on the Sources page's link. */}
+      {ingestion?.units && (ingestion.unnumbered?.length || ingestion.counts.failed > 0) ? (
+        <NavLink
+          to="/sources"
+          className="mt-1 block rounded px-2 py-1 font-mono text-[11px] text-amber hover:bg-hover"
+        >
+          {[
+            ingestion.unnumbered?.length ? `${ingestion.unnumbered.length} not numbered` : null,
+            ingestion.counts.failed > 0 ? `${ingestion.counts.failed} failed` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </NavLink>
+      ) : null}
     </TreeSection>
   );
 }

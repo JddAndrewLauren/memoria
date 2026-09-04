@@ -13,6 +13,7 @@ import {
   type StyleOut,
 } from "../api/client";
 import { Region } from "./SettingsRegion";
+import { encodeFile } from "../lib/rawUnits";
 import { RunButton, describeSpend, useModelReadiness } from "./DirectRun";
 
 export const STYLE_KEY = ["style"] as const;
@@ -321,19 +322,6 @@ export function matchingSources(
         .includes(needle),
     )
     .slice(0, 20);
-}
-
-function encodeFile(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error);
-    reader.onload = () => {
-      // A data URL: everything after the comma is the base64 body.
-      const result = String(reader.result);
-      resolve(result.slice(result.indexOf(",") + 1));
-    };
-    reader.readAsDataURL(file);
-  });
 }
 
 // --- the analysis and its proposals -----------------------------------------

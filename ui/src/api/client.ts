@@ -63,6 +63,8 @@ export type AuditRunOut = components["schemas"]["AuditRunOut"];
 export type StyleRunOut = components["schemas"]["StyleRunOut"];
 export type SpendOut = components["schemas"]["SpendOut"];
 export type RejectionOut = components["schemas"]["RejectionOut"];
+export type SubjectCreate = components["schemas"]["SubjectCreate"];
+export type SubjectCreated = components["schemas"]["SubjectCreated"];
 export type SectionCreate = components["schemas"]["SectionCreate"];
 export type SectionCreated = components["schemas"]["SectionCreated"];
 export type GrillTurnIn = components["schemas"]["GrillTurnIn"];
@@ -71,6 +73,8 @@ export type GrillOut = components["schemas"]["GrillOut"];
 export type IngestionStatusOut = components["schemas"]["IngestionStatusOut"];
 export type UnitStatusOut = components["schemas"]["UnitStatusOut"];
 export type IngestionRunOut = components["schemas"]["IngestionRunOut"];
+export type RawUnitUpload = components["schemas"]["RawUnitUpload"];
+export type RawUnitOut = components["schemas"]["RawUnitOut"];
 
 class ApiError extends Error {
   constructor(
@@ -284,6 +288,13 @@ export function runRebuild(): Promise<IngestionRunOut> {
   return post(`/api/ingestion/rebuild`);
 }
 
+// One raw unit's bytes placed under `raw/` (ADR-0013). Not local-only - the
+// bytes travel - and mints nothing: the next normalize numbers it. A 409 is
+// the path already taken, nothing overwritten.
+export function uploadRawUnit(upload: RawUnitUpload): Promise<RawUnitOut> {
+  return post(`/api/ingestion/units`, upload);
+}
+
 export function search(query: string): Promise<SearchResponse> {
   return get(`/api/search?q=${encodeURIComponent(query)}`);
 }
@@ -354,6 +365,11 @@ export function runStyleAnalysis(): Promise<StyleRunOut> {
 // of it, and a 409 says direct runs are off.
 export function createSection(chapterId: string, body: SectionCreate): Promise<SectionCreated> {
   return post(`/api/chapters/${encodeURIComponent(chapterId)}/sections`, body);
+}
+
+/** ADR-0014: the author declaring a subject; the id is derived server-side. */
+export function createSubject(body: SubjectCreate): Promise<SubjectCreated> {
+  return post(`/api/subjects`, body);
 }
 
 export function grill(request: GrillRequest): Promise<GrillOut> {

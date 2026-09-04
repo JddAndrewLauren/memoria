@@ -18,9 +18,10 @@ change to either that the other does not match is a corruption.
 `write_builtin_subjects` seeds the five built-ins the way
 `records.write_normalized_records` writes derived records, and it never
 overwrites a file the author has already touched - it is not a durable
-write. The one durable write this module owns is `set_match_terms` (#26),
-the author editing an entry's match terms, and it goes through `memoria.write`
-like every other write to a durable state class (ADR-0003).
+write. The durable writes this module owns are `set_match_terms` (#26), the
+author editing an entry's match terms, and `add_subject` (ADR-0014), the
+author adding a subject from the app; both go through `memoria.write` like
+every other write to a durable state class (ADR-0003).
 """
 
 from __future__ import annotations
@@ -34,7 +35,15 @@ from pathlib import Path
 import yaml
 
 from memoria.repository import Repository
-from memoria.write import Actor, WriteError, WriteResult, serve, write as write_file
+from memoria.write import (
+    Actor,
+    Rejected,
+    WriteError,
+    WriteResult,
+    create as create_file,
+    serve,
+    write as write_file,
+)
 
 # Where subjects live inside the book repository (part 04 §2's
 # `subjects/<slug>/_subject.md`, `subjects/<slug>/<entry-slug>.md`).
@@ -599,6 +608,69 @@ def set_match_terms(
     entry, _minted_here_and_unused = serve_entry(repository, subject_id, entry_slug)
     content = entry_to_markdown(dataclass_replace(entry, match_terms=list(match_terms)))
     return write_file(repository, relative_path, token, content, actor)
+
+
+# --- a new subject (ADR-0014) --------------------------------------------------
+
+
+_SLUG_RE = re.compile(rf"^{_SLUG}$")
+
+
+def subject_slug(name: str) -> str:
+    """The directory slug for a subject the author names - ``Places`` is
+    ``places``, ``Key dates`` is ``key-dates``. Lower-cased ASCII letters
+    and digits joined by single hyphens, the same shape ``_SLUG`` accepts
+    for an entry reference; a name that leaves nothing behind, or starts
+    with a digit, is a ``SubjectError`` naming it."""
+    ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_name.lower()).strip("-")
+    if not _SLUG_RE.match(slug):
+        raise SubjectError(
+            f"{name!r} does not make a subject id: a name needs a letter to "
+            "start with, and only letters, digits and spaces"
+        )
+    return slug
+
+
+def add_subject(
+    repository: Repository,
+    name: str,
+    *,
+    match: str,
+    hazards: str,
+    audit_questions: str,
+    auto_promote: bool,
+    actor: Actor,
+) -> Subject:
+    """Bring a subject the author declared into being - ``+ New subject``
+    (CONTEXT.md's subject system, ADR-0014) - through the write path's
+    creation door, one file, one commit, attributed to ``actor``.
+
+    The prompt is exactly what ``subject_to_markdown`` writes for a
+    built-in: the four declarations part 06 §8.1 requires, so
+    ``parse_subject`` and ``memoria validate`` read it back like any other.
+    A subject already there is a ``SubjectError`` and nothing is written,
+    the same shape ``add_draft`` keeps: a prompt the author may have edited
+    is never flattened by a second create. An unattributed ``actor`` is
+    refused before the file is touched, for ``set_match_terms``'s reason.
+    """
+    if not actor.name.strip() or not actor.email.strip():
+        raise WriteError(
+            "cannot add a subject: an author act must be attributed - actor "
+            "name and email may not be empty"
+        )
+    subject = Subject(
+        id=f"SUB-{subject_slug(name)}",
+        match=match.strip(),
+        hazards=hazards.strip(),
+        audit_questions=audit_questions.strip(),
+        auto_promote=auto_promote,
+    )
+    relative = subject_path(repository, subject.id).relative_to(repository.root).as_posix()
+    result = create_file(repository, relative, subject_to_markdown(subject), actor)
+    if isinstance(result, Rejected):
+        raise SubjectError(f"{subject.id} already exists ({result.outcome}); nothing written")
+    return subject
 
 
 # --- the five built-in subjects ---------------------------------------------

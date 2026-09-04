@@ -193,6 +193,26 @@ class SubjectSummary(BaseModel):
     entry_count: int
 
 
+class SubjectCreate(BaseModel):
+    """The author adding a subject from the dialog (ADR-0014): its name -
+    the id is derived, ``Key dates`` becoming ``SUB-key-dates`` - and the
+    four declarations part 06 §8.1 requires of every subject prompt. Only
+    the match is required to say something; the others may be filled in
+    later, in the prompt file, and validate reads them back either way."""
+
+    name: str = Field(min_length=1, max_length=80)
+    match: str = Field(min_length=1)
+    hazards: str = ""
+    audit_questions: str = ""
+    auto_promote: bool = False
+
+
+class SubjectCreated(BaseModel):
+    """The subject that now exists, by its id."""
+
+    id: str
+
+
 class SubjectListResponse(BaseModel):
     """The `SUBJECTS` tree's top level.
 
@@ -783,6 +803,24 @@ class ObservationResolution(BaseModel):
     text: str | None = None
 
 
+class RawUnitUpload(BaseModel):
+    """One raw unit added from the app (ADR-0013). ``path`` is relative to
+    ``raw/``, forward-slash, and keeps the folder a drop came from;
+    ``content`` is the bytes, base64 in transit as ``SampleUpload``'s are.
+    Capped higher than a style sample - scanned PDFs are large - and still
+    refused at the boundary rather than held in memory."""
+
+    path: str = Field(min_length=1, max_length=1024)
+    content: Base64Bytes = Field(max_length=64 * 1024 * 1024)
+
+
+class RawUnitOut(BaseModel):
+    """Where one added raw unit now sits, as the ledger will record it."""
+
+    path: str
+    size: int
+
+
 class SampleUpload(BaseModel):
     """One document uploaded as a style sample. ``content`` is the file's
     bytes, base64 in transit (a JSON body rather than multipart, so the
@@ -1002,6 +1040,9 @@ class IngestionStatusOut(BaseModel):
 
     units: list[UnitStatusOut] | None
     counts: dict[str, int]
+    # Files under ``raw/`` no normalize has numbered yet, as ledger paths;
+    # ``None`` with ``units``. What "already in the archive" can point at.
+    unnumbered: list[str] | None
     is_normalized: bool
     is_indexed: bool
     generated_at: str

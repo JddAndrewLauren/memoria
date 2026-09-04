@@ -133,6 +133,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ingestion/units": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingestion Add Unit
+         * @description Place one raw unit's bytes under ``raw/`` (ADR-0013). Not local-only:
+         *     the bytes travel, so this works hosted; only the normalize that numbers
+         *     the unit is local. Mints nothing - the next normalize does (ADR-0006).
+         *     **409** for a path already taken (nothing overwritten), **400** for a
+         *     path that is absolute, climbs out of ``raw/`` or names a dotfile,
+         *     **404** when no evidence corpus is configured.
+         */
+        post: operations["ingestion_add_unit_api_ingestion_units_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/locality": {
         parameters: {
             query?: never;
@@ -244,7 +269,19 @@ export interface paths {
          */
         get: operations["list_subjects_api_subjects_get"];
         put?: never;
-        post?: never;
+        /**
+         * Create Subject
+         * @description The author adding a subject from the dialog - ``+ New subject``
+         *     (ADR-0014). One file, ``subjects/<slug>/_subject.md``, one commit
+         *     through the write path's creation door, committed as the author -
+         *     ``repository_actor``, never a name in the payload (ADR-0002) - because
+         *     the click is the act, as it is for ``create_section``.
+         *
+         *     **409** for a subject already there (nothing written), **422** for a
+         *     name that makes no id, **500** for a write that cannot be attempted
+         *     (no git identity).
+         */
+        post: operations["create_subject_api_subjects_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1373,6 +1410,8 @@ export interface components {
             counts: {
                 [key: string]: number;
             };
+            /** Unnumbered */
+            unnumbered: string[] | null;
             /** Is Normalized */
             is_normalized: boolean;
             /** Is Indexed */
@@ -1598,6 +1637,33 @@ export interface components {
             text: string;
             /** Original Locator */
             original_locator: string;
+        };
+        /**
+         * RawUnitOut
+         * @description Where one added raw unit now sits, as the ledger will record it.
+         */
+        RawUnitOut: {
+            /** Path */
+            path: string;
+            /** Size */
+            size: number;
+        };
+        /**
+         * RawUnitUpload
+         * @description One raw unit added from the app (ADR-0013). ``path`` is relative to
+         *     ``raw/``, forward-slash, and keeps the folder a drop came from;
+         *     ``content`` is the bytes, base64 in transit as ``SampleUpload``'s are.
+         *     Capped higher than a style sample - scanned PDFs are large - and still
+         *     refused at the boundary rather than held in memory.
+         */
+        RawUnitUpload: {
+            /** Path */
+            path: string;
+            /**
+             * Content
+             * Format: base64
+             */
+            content: string;
         };
         /**
          * ReadOverlayOut
@@ -2162,6 +2228,43 @@ export interface components {
             sample_sources: string[];
         };
         /**
+         * SubjectCreate
+         * @description The author adding a subject from the dialog (ADR-0014): its name -
+         *     the id is derived, ``Key dates`` becoming ``SUB-key-dates`` - and the
+         *     four declarations part 06 §8.1 requires of every subject prompt. Only
+         *     the match is required to say something; the others may be filled in
+         *     later, in the prompt file, and validate reads them back either way.
+         */
+        SubjectCreate: {
+            /** Name */
+            name: string;
+            /** Match */
+            match: string;
+            /**
+             * Hazards
+             * @default
+             */
+            hazards: string;
+            /**
+             * Audit Questions
+             * @default
+             */
+            audit_questions: string;
+            /**
+             * Auto Promote
+             * @default false
+             */
+            auto_promote: boolean;
+        };
+        /**
+         * SubjectCreated
+         * @description The subject that now exists, by its id.
+         */
+        SubjectCreated: {
+            /** Id */
+            id: string;
+        };
+        /**
          * SubjectListResponse
          * @description The `SUBJECTS` tree's top level.
          *
@@ -2413,6 +2516,39 @@ export interface operations {
             };
         };
     };
+    ingestion_add_unit_api_ingestion_units_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RawUnitUpload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RawUnitOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     locality_api_locality_get: {
         parameters: {
             query?: never;
@@ -2511,6 +2647,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SubjectListResponse"];
+                };
+            };
+        };
+    };
+    create_subject_api_subjects_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubjectCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

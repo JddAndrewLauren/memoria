@@ -29,13 +29,21 @@ over the same ledger at once. ``run_rebuild`` passes no embedder on purpose
 - embeddings enter by choice (ADR-0007), and the CLI's ``memoria rebuild``
 stays the only path that loads the model - and it does not write the
 ``changes/`` projection, which is likewise the CLI's alone.
+
+``add_raw_unit`` (ADR-0013) is the one thing here that writes: a raw unit's
+bytes placed under ``raw/`` from the app, so the author need not copy a file
+into the archive by hand. Original state outside the write path, never
+committed and never numbered here - the status above stays derived.
 """
 
 from __future__ import annotations
 
+import os
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -136,9 +144,32 @@ class IngestionStatus:
     # paragraph is in the index) and ``extracted_complete`` (units whose
     # every real paragraph the extraction has read).
     counts: dict[str, int]
+    # Files under ``raw/`` the ledger has not numbered yet - dropped in by
+    # hand, fetched by a script, or added from the app (ADR-0013) with no
+    # normalize since. The one fact about the archive the ledger cannot
+    # carry, and the reason an author sees "already in the archive" for a
+    # file no other surface shows. Ledger-relative paths (``raw/...``),
+    # sorted as ``manifest.sync`` will number them; ``None`` with ``units``.
+    unnumbered: tuple[str, ...] | None
     is_normalized: bool
     is_indexed: bool
     generated_at: str
+
+
+def _unnumbered_paths(evidence_root: Path, entries: list[ManifestEntry]) -> tuple[str, ...]:
+    """The same walk ``manifest.sync`` makes, without the hashing or the
+    append: every file under ``raw/`` but the ledger itself, less the
+    paths the ledger lists."""
+    manifest_path = evidence_root / DEFAULT_MANIFEST_RELATIVE_PATH
+    raw_root = manifest_path.parent
+    listed = {entry.path for entry in entries}
+    return tuple(
+        sorted(
+            p.relative_to(evidence_root).as_posix()
+            for p in raw_root.rglob("*")
+            if p.is_file() and p != manifest_path and p.relative_to(evidence_root).as_posix() not in listed
+        )
+    )
 
 
 def _converted_state(
@@ -203,6 +234,7 @@ def ingestion_status(repository: Repository) -> IngestionStatus:
         return IngestionStatus(
             units=None,
             counts=_tally(()),
+            unnumbered=None,
             is_normalized=normalized,
             is_indexed=built,
             generated_at=generated_at,
@@ -241,6 +273,7 @@ def ingestion_status(repository: Repository) -> IngestionStatus:
     return IngestionStatus(
         units=tuple(units),
         counts=_tally(units),
+        unnumbered=_unnumbered_paths(repository.evidence_root, entries),
         is_normalized=normalized,
         is_indexed=built,
         generated_at=generated_at,
@@ -361,3 +394,81 @@ def run_rebuild(repository: Repository) -> RunOutcome:
         },
         elapsed_seconds=time.monotonic() - started,
     )
+
+
+# --- adding a raw unit from the web (ADR-0013) ----------------------------------
+#
+# The one write in this module, and deliberately not a durable one: ``raw/``
+# is Original state outside ``write.DURABLE_PATHS``, the evidence root may
+# live outside the book repository, and nothing is committed - the same
+# posture as ``normalize`` materializing an email attachment. The manifest
+# is not touched: the ledger numbers a unit on first sight (ADR-0006), so
+# the next normalize pass mints the id, never the caller.
+
+
+class RawUnitError(ValueError):
+    """A path a raw unit may not be written at."""
+
+
+class RawUnitExists(Exception):
+    """A raw unit already sits at that path; nothing was written."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(f"{path} already exists - nothing was written")
+        self.path = path
+
+
+@dataclass(frozen=True)
+class AddedRawUnit:
+    """One raw unit placed under ``raw/``, at the path the ledger will record."""
+
+    path: str
+    size: int
+
+
+def _validated_relative_path(relative_path: str) -> PurePosixPath:
+    if "\\" in relative_path or "\0" in relative_path:
+        raise RawUnitError(f"{relative_path!r} is not a forward-slash relative path")
+    rel = PurePosixPath(relative_path)
+    if not relative_path.strip() or rel.is_absolute() or not rel.parts:
+        raise RawUnitError(f"{relative_path!r} is not a relative path under raw/")
+    for part in rel.parts:
+        if part == "..":
+            raise RawUnitError(f"{relative_path!r} may not climb out of raw/")
+        if part.startswith("."):
+            raise RawUnitError(
+                f"{relative_path!r} names a hidden file or folder - the ledger numbers "
+                "every file under raw/, so a dotfile is refused rather than numbered"
+            )
+    if str(rel) == PurePosixPath(DEFAULT_MANIFEST_RELATIVE_PATH).name:
+        raise RawUnitError(f"{relative_path!r} is the ledger itself")
+    return rel
+
+
+def add_raw_unit(repository: Repository, relative_path: str, data: bytes) -> AddedRawUnit:
+    """Place one raw unit's bytes at ``raw/<relative_path>`` under the
+    evidence root, creating parent folders so a dropped folder keeps its
+    shape. Refuses a path already taken (``RawUnitExists``) rather than
+    overwriting, and a path that is absolute, climbs out, or names a dotfile
+    (``RawUnitError``). Raises ``NoEvidenceRoot`` when no corpus is
+    configured. The manifest is not touched: the next normalize pass numbers
+    the unit (ADR-0006)."""
+    evidence_root = require_evidence_root(repository)
+    rel = _validated_relative_path(relative_path)
+    raw_root = (evidence_root / "raw").resolve()
+    target = (raw_root / rel).resolve()
+    if not target.is_relative_to(raw_root):
+        raise RawUnitError(f"{relative_path!r} may not climb out of raw/")
+    ledger_path = f"raw/{rel}"
+    if target.exists():
+        raise RawUnitExists(ledger_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        os.replace(tmp, target)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+    return AddedRawUnit(path=ledger_path, size=len(data))

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import IngestionPage from "./IngestionPage";
+import SourcesPage from "./SourcesPage";
 
 const STATUS = {
   units: [
@@ -63,6 +63,7 @@ const STATUS = {
     indexed: 2,
     extracted_complete: 1,
   },
+  unnumbered: [],
   is_normalized: true,
   is_indexed: true,
   generated_at: "2026-09-03T10:00:00+00:00",
@@ -86,8 +87,8 @@ function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/ingestion"]}>
-        <IngestionPage />
+      <MemoryRouter initialEntries={["/sources"]}>
+        <SourcesPage />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -95,7 +96,11 @@ function renderPage() {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("the ingestion status page", () => {
+async function showUnits() {
+  fireEvent.click(await screen.findByRole("tab", { name: "Units" }));
+}
+
+describe("the Sources page", () => {
   it("lists every ledger unit with its three stages, failed ones included", async () => {
     stubFetch((url) => {
       if (url.includes("/api/ingestion")) return json(STATUS);
@@ -103,6 +108,7 @@ describe("the ingestion status page", () => {
       return json({ detail: "not found" }, 404);
     });
     renderPage();
+    await showUnits();
 
     const table = await screen.findByRole("table");
     const rows = within(table).getAllByRole("row").slice(1);
@@ -154,6 +160,7 @@ describe("the ingestion status page", () => {
     renderPage();
 
     expect(await screen.findByText(/index not built/)).toBeInTheDocument();
+    await showUnits();
     expect(screen.getAllByText("not built").length).toBeGreaterThan(0);
   });
 
@@ -171,7 +178,28 @@ describe("the ingestion status page", () => {
       return json({ is_local: false });
     });
     renderPage();
+    await showUnits();
     expect(await screen.findByText(/The ledger is empty/)).toBeInTheDocument();
+  });
+
+  it("says how many raw files the ledger has not numbered yet", async () => {
+    stubFetch((url) => {
+      if (url.includes("/api/ingestion")) return json({ ...STATUS, unnumbered: ["raw/a.eml", "raw/b.eml"] });
+      return json({ is_local: false });
+    });
+    renderPage();
+    expect(await screen.findByRole("note")).toHaveTextContent("2 files in raw/ are not numbered yet");
+  });
+
+  it("offers Add sources whether or not the connection is local (ADR-0013)", async () => {
+    stubFetch((url) => {
+      if (url.includes("/api/ingestion")) return json(STATUS);
+      return json({ is_local: false });
+    });
+    renderPage();
+    await showUnits();
+    await screen.findByRole("table");
+    expect(screen.getByRole("button", { name: "Add sources…" })).toBeInTheDocument();
   });
 
   it("offers Normalize and Rebuild index only on a local connection", async () => {
@@ -180,6 +208,7 @@ describe("the ingestion status page", () => {
       return json({ is_local: false });
     });
     const { unmount } = renderPage();
+    await showUnits();
     await screen.findByRole("table");
     expect(screen.queryByRole("button", { name: "Normalize" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Rebuild index" })).not.toBeInTheDocument();
@@ -240,5 +269,57 @@ describe("the ingestion status page", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Rebuild index: A run is already in progress",
     );
+  });
+});
+
+describe("the Sources page's Files view", () => {
+  const WITH_FILES = {
+    ...STATUS,
+    units: [STATUS.units[0], STATUS.units[1]],
+    unnumbered: ["raw/letters/1952/waiting.eml", "raw/enron/x.eml"],
+  };
+
+  it("opens on the file tree, numbered or not, with the counts up top", async () => {
+    stubFetch((url) => {
+      if (url.includes("/api/ingestion")) return json(WITH_FILES);
+      return json({ is_local: false });
+    });
+    renderPage();
+
+    expect(await screen.findByText("4 files · 2 not numbered yet")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-selected", "true");
+    // Few top-level folders: they start open; deeper ones start closed.
+    expect(screen.getByText("bad.pdf")).toBeInTheDocument();
+    expect(screen.queryByText("waiting.eml")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /1952\// }));
+    expect(screen.getByText("waiting.eml")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "SRC-000002" })).toHaveAttribute("href", "/sources/SRC-000002");
+    expect(screen.getByText("SRC-000001 · failed")).toBeInTheDocument();
+  });
+
+  it("folds a folder away and filters by path", async () => {
+    stubFetch((url) => {
+      if (url.includes("/api/ingestion")) return json(WITH_FILES);
+      return json({ is_local: false });
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /enron\// }));
+    expect(screen.queryByText("x.eml")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Filter by path"), { target: { value: "enron" } });
+    expect(screen.getByText("x.eml")).toBeInTheDocument();
+    expect(screen.queryByText("one.txt")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Filter by path"), { target: { value: "zzz" } });
+    expect(screen.getByText("No file matches.")).toBeInTheDocument();
+  });
+
+  it("says so when raw/ is empty", async () => {
+    stubFetch((url) => {
+      if (url.includes("/api/ingestion")) return json({ ...STATUS, units: [], unnumbered: [] });
+      return json({ is_local: false });
+    });
+    renderPage();
+    expect(await screen.findByText(/Nothing under/)).toBeInTheDocument();
   });
 });

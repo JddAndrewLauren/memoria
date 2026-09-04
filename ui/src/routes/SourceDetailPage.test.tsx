@@ -370,6 +370,7 @@ describe("the source viewer's ingestion badges", () => {
       },
     ],
     counts: { out_of_date: 1 },
+    unnumbered: [],
     is_normalized: true,
     is_indexed: true,
     generated_at: "2026-09-03T10:00:00+00:00",

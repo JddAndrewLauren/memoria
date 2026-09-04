@@ -9,29 +9,31 @@ and badged statements) and match terms (the system's only alias store).
 import pytest
 
 from memoria.subjects import (
-    MEMORIA_NOTE,
+    add_subject,
     BUILTIN_SUBJECTS,
-    Entry,
-    OverlayAct,
-    Subject,
-    SubjectError,
     classify_match_term,
+    Entry,
     entry_to_markdown,
-    SUBJECTS_RELATIVE_PATH,
-    Statement,
     find_entry_path,
     is_audit_visible,
     is_seeded,
     load_all_subjects,
     load_entry,
     load_subject,
+    MEMORIA_NOTE,
+    OverlayAct,
     parse_entry,
     parse_statements,
     parse_subject,
     serve_entry,
     set_match_terms,
+    Statement,
+    Subject,
     subject_path,
+    subject_slug,
     subject_to_markdown,
+    SubjectError,
+    SUBJECTS_RELATIVE_PATH,
     write_builtin_subjects,
 )
 from memoria.repository import Repository
@@ -747,3 +749,86 @@ def test_an_entry_reference_or_relation_is_a_valid_match_term(tmp_path):
 
     assert isinstance(result, Written)
     assert load_entry(repository, "SUB-people", "bob").match_terms == terms
+
+
+# --- a new subject (ADR-0014) --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("name", "slug"),
+    [("Places", "places"), ("Key dates", "key-dates"), ("  Côte d'Azur  ", "cote-d-azur")],
+)
+def test_subject_slug_derives_the_id_from_the_name(name, slug):
+    assert subject_slug(name) == slug
+
+
+@pytest.mark.parametrize("name", ["", "   ", "---", "2024", "!!!"])
+def test_subject_slug_refuses_a_name_that_makes_no_id(name):
+    with pytest.raises(SubjectError):
+        subject_slug(name)
+
+
+def test_add_subject_writes_the_prompt_through_the_write_path(tmp_path):
+    """One file, one commit, as the actor - and a prompt `parse_subject`
+    reads back whole, so the new subject is a subject like the five
+    built-ins to validate and to the extraction."""
+    import subprocess
+
+    repository = _entry_repo(tmp_path)
+
+    subject = add_subject(
+        repository,
+        "Key dates",
+        match="A date the archive returns to.",
+        hazards="",
+        audit_questions="Is the date the entry's?",
+        auto_promote=True,
+        actor=AUTHOR,
+    )
+
+    assert subject.id == "SUB-key-dates"
+    assert load_subject(repository, "SUB-key-dates") == subject
+    assert [s.id for s in load_all_subjects(repository) if s.id == "SUB-key-dates"]
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert status.strip() == ""
+    author = subprocess.run(
+        ["git", "log", "-1", "--format=%an"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout.strip()
+    assert author == "Author"
+
+
+def test_add_subject_never_flattens_a_subject_already_there(tmp_path):
+    repository = _entry_repo(tmp_path)
+    before = subject_path(repository, "SUB-people").read_text(encoding="utf-8")
+
+    with pytest.raises(SubjectError, match="already exists"):
+        add_subject(
+            repository,
+            "People",
+            match="x",
+            hazards="",
+            audit_questions="",
+            auto_promote=False,
+            actor=AUTHOR,
+        )
+
+    assert subject_path(repository, "SUB-people").read_text(encoding="utf-8") == before
+
+
+def test_add_subject_refuses_an_unattributed_actor(tmp_path):
+    repository = _entry_repo(tmp_path)
+
+    with pytest.raises(WriteError):
+        add_subject(
+            repository,
+            "Places",
+            match="x",
+            hazards="",
+            audit_questions="",
+            auto_promote=False,
+            actor=Actor(name="", email="a@b.test"),
+        )
+
+    assert not subject_path(repository, "SUB-places").exists()
