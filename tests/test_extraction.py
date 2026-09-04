@@ -116,22 +116,57 @@ def test_no_core_module_imports_a_model_client():
     Like that guard, it is against drift rather than against an adversary: a
     `__import__` built from a string would walk past it. The runtime half of
     the claim is the socket test below, which is the one that actually holds.
+
+    ADR-0010 admits exactly one exception: `memoria.model`, the seam a direct
+    run reaches a model through, which imports the SDK lazily and only when
+    the author switched direct runs on. It is skipped here and held to its
+    own shape by `test_the_model_seam_is_one_module_and_imports_the_sdk_lazily`;
+    everything else in the core is still held to no model client at all.
     """
-    forbidden = {"anthropic", "openai", "httpx", "requests", "urllib", "socket"}
     for path in sorted(SRC_ROOT.rglob("*.py")):
-        if path.parts[-2] in ("mcp", "web"):
+        if path.parts[-2] in ("mcp", "web") or path.name == "model.py":
             continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            names = []
-            if isinstance(node, ast.Import):
-                names = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                names = [node.module]
-            for name in names:
-                assert name.split(".")[0] not in forbidden, (
-                    f"{path.name} imports {name}: the core calls no model"
-                )
+        for name in _imports(path):
+            assert name.split(".")[0] not in MODEL_CLIENTS, (
+                f"{path.name} imports {name}: the core calls no model"
+            )
+
+
+MODEL_CLIENTS = {"anthropic", "openai", "httpx", "requests", "urllib", "socket"}
+
+
+def _imports(path, *, top_level_only=False):
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    nodes = tree.body if top_level_only else list(ast.walk(tree))
+    names = []
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            names += [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.append(node.module)
+    return names
+
+
+def test_the_model_seam_is_one_module_and_imports_the_sdk_lazily():
+    """ADR-0010: the seam is `memoria.model`, and it is the whole of the
+    exception. Only the drivers may reach for it, and only for its types;
+    the SDK import inside it sits in the provider function, never at module
+    scope, so importing the core never loads a model client."""
+    for path in sorted(SRC_ROOT.rglob("*.py")):
+        if path.parts[-2] in ("mcp", "web") or path.name in ("model.py", "drivers.py"):
+            continue
+        for name in _imports(path):
+            assert name != "memoria.model" and not name.startswith("memoria.model."), (
+                f"{path.name} imports memoria.model: only the drivers reach the seam"
+            )
+    seam = SRC_ROOT / "model.py"
+    assert seam.is_file()
+    assert all(
+        name.split(".")[0] not in MODEL_CLIENTS for name in _imports(seam, top_level_only=True)
+    ), "memoria.model imports the SDK at module scope; it must be lazy"
+    assert any(name == "anthropic" for name in _imports(seam)), (
+        "memoria.model no longer imports the SDK anywhere - the seam has no provider"
+    )
 
 
 def test_the_whole_pass_leaves_no_process_and_opens_no_socket(tmp_path, monkeypatch):
