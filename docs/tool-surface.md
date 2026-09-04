@@ -42,6 +42,7 @@ write, and they exist because there is nowhere else to put them.
 | `extraction_promote_candidate(candidate_id, entry_slug)` | **Forced** — issue #17 |
 | `extraction_promote_cluster(cluster_id, subject_id, entry_slug)` | **Forced** — issue #17 |
 | `writing_style()`, `style_status()`, `style_brief()`, `style_record(observations)` | **Forced** — ADR-0009, below |
+| `model_status()`, `extraction_run(limit)`, `audit_run(...)`, `style_run()` | **Forced** — ADR-0010, below |
 
 The last five are the author's side of the pass rather than the pass itself.
 #17 keeps rejected candidates and unplaced forms *enumerable* and offers
@@ -52,20 +53,27 @@ act only on an id the author named.
 
 ### Why they are on this server
 
-Because there is no other model in the system. `poc-plan.md` §3 forbids a
-model-driving service, and part 08 §12.1 forbids anything needing a model
-from running unasked, so the extraction is an author-launched act inside a
-Claude Code session — and the session's only route to the archive is this
-server.
+Because, by default, there is no other model in the system. `poc-plan.md` §3
+forbids a model-driving service, and part 08 §12.1 forbids anything needing a
+model from running unasked, so the extraction is an author-launched act inside
+a Claude Code session — and the session's only route to the archive is this
+server. ADR-0010's direct run (below) does not change that: it is the same
+author-launched act with Memoria holding the model's end of the conversation,
+and only when the author switched it on.
 
 ### The rule that shapes every signature
 
-**No adapter can call a model**, and this one does not. Every tool is one of
-three things: it *serves* (paragraphs, prompts, a summary task), it *records*
-what the model produced, or it is local computation over rows
-(`extraction_derive`, `extraction_finish`). There is no `generate_` anything.
-This is the same finding that decided `search_global(summarize=true)` serves a
-memoized summary rather than composing one (#74).
+**No adapter can call a model**, and this one does not — with one deliberate,
+named widening (ADR-0010): the `*_run` tools ask `memoria.model`'s seam for a
+model at the point of use and hand it to a driver, when the author switched
+direct runs on, and refuse otherwise. Every other tool is one of three things:
+it *serves* (paragraphs, prompts, a summary task), it *records* what the model
+produced, or it is local computation over rows (`extraction_derive`,
+`extraction_finish`). There is no `generate_` anything: a direct run records
+through the same `record_*` functions and validation the serve/record tools
+use. This is the same finding that decided `search_global(summarize=true)`
+serves a memoized summary rather than composing one (#74) — and a direct run
+does not compose one on that call either.
 
 ### What the model sends back
 
@@ -253,6 +261,7 @@ manuscript paragraph carries no durable reference to record — the module
 docstring's "no paragraph carries a durable identity" applies here exactly as
 it does to the staleness map. No session id is minted for an audit call
 either, so no `sessions/` directory appears from calling these tools alone.
+`audit_run` (ADR-0010, below) is the exception: it is metered, so it ledgers.
 
 ### The author-testimony policy is served, not enforced
 
@@ -322,6 +331,87 @@ skill holds no copy, for the reason given under the extraction above.
 - `style_brief` — every `SRC-` id and sample path served: the author's own
   words entering a model's context.
 - `style_status` and `style_record` — nothing; neither serves evidence.
+
+---
+
+## Direct-run tools — forced, ADR-0010
+
+```
+model_status() -> str
+extraction_run(limit: int = 20) -> str
+audit_run(chapter_number, section_number=None, paragraph_index=None, limit=20) -> str
+style_run() -> str
+```
+
+A fifth class, and the one that reaches a generative model. A **direct run**
+(CONTEXT.md) is a pass Memoria executes itself against a metered model API —
+the same `brief`, `pending_*` and `record_*` core functions the serve/record
+tools call, in the skill's order, with `memoria.model`'s `ModelFn` between the
+serve and the record (`memoria.drivers`). The prompts are served verbatim and
+unchanged, so the memo keys are the same keys a session run writes; every
+reading passes the same validation. The server holds no model: each tool is
+`require_model` → one driver call → render, and `require_model` is the point of
+use, refusing with a `ToolError` that names Settings > Model.
+
+**Off by default.** The switch, the model id and the stored key live in
+`.memoria/model.json`, beside the index, machine-local and gitignored, written
+0600 by the app's Settings > Model and never through `memoria.write`;
+`ANTHROPIC_API_KEY` in the server's environment overrides the stored key. A key
+alone does not switch direct runs on. `model_status` says whether a run would
+succeed and, if not, why; it never shows the key.
+
+### Where the skills stand
+
+The `extraction` and `writing-style` skills call `model_status()` **after** the
+author's go, never before it, and hand the pass to `extraction_run` /
+`style_run` only when it says ready; otherwise they drive the serve/record
+tools as before. They never tell the author to switch direct runs on. The audit
+has no skill; `audit_run` is reached like `audit_pending`, by something naming a
+target the author asked to audit.
+
+### Bounded per call, resumable
+
+`extraction_run` makes at most `limit` model calls: one per paragraph while any
+awaits extraction, then — once none do — it closes the pass (`finish_pass`, run
+again on every summary-phase call rather than any state being carried) and
+writes up to `limit` summaries, leaves first. It reports `phase: paragraphs`,
+`summaries` or `done`, and the caller calls again. `audit_run` answers up to
+`limit` of a target's not-current judgements per call. A refused, truncated or
+off-schema reply is one rejected item, named by anchor with its reason, and
+the run goes on; a provider failure is a `ToolError` with what was recorded
+kept. Nothing is lost between calls and nothing repeats, for the extraction's
+own reason: what is left is a query over what is absent.
+
+### What each refuses
+
+- All four: nothing while direct runs are off, no key is set, or the `llm`
+  extra is not installed — a `ToolError` naming Settings > Model and the reason.
+- `extraction_run` — a `limit` below one.
+- `audit_run` — a passage without its section, as `audit_pending` does; a
+  `limit` below one.
+- `style_run` — nothing to analyse, as `style_brief` does.
+
+### What is ledgered
+
+Every metered call, as a `model_call` line: the pass it served, the provider,
+the model that answered, input and output tokens, the cache counts, the stop
+reason, and the anchor or cluster it was about. That is part 13 §24.5's "the
+author should be able to tell whether a task is using subscription capacity or
+metered API usage", made mechanical. The line carries **no `served` key**:
+`supplied_context` reads every event with one as a served read, and this line
+records spend, not supply. What reached the model's context is ledgered by the
+same `extraction_brief`, `extraction_next_paragraphs`,
+`extraction_next_summary`, `style_brief` and `read` lines the serve tools
+write — the drivers write those too, including a `read` for each gathered
+anchor a direct audit inlines where a session would `read(ref)` it.
+
+### Reachable without the MCP server
+
+`memoria.drivers.run_extraction`, `run_audit` and `run_style` take a
+`Repository`, a `ModelFn` and a session id. The app's `POST /api/extraction/run`,
+`POST /api/sections/{id}/audit` and `POST /api/style/analyse` call the same three,
+under one ledger session per server process, and answer 409 while direct runs
+are off.
 
 ---
 

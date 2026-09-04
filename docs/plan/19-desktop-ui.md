@@ -357,8 +357,10 @@ commit d41f2a9            the git commit for an author edit
   survives because it is a git fact. Of §19.5's six right-rail cards, only `PURPOSE`
   reads a file — it reads the brief — and the other five compose live.
 - `Settings` and `Feedback`. **Settings adopted 2026-09-04** (ADR-0009): the
-  footer's `⚙ Settings` opens a dialog whose one setting is the writing style, a
-  durable file the dialog edits through the write path. `Feedback` stays unresolved.
+  footer's `⚙ Settings` opens a dialog whose first setting is the writing style, a
+  durable file the dialog edits through the write path. **Its second row, the same
+  day** (ADR-0010): Model — the switch for direct runs, the model id and the API key,
+  machine-local and never a durable file. `Feedback` stays unresolved.
 
 **Runs ahead of decisions that are still open. Recorded, not resolved.**
 

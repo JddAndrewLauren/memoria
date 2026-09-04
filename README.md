@@ -44,9 +44,11 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 ```
 
-`[dev]` pulls in the `[mcp]`, `[web]`, `[convert]` and `[graph]` extras, so
-the MCP server, the FastAPI app below, the docx/pdf converters and the
-extraction's clustering are all importable and their tests run. `pip install
+`[dev]` pulls in the `[mcp]`, `[web]`, `[convert]`, `[graph]` and `[llm]`
+extras, so the MCP server, the FastAPI app below, the docx/pdf converters,
+the extraction's clustering and the model seam a direct run calls through
+(ADR-0010; nothing calls it unless the author switched direct runs on under
+Settings > Model) are all importable and their tests run. `pip install
 memoria` on its own installs the core and the CLI only — the core's own
 runtime dependencies are PyYAML, `sqlite-vec` and `fastembed` (the semantic
 index, #81, ADR-0007; installing the latter pulls in `onnxruntime` but
@@ -147,6 +149,15 @@ It speaks JSON-RPC over stdio, so it is not interactive — a client drives it.
 **There are no records to read on a fresh checkout**, because nothing produces
 them (see *No evidence corpus* above). `read` says so rather than failing
 obscurely.
+
+**The server calls no model by default.** Every pass that needs one — the
+extraction, an audit, the writing-style analysis — runs as a conversation the
+session drives. `model_status()` says whether the author switched **direct
+runs** on under Settings > Model in the app (`docs/adr/0010-…`); when it says
+ready, `extraction_run`, `audit_run` and `style_run` execute the pass on the
+server against the author's own metered API key, bounded per call and
+ledgered per model call. The `extraction` and `writing-style` skills check it
+after the author says go. `docs/tool-surface.md` has the four tools.
 
 ## The FastAPI app
 
@@ -270,7 +281,16 @@ author's own writing an analysis reads — sources in the archive, or documents
 uploaded for their style alone — and walks the observations that analysis
 proposed, one at a time, to confirm, change or discard. The analysis itself
 runs as a Claude Code session (`/writing-style`, over `style_brief` /
-`style_record`), never from the app.
+`style_record`) — or, when direct runs are on, from an *Analyse now* button.
+
+The dialog's second setting is **Model** (`docs/adr/0010-…`): the switch that
+lets Memoria call a model directly, off by default; the model it calls; and
+the API key it calls with, stored on this machine beside the index (0600,
+gitignored) and never shown back — or taken from `ANTHROPIC_API_KEY` in the
+shell that starts the server, which overrides it. Once ready, the panel shows
+the extraction's numbers with a *Run extraction* button, Review and the
+Section view gain *Run audit*, and every run reports what it metered. Nothing
+under `ui/` reaches a model: each button posts to the API.
 
 Styling is Tailwind v4, tokens declared in `ui/src/index.css`'s `@theme`
 block and extracted from `docs/design/memoria-desktop.dc.html` (the canvas
@@ -355,21 +375,28 @@ paragraph of the archive for what it mentions, and from that Memoria proposes
 candidates under every subject, clusters offered under Themes and Arcs, and
 match terms on the entries that already exist.
 
-It is **author-launched and runs nowhere else**: there is no scheduler and no
-model-driving service (`docs/poc-plan.md` §3), and nothing that needs a model
-runs unasked (part 08 §12.1). Run it from a Claude Code session in the
-repository with the `extraction` skill:
+It is **author-launched**: there is no scheduler and no model-driving service
+(`docs/poc-plan.md` §3), and nothing that needs a model runs unasked (part 08
+§12.1). Run it from a Claude Code session in the repository with the
+`extraction` skill:
 
 ```
 /extraction
 ```
 
 The skill drives the `extraction_*` tools on the MCP server, which hand
-paragraphs out and take structured readings back — the server itself calls no
-model and cannot. A pass that runs out of capacity stops cleanly and resumes
-where it stopped; nothing is lost and nothing repeats, because what is left to
-do is a query over what has no cached reading rather than a cursor to keep.
-`docs/tool-surface.md` records the tools and why they are shaped as they are.
+paragraphs out and take structured readings back — by default the server
+itself calls no model. A pass that runs out of capacity stops cleanly and
+resumes where it stopped; nothing is lost and nothing repeats, because what is
+left to do is a query over what has no cached reading rather than a cursor to
+keep. `docs/tool-surface.md` records the tools and why they are shaped as they
+are.
+
+With **direct runs** switched on under Settings > Model (`docs/adr/0010-…`),
+the same pass can run on the server against the author's own metered API key
+— from the *Run extraction* button in Settings, or from `extraction_run` when
+the skill finds `model_status()` ready. Same prompts, same memo keys, same
+validation; one bounded step per call, resumable, every model call ledgered.
 
 What the pass produces waits for the author. Candidates above the recurrence
 filter, the ones it set aside, the mentions nothing licensed and every
