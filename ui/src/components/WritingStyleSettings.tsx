@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ApiError,
@@ -47,14 +47,24 @@ function WritingStyleEditor({ style }: { style: StyleOut }) {
   const [observations, setObservations] = useState<string[]>(style.observations);
   const [sampleSources, setSampleSources] = useState<string[]>(style.sample_sources);
   const [token, setToken] = useState(style.token);
+  const base = useRef(style);
 
-  // A fresh read - after a save, a confirm, or a reload following a 409 -
-  // replaces the buffer and, above all, the token.
+  // A fresh snapshot arrives whenever the query cache changes - a save, an
+  // uploaded sample, a confirm/discard, or a reload following a 409. Adopt
+  // its value for any field the author has not touched, but keep a field
+  // they have edited so none of those actions silently discards work in
+  // progress. The token always advances: the next write must present it.
   useEffect(() => {
-    setDirection(style.direction);
-    setObservations(style.observations);
-    setSampleSources(style.sample_sources);
+    const previous = base.current;
+    setDirection((current) => (current === previous.direction ? style.direction : current));
+    setObservations((current) =>
+      current.join("\n") === previous.observations.join("\n") ? style.observations : current,
+    );
+    setSampleSources((current) =>
+      current.join("\n") === previous.sample_sources.join("\n") ? style.sample_sources : current,
+    );
     setToken(style.token);
+    base.current = style;
   }, [style]);
 
   const save = useMutation({

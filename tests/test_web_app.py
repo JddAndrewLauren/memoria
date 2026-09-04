@@ -1942,11 +1942,12 @@ def test_a_sample_source_that_names_no_record_is_a_400(tmp_path):
 
 
 def _propose(repository, *observations):
-    from memoria.style import RecordedObservation, record_observations
+    from memoria.style import RecordedObservation, brief, record_observations
 
     record_observations(
         repository,
         [RecordedObservation("rhythm", text, "Nobody dared touch it.") for text in observations],
+        brief(repository).analysis_key,
     )
 
 

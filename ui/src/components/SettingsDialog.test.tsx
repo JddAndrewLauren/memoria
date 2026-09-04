@@ -225,6 +225,33 @@ describe("the settings dialog", () => {
     expect(screen.getAllByText("Stay plain, and short.").length).toBeGreaterThan(0);
   });
 
+  it("keeps typed direction when a proposal is confirmed, then saves with the fresh token", async () => {
+    const calls = stubFetch({ current: style() });
+    renderDialog();
+    const direction = await screen.findByLabelText("Direction");
+
+    // The author edits the direction, then acts on a proposal in the same
+    // panel - which refreshes the style cache with a new token.
+    fireEvent.change(direction, { target: { value: "No hindsight." } });
+    const card = screen.getByRole("group", { name: "Proposed observation" });
+    fireEvent.click(within(card).getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(screen.getByText("2 of 2")).toBeInTheDocument());
+
+    // The typed direction survived that refresh...
+    expect(screen.getByLabelText("Direction")).toHaveValue("No hindsight.");
+
+    // ...and the save carries the token the confirm advanced to, not the stale one.
+    fireEvent.click(screen.getByRole("button", { name: "Save writing style" }));
+    await screen.findByText("Saved.");
+    const put = calls.find((call) => call.method === "PUT");
+    expect(put?.body).toEqual({
+      token: "tok-2",
+      direction: "No hindsight.",
+      observations: ["Keep sentences short.", "End on the noun."],
+      sample_sources: ["SRC-000184"],
+    });
+  });
+
   it("discards without touching the style", async () => {
     const calls = stubFetch({ current: style({ pending: [style().pending[0]] }) });
     renderDialog();

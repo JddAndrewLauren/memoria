@@ -29,9 +29,10 @@ model, and part 08 §12.1's rule is that nothing needing a model runs unasked.
 ## The brief
 
 Call `style_brief()` **once** and keep it. It carries the analysis prompt,
-what the style already says, and every sample verbatim - the chosen sources'
-paragraphs (the first eighty of each; it says when it truncated) and every
-uploaded document.
+what the style already says, the **analysis key** - keep it, `style_record`
+needs it back - and every sample verbatim: the chosen sources' paragraphs
+(the first eighty of each; it says when it truncated) and every uploaded
+document.
 
 Do not paraphrase the prompt, summarize it, or substitute instructions of
 your own; it is served verbatim so that there is exactly one version of it.
@@ -45,10 +46,14 @@ Do not propose again what the style already says.
    can follow, and an `example` quoted **verbatim** from a sample. The
    example is checked: one that does not occur in the samples exactly as you
    quote it is refused, and that is the right outcome.
-3. `style_record(observations=[...])`, the whole batch in one call.
-4. Read the outcome. Rejected elements name their reason; re-send those
-   **once**, corrected. Do not re-send accepted ones - a second batch under
-   the same samples replaces the first.
+3. `style_record(observations=[...], key=...)`, the whole batch in one call,
+   with the analysis key the brief served. If the author changed the samples
+   since the brief, the whole batch is refused: fetch `style_brief()` again
+   and analyse what it now serves.
+4. Read the outcome. If any element was rejected, correct those and re-send
+   the **whole batch once** - the accepted elements alongside the corrected
+   ones. A second batch under the same key replaces the first, so any
+   element left out is dropped, not kept.
 
 ## The report
 

@@ -760,6 +760,14 @@ def render_style_brief(result: style.Brief) -> str:
             "",
             current,
         ]
+    lines += [
+        "",
+        "## The analysis key",
+        "",
+        "Pass this back to `style_record` as `key`; it binds the record to the "
+        "samples below, and a batch is refused if they change in between:",
+        result.analysis_key,
+    ]
     lines += ["", f"## The samples ({len(result.samples)})", ""]
     for sample in result.samples:
         lines += [f"### {sample.ref} - {sample.title}", ""]
@@ -773,20 +781,26 @@ def render_style_brief(result: style.Brief) -> str:
 
 
 @mcp.tool()
-def style_record(observations: list[style.RecordedObservation]) -> str:
+def style_record(observations: list[style.RecordedObservation], key: str) -> str:
     """Record one batch of proposed observations for the author to confirm.
+
+    ``key`` is the analysis key ``style_brief`` served; it binds the record
+    to the samples the brief carried, and the whole batch is refused if the
+    author changed the samples in between.
 
     Send the whole batch in one call. Each element is accepted or rejected
     on its own: an observation whose ``example`` does not occur verbatim in
-    the samples served is refused and names why, and the rest are kept.
-    Re-send only what was rejected, corrected. Nothing here writes the
-    style: the author confirms, changes or discards each observation under
-    Settings > Writing style.
+    a served sample is refused and names why, and the rest are kept. To
+    retry, correct the rejected ones and re-send the **whole batch** - the
+    accepted elements alongside the corrected ones - because a second batch
+    under the same key replaces the first, so any element left out is
+    dropped. Nothing here writes the style: the author confirms, changes or
+    discards each observation under Settings > Writing style.
     """
     if not observations:
         raise ToolError("no observations to record")
     try:
-        outcome = style.record_observations(repository(), observations)
+        outcome = style.record_observations(repository(), observations, key)
     except style.StyleError as exc:
         raise ToolError(str(exc)) from exc
     return render_style_outcome(outcome, len(observations))

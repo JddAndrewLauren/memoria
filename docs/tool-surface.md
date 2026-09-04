@@ -293,12 +293,17 @@ anything. The `writing-style` skill drives them.
 
 ### What the model sends back
 
-`style_record` takes a list of `RecordedObservation`, each an `aspect`, an
-`observation` phrased as a directive, and an `example`. The core refuses an
-element whose example does not occur verbatim (whitespace-normalized) in the
-samples the brief served: an observation that cannot point at the author's own
-words is not one the author should be asked to confirm. Batch in, per-element
-out, as `extraction_record`.
+`style_record` takes a list of `RecordedObservation` - each an `aspect`, an
+`observation` phrased as a directive, and an `example` - and the analysis
+`key` the brief served. The key binds the batch to the samples the model read:
+if the author changed the sources or uploads in between, the served key no
+longer matches and the whole batch is refused, the way `extraction_record_summary`
+refuses a re-clustered membership. With the key confirmed, the core refuses any
+element whose example does not occur verbatim (whitespace-normalized) within a
+single served sample - not merely somewhere across them concatenated, which
+would let a quote straddle two samples: an observation that cannot point at the
+author's own words is not one the author should be asked to confirm. Batch in,
+per-element out, as `extraction_record`.
 
 ### What it records, and what it does not
 
