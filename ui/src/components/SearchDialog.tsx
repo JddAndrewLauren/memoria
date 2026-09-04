@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
+import { Dialog } from "./Dialog";
 import { listSubjects, listEntries, search } from "../api/client";
 import { splitSearchResultsByLayer } from "../lib/searchLayers";
 import { searchEntries } from "../lib/entrySearch";
@@ -28,14 +29,6 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
   useEffect(() => {
     if (!open) setQuery("");
   }, [open]);
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    if (open) document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
 
   const trimmed = debouncedQuery.trim();
 
@@ -79,110 +72,98 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
   if (!open) return null;
 
   return (
-    <div
-      role="presentation"
-      onClick={onClose}
-      className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 pt-24"
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Search"
-        onClick={(event) => event.stopPropagation()}
-        className="w-[620px] max-w-[90vw] rounded-card border border-border bg-card shadow-lg"
-      >
-        <div className="border-b border-border p-3">
-          <input
-            autoFocus
-            type="text"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search sources and subjects..."
-            className="w-full rounded px-2 py-2 text-sm text-ink outline-none placeholder:text-faint"
-          />
-        </div>
-        {trimmed.length === 0 ? (
-          <p className="p-4 text-xs text-muted">Start typing to search.</p>
-        ) : (
-          <div className="max-h-[60vh] overflow-y-auto p-3">
+    <Dialog open={open} onClose={onClose} label="Search">
+      <div className="border-b border-border p-3">
+        <input
+          autoFocus
+          type="text"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search sources and subjects..."
+          className="w-full rounded px-2 py-2 text-sm text-ink outline-none placeholder:text-faint"
+        />
+      </div>
+      {trimmed.length === 0 ? (
+        <p className="p-4 text-xs text-muted">Start typing to search.</p>
+      ) : (
+        <div className="max-h-[60vh] overflow-y-auto p-3">
+          <ResultGroup
+            label="Sources"
+            tone="sources"
+            count={evidence.length}
+            empty="No matching evidence."
+            unbuilt={indexUnbuilt}
+            isError={searchIsError}
+            error="Search could not be completed."
+          >
+            {evidence.map((hit) => (
+              <SourceHitRow
+                key={`${hit.src_id}-${hit.anchor}`}
+                hit={hit}
+                onSelect={() => {
+                  // A citation chip's click, per §19.9: opens the
+                  // slide-over rather than navigating away, so checking a
+                  // hit never costs the reader their place.
+                  openCitation(hit.anchor);
+                  onClose();
+                }}
+              />
+            ))}
+          </ResultGroup>
+
+          <label className="mb-2 flex items-center gap-2 px-1 text-[11px] text-muted">
+            <input
+              type="checkbox"
+              checked={includeEditorial}
+              onChange={(event) => setIncludeEditorial(event.target.checked)}
+            />
+            Include editorial voice ({editorial.length})
+          </label>
+          {includeEditorial && (
             <ResultGroup
-              label="Sources"
-              tone="sources"
-              count={evidence.length}
-              empty="No matching evidence."
+              label="Editorial"
+              tone="amber"
+              count={editorial.length}
+              empty="No matching editorial commentary."
               unbuilt={indexUnbuilt}
               isError={searchIsError}
               error="Search could not be completed."
             >
-              {evidence.map((hit) => (
+              {editorial.map((hit) => (
                 <SourceHitRow
                   key={`${hit.src_id}-${hit.anchor}`}
                   hit={hit}
                   onSelect={() => {
-                    // A citation chip's click, per §19.9: opens the
-                    // slide-over rather than navigating away, so checking a
-                    // hit never costs the reader their place.
                     openCitation(hit.anchor);
                     onClose();
                   }}
                 />
               ))}
             </ResultGroup>
+          )}
 
-            <label className="mb-2 flex items-center gap-2 px-1 text-[11px] text-muted">
-              <input
-                type="checkbox"
-                checked={includeEditorial}
-                onChange={(event) => setIncludeEditorial(event.target.checked)}
-              />
-              Include editorial voice ({editorial.length})
-            </label>
-            {includeEditorial && (
-              <ResultGroup
-                label="Editorial"
-                tone="amber"
-                count={editorial.length}
-                empty="No matching editorial commentary."
-                unbuilt={indexUnbuilt}
-                isError={searchIsError}
-                error="Search could not be completed."
-              >
-                {editorial.map((hit) => (
-                  <SourceHitRow
-                    key={`${hit.src_id}-${hit.anchor}`}
-                    hit={hit}
-                    onSelect={() => {
-                      openCitation(hit.anchor);
-                      onClose();
-                    }}
-                  />
-                ))}
-              </ResultGroup>
-            )}
-
-            <ResultGroup
-              label="Subjects"
-              tone="subjects"
-              count={entryHits.length}
-              empty="No matching entries."
-              unbuilt={subjectsUnseeded}
-              isError={entriesIsError}
-              error="Subjects could not be searched."
-            >
-              {entryHits.map(({ subjectId, entry, matchedOn }) => (
-                <div key={entry.id} className="rounded px-2 py-1.5 text-sm">
-                  <span className="font-mono text-xs text-subjects">
-                    {subjectId.replace(/^SUB-/, "")}
-                  </span>
-                  <span className="ml-2 text-ink">{entry.id.split("/")[1] ?? entry.id}</span>
-                  <span className="ml-2 text-xs text-muted">matched &quot;{matchedOn}&quot;</span>
-                </div>
-              ))}
-            </ResultGroup>
-          </div>
-        )}
-      </div>
-    </div>
+          <ResultGroup
+            label="Subjects"
+            tone="subjects"
+            count={entryHits.length}
+            empty="No matching entries."
+            unbuilt={subjectsUnseeded}
+            isError={entriesIsError}
+            error="Subjects could not be searched."
+          >
+            {entryHits.map(({ subjectId, entry, matchedOn }) => (
+              <div key={entry.id} className="rounded px-2 py-1.5 text-sm">
+                <span className="font-mono text-xs text-subjects">
+                  {subjectId.replace(/^SUB-/, "")}
+                </span>
+                <span className="ml-2 text-ink">{entry.id.split("/")[1] ?? entry.id}</span>
+                <span className="ml-2 text-xs text-muted">matched &quot;{matchedOn}&quot;</span>
+              </div>
+            ))}
+          </ResultGroup>
+        </div>
+      )}
+    </Dialog>
   );
 }
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
@@ -31,6 +31,22 @@ function stubFetch(isBuilt: boolean) {
         return new Response(JSON.stringify({ chapters: [], is_built: isBuilt }), {
           status: 200,
         });
+      }
+      if (url.includes("/api/style")) {
+        return new Response(
+          JSON.stringify({
+            exists: false,
+            direction: "",
+            observations: [],
+            sample_sources: [],
+            samples: [],
+            token: null,
+            pending: [],
+            confirmed_count: 0,
+            discarded_count: 0,
+          }),
+          { status: 200 },
+        );
       }
       return new Response(JSON.stringify({}), { status: 200 });
     }),
@@ -74,6 +90,24 @@ describe("the app shell on a fresh checkout", () => {
     expect(screen.getByText("Manuscript")).toBeInTheDocument();
     expect(screen.getByText("Subjects")).toBeInTheDocument();
     expect(screen.getByText("Sources")).toBeInTheDocument();
+  });
+
+  it("opens Settings from the footer gear, on the writing style (ADR-0009)", async () => {
+    renderApp();
+    expect(screen.queryByRole("dialog", { name: "Settings" })).not.toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    expect(
+      await within(dialog).findByRole("heading", { name: "Writing style" }),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Direction")).toHaveValue("");
+    // No style yet is an honest empty state, not an error.
+    expect(within(dialog).getByText("No confirmed observations yet.")).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close settings" }));
+    expect(screen.queryByRole("dialog", { name: "Settings" })).not.toBeInTheDocument();
   });
 });
 

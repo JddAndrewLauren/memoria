@@ -262,6 +262,16 @@ repository directly, and a dependency boundary rule
 (`tests/test_ui_dependency_boundary.py`) fails the Python suite if `ui/`
 ever gains a package capable of reaching a model API.
 
+The footer's `⚙ Settings` opens the settings dialog, whose one setting is the
+**writing style** (`docs/adr/0009-…`): the author's book-wide direction for
+how their prose is written, kept in `style/writing-style.md` and edited here
+through the same write path. The dialog also chooses the samples of the
+author's own writing an analysis reads — sources in the archive, or documents
+uploaded for their style alone — and walks the observations that analysis
+proposed, one at a time, to confirm, change or discard. The analysis itself
+runs as a Claude Code session (`/writing-style`, over `style_brief` /
+`style_record`), never from the app.
+
 Styling is Tailwind v4, tokens declared in `ui/src/index.css`'s `@theme`
 block and extracted from `docs/design/memoria-desktop.dc.html` (the canvas
 is a reference, never a source — components are built against the tokens,

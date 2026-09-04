@@ -599,6 +599,8 @@ def test_durable_paths_name_the_state_classes_and_nothing_derived_or_immutable()
     write already makes, not a directory this module writes into."""
     assert {"book.md", "chapters/", "subjects/", "claims/"} <= set(write.DURABLE_PATHS)
     assert {"decisions.md", "questions.md", "research/"} <= set(write.DURABLE_PATHS)
+    # ADR-0009: the writing style and its uploaded samples.
+    assert "style/" in write.DURABLE_PATHS
     for excluded in ("sources/", "sessions/", ".memoria/", "changes/"):
         assert excluded not in write.DURABLE_PATHS
 

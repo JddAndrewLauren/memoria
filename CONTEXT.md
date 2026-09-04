@@ -268,6 +268,28 @@ Arcs that cannot. It carries no pin or exclude overlay, because an author act ag
 one passage would be a durable pointer into mutable prose.
 _Avoid_: Affected passages, backlinks, manuscript matches, edges
 
+### Craft direction
+
+**Writing style**:
+Book-wide direction for how the author's prose is written, held in one durable file
+(`style/writing-style.md`): the author's own prose, plus the [[style observation]]s
+they confirmed. Craft direction, not testimony (part 06 §8.6): it names no scope, is
+never checked against evidence, and reaches every writing agent the same way - loaded
+into the [[working context]] as Tier 1 voice guidance, served verbatim by the
+`writing_style` tool, printed above an audit batch whose findings may carry a rewrite.
+Edited under Settings or in Obsidian; the Settings dialog is a window onto the file,
+not a store of its own (ADR-0009). The sources and uploaded documents chosen as
+samples of the author's writing are kept with it and are never evidence.
+_Avoid_: Style guide, voice prompt, style prompt, system prompt, tone settings, preferences
+
+**Style observation**:
+One thing a writing-style analysis found in the author's own samples - phrased as a
+directive a writer can follow, with a verbatim example - that the author has not yet
+acted on. Proposed by a session through `style_record`, held only in the index, and
+asserting nothing until the author confirms it (as proposed, or changed) in Settings,
+which is the act that writes it into the [[writing style]]. Discarded stays discarded.
+_Avoid_: Finding, rule, suggestion, insight, tip, recommendation
+
 ### Evidence
 
 **Raw unit**:

@@ -51,6 +51,7 @@ ALLOWED_IMPORTS = {
     "memoria.trace",  # #42: trace(ref), provenance composed from git and the session
     "memoria.record_extractor",  # #34: the record extractor's tools, driven by the curation skill
     "memoria.human_touched",  # #34: curation_flag, the flagging step on its own
+    "memoria.style",  # ADR-0009: writing_style and the style_* analysis tools
 }
 
 FILE_OPENING_CALLS = {"open", "read_text", "read_bytes", "write_text", "write_bytes"}
@@ -460,6 +461,13 @@ def test_the_tool_surface_is_the_read_tools_and_the_extraction_tools():
         "record_statement",
         "revise_statement",
         "curation_flag",
+        # ADR-0009: the writing style served to a writer, and the analysis
+        # that proposes it - serve-then-record like the extraction, with the
+        # author confirming each observation in Settings, never here.
+        "writing_style",
+        "style_status",
+        "style_brief",
+        "style_record",
     }
 
 

@@ -256,6 +256,7 @@ def append_assembly(
     fallbacks: list[dict],
     unconfirmed: bool,
     empty: bool,
+    writing_style: str | None = None,
 ) -> None:
     """Ledger one served ``assemble`` call (#38): a declared scope's
     resolution, in the countable domain units §33.1 asks for and no others -
@@ -271,7 +272,9 @@ def append_assembly(
     text they name (that stays Tier 4, on demand, ledgered by its own
     ``read`` call if one follows). ``fallbacks`` names every unpromoted
     candidate the declared scope named instead - part 06 §8.4's "assembly
-    never dead-ends".
+    never dead-ends". ``writing_style`` names the style file assembly loaded
+    as Tier 1 voice guidance (ADR-0009), or is ``None`` when there was
+    none - a fact, never the text, like everything else on this line.
     """
     _append(
         repository,
@@ -283,8 +286,24 @@ def append_assembly(
             "fallbacks": fallbacks,
             "unconfirmed": unconfirmed,
             "empty": empty,
+            "writing_style": writing_style,
         },
     )
+
+
+def append_writing_style(repository: Repository, session_id: str, path: str) -> None:
+    """Ledger one served ``writing_style`` call (ADR-0009): the style file
+    reached a context verbatim, which is the same category of thing as
+    ``read("style/writing-style.md")``, and that is ledgered."""
+    _append(repository, session_id, {"tool": "writing_style", "served": [path]})
+
+
+def append_style_brief(repository: Repository, session_id: str, served: list[str]) -> None:
+    """Ledger one served style brief (ADR-0009): every chosen source's text
+    and every uploaded sample entered a context, named by ``SRC-`` id or by
+    path. The largest delivery of the author's own words into a model that
+    the style tools make, and the one that must not go unrecorded."""
+    _append(repository, session_id, {"tool": "style_brief", "served": served})
 
 
 def _filters_dict(filters: SearchFilters | None) -> dict | None:

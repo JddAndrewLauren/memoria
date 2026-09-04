@@ -111,6 +111,9 @@ def build_context_manifest(repository: Repository, session_id: str) -> dict:
             "fallbacks": event.get("fallbacks", []),
             "unconfirmed": event.get("unconfirmed", False),
             "empty": event.get("empty", False),
+            # The style file assembly loaded as voice guidance (ADR-0009),
+            # or None - a fact about what was supplied, never its text.
+            "writing_style": event.get("writing_style"),
         }
         for event in events
         if event.get("tool") == "assemble"
