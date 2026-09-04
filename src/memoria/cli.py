@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from memoria import changes, health
+from memoria.ingestion import CONVERTED_STATES, ingestion_status
 from memoria.context_manifest import derive_context_manifest
 from memoria.embeddings import default_embed_fn
 from memoria.extraction import RECURRENCE_THRESHOLD_DEFAULT
@@ -155,6 +156,49 @@ def _report_health(report) -> None:
     )
 
 
+def _report_sources(status) -> None:
+    """Print the ingestion status (`memoria sources`): one row per raw unit
+    in the ledger, then the tallies - the same table the `/ingestion`
+    surface draws, so a script or a gate walk can check an ingest without
+    the browser. `None` prints as `-`: not checked, never zero."""
+    if status.units is None:
+        print("sources: not checked - no evidence corpus configured (MEMORIA_EVIDENCE_ROOT)")
+        return
+    if not status.units:
+        print("sources: the ledger is empty - run `memoria normalize` against an evidence root")
+        return
+
+    def cell(value) -> str:
+        return "-" if value is None else str(value)
+
+    width = max(len(unit.path) for unit in status.units)
+    print(f"{'ID':<10} {'PATH':<{width}} {'CONVERTED':<18} {'INDEXED':>8} {'EXTRACTED':>10}")
+    for unit in status.units:
+        converted = unit.converted.replace("_", " ")
+        extracted = (
+            "-"
+            if unit.extracted_paragraphs is None
+            else f"{unit.extracted_paragraphs}/{cell(unit.record_paragraphs)}"
+        )
+        print(
+            f"{unit.id:<10} {unit.path:<{width}} {converted:<18} "
+            f"{cell(unit.indexed_paragraphs):>8} {extracted:>10}"
+        )
+        if unit.failure_reason:
+            print(f"  {unit.failure_reason}")
+    tallies = ", ".join(
+        f"{status.counts[state]} {state.replace('_', ' ')}" for state in CONVERTED_STATES
+    )
+    print(f"sources: {len(status.units)} unit(s) - {tallies}")
+    if status.is_indexed:
+        print(
+            f"sources: {status.counts['indexed']} record(s) fully indexed, "
+            f"{status.counts['extracted_complete']} fully read by the extraction"
+        )
+    else:
+        print("sources: index not built - run `memoria rebuild`")
+
+
 def _report_phases(phases) -> None:
     """Print where a rebuild's time went, one line per phase (#172).
 
@@ -269,6 +313,14 @@ def main(argv=None):
         action="store_true",
         help="Reconvert every unit, not only those whose hash or converter changed",
     )
+    subparsers.add_parser(
+        "sources",
+        help=(
+            "List every raw unit in the ledger with its conversion, index and "
+            "extraction state - derived from the ledger, the records and the "
+            "index, computed without a model"
+        ),
+    )
     derive_session_parser = subparsers.add_parser(
         "derive-session",
         help=(
@@ -365,6 +417,10 @@ def main(argv=None):
                 "unit(s) skipped (unchanged)",
                 file=sys.stderr,
             )
+        return 0
+
+    if args.command == "sources":
+        _report_sources(ingestion_status(repository))
         return 0
 
     if args.command == "rebuild":

@@ -723,7 +723,9 @@ def run_style(
             rejected=(Rejection("analysis", "the model proposed no observations"),),
             spend=meter.spend(),
         )
-    outcome = style.record_observations(repository, observations)
+    # The key the brief served, as a session echoes it back to style_record:
+    # the record is bound to the samples the model read.
+    outcome = style.record_observations(repository, observations, served.analysis_key)
     return StyleRun(
         accepted=len(outcome.accepted),
         rejected=tuple(Rejection(str(ordinal), reason) for ordinal, reason in outcome.rejected),

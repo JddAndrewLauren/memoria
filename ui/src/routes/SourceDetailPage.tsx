@@ -6,12 +6,14 @@ import {
   readRef,
   checkLocality,
   revealSource,
+  readIngestionStatus,
   ApiError,
   type EditorialRecordOut,
 } from "../api/client";
 import { Badge, type Tone } from "../components/Badge";
 import { Backlinks } from "../components/CitationPanel";
 import { useCitationPanel } from "../lib/citationPanel";
+import { drawState, extractedLabel, indexByUnitId } from "../lib/ingestion";
 
 // Five values, all of which must render distinguishably
 // (docs/normalized-record-schema.md's `date_confidence`) - not just as
@@ -70,6 +72,16 @@ export default function SourceDetailPage() {
   });
   const reveal = useMutation({ mutationFn: () => revealSource(id as string) });
 
+  // This record's ingestion state - the same status the `/ingestion` page
+  // and the SOURCES tree read, joined by id here for two badges in the
+  // header: whether the record is current against its raw unit, and how
+  // much of it the extraction has read.
+  const { data: ingestion } = useQuery({
+    queryKey: ["ingestion"],
+    queryFn: readIngestionStatus,
+  });
+  const unit = id ? indexByUnitId(ingestion).get(id) : undefined;
+
   const citedRef = useRef<HTMLParagraphElement | null>(null);
   useEffect(() => {
     citedRef.current?.scrollIntoView?.({ block: "center" });
@@ -96,6 +108,10 @@ export default function SourceDetailPage() {
             {data.contemporaneous ? "Contemporaneous" : "Retrospective"}
           </Badge>
           <Badge tone="neutral">{data.source_type}</Badge>
+          {unit && <Badge tone={drawState(unit.converted).tone}>{drawState(unit.converted).label}</Badge>}
+          {unit && extractedLabel(unit) && (
+            <Badge tone="neutral">extracted {extractedLabel(unit)}</Badge>
+          )}
           {hasNoDate ? (
             <Badge tone="neutral">no date resolved</Badge>
           ) : (

@@ -608,14 +608,21 @@ def _now() -> str:
 
 
 def record_observations(
-    repository: Repository, results: list[RecordedObservation]
+    repository: Repository, results: list[RecordedObservation], key: str
 ) -> RecordOutcome:
-    """Record one batch of proposed observations against the current samples.
+    """Record one batch of proposed observations against the served brief.
 
-    Each element is accepted or rejected on its own. An element is refused
-    for an empty field, or for an ``example`` that does not occur verbatim
-    (whitespace-normalized) in the samples the brief served - the type
-    cannot hold that rule, so the core does.
+    ``key`` is the ``analysis_key`` ``brief`` served. Between serving the
+    brief and recording against it the author may have changed the chosen
+    sources or uploaded a sample; the whole batch is refused when the key no
+    longer matches, because the examples were checked and the rows would be
+    filed against samples the model never read. The skill fetches the brief
+    afresh and analyses the new samples.
+
+    With the key confirmed, each element is accepted or rejected on its own.
+    An element is refused for an empty field, or for an ``example`` that does
+    not occur verbatim (whitespace-normalized) within a single served sample
+    - the type cannot hold that rule, so the core does.
 
     A batch replaces the still-proposed rows under the same analysis key:
     running the analysis twice over the same samples is a second opinion,
@@ -623,7 +630,12 @@ def record_observations(
     kept under any key.
     """
     served = brief(repository)
-    corpus = _one_line("\n".join(sample.text for sample in served.samples))
+    if key != served.analysis_key:
+        raise StyleError(
+            "the samples changed since the brief was served: fetch style_brief "
+            "again and analyse what it serves"
+        )
+    samples = [_one_line(sample.text) for sample in served.samples]
     accepted_rows: list[tuple[int, RecordedObservation]] = []
     rejected: list[tuple[int, str]] = []
     for ordinal, result in enumerate(results, start=1):
@@ -633,9 +645,9 @@ def record_observations(
         if not aspect or not observation or not example:
             rejected.append((ordinal, "aspect, observation and example are all required"))
             continue
-        if example not in corpus:
+        if not any(example in sample for sample in samples):
             rejected.append(
-                (ordinal, f"example is not in the samples verbatim: {example[:60]!r}")
+                (ordinal, f"example is not in a sample verbatim: {example[:60]!r}")
             )
             continue
         accepted_rows.append((ordinal, RecordedObservation(aspect, observation, example)))

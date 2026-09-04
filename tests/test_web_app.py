@@ -85,6 +85,13 @@ ALLOWED_IMPORTS = {
     "memoria.drivers",
     "memoria.extraction",
     "memoria.ledger",
+    # The ingestion surface (ADR-0009): a derived, model-free status the
+    # core computes and two local-only runs the adapter forwards to it. The
+    # adapter shapes the status and maps the runs' outcomes - a held lock
+    # becomes a 409, a missing corpus a 404 - and computes no state, opens
+    # no database and touches no file itself; the two tests below still
+    # hold.
+    "memoria.ingestion",
 }
 
 FILE_OPENING_CALLS = {"open", "read_text", "read_bytes", "write_text", "write_bytes"}
@@ -1313,6 +1320,13 @@ def test_nothing_but_the_match_terms_route_writes(tmp_path):
         # session's extraction_record does - and a 409 until the author
         # switched direct runs on.
         "/extraction/run",
+        # ADR-0009: the two model-free derived-state passes the adapter may
+        # launch on the author's own machine. Neither is a durable write -
+        # normalized records and the index are Derived (§42), outside the
+        # write path - and neither computes anything here: the core runs
+        # the pass and this forwards its report.
+        "/ingestion/normalize",
+        "/ingestion/rebuild",
         # ADR-0010: Settings > Model - the switch, the model id and the
         # stored key, in the machine-local settings file beside the index;
         # the one write here that is neither durable nor through
@@ -1951,11 +1965,12 @@ def test_a_sample_source_that_names_no_record_is_a_400(tmp_path):
 
 
 def _propose(repository, *observations):
-    from memoria.style import RecordedObservation, record_observations
+    from memoria.style import RecordedObservation, brief, record_observations
 
     record_observations(
         repository,
         [RecordedObservation("rhythm", text, "Nobody dared touch it.") for text in observations],
+        brief(repository).analysis_key,
     )
 
 

@@ -501,3 +501,58 @@ def test_derive_context_manifest_end_to_end_through_the_cli(tmp_path):
     assert manifest["records_loaded"] == [
         {"ref": "SRC-000184", "tokens": ledger.estimate_tokens("A blue heron flew over.")}
     ]
+
+
+# --- sources (the ingestion status) --------------------------------------------
+
+
+def test_help_lists_sources():
+    result = run_cli("--help")
+    assert result.returncode == 0
+    assert "sources" in result.stdout
+
+
+def test_sources_reports_not_checked_without_a_corpus(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    env = {k: v for k, v in os.environ.items() if k != "MEMORIA_EVIDENCE_ROOT"}
+
+    result = run_cli("sources", env=env, cwd=tmp_path)
+
+    assert result.returncode == 0
+    assert "sources: not checked" in result.stdout
+
+
+def test_sources_prints_one_row_per_ledger_unit_and_the_tallies(tmp_path):
+    evidence_root = tmp_path / "evidence"
+    (evidence_root / "raw").mkdir(parents=True)
+    (evidence_root / "raw" / "one.txt").write_text("hello\n\nworld")
+    (evidence_root / "raw" / "bad.pdf").write_text("not a pdf")
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    env = dict(os.environ, MEMORIA_EVIDENCE_ROOT=str(evidence_root))
+    assert run_cli("normalize", env=env, cwd=repo_root).returncode == 0
+
+    result = run_cli("sources", env=env, cwd=repo_root)
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[0].startswith("ID")
+    rows = {line.split()[0]: line for line in lines[1:] if line.startswith("SRC-")}
+    assert "failed" in rows["SRC-000001"]  # bad.pdf, numbered first in path order
+    assert "current" in rows["SRC-000002"]
+    assert "0/2" in rows["SRC-000002"]
+    assert any(line.startswith("  ") for line in lines)  # the failure reason, indented
+    assert "sources: 2 unit(s) - 1 current" in result.stdout
+    assert "1 failed" in result.stdout
+    assert "index not built" in result.stdout
+
+    # Indexed in-process rather than via `memoria rebuild`, which wires the
+    # real embedder (#81) and so would load a model this test has no use for.
+    from memoria.index import build_index
+    from memoria.records import read_all
+
+    build_index(Repository(root=repo_root), read_all(Repository(root=repo_root)))
+    result = run_cli("sources", env=env, cwd=repo_root)
+    assert "1 record(s) fully indexed" in result.stdout
+    assert "0 fully read by the extraction" in result.stdout

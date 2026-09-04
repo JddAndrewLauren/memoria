@@ -65,6 +65,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ingestion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ingestion
+         * @description Every raw unit in the ledger with its conversion, index and
+         *     extraction state - derived from the ledger, the records and the index,
+         *     never recorded (part 05 §5.4). ``memoria.ingestion`` computes it; this
+         *     shapes it.
+         */
+        get: operations["ingestion_api_ingestion_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ingestion/normalize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingestion Normalize
+         * @description Run one normalization pass (ADR-0009): the same pass ``memoria
+         *     normalize`` runs, on the author's own machine only - the same peer
+         *     check ``reveal`` makes, for the same reason. Synchronous: the response
+         *     is the pass's report. A 409 is another pass already running.
+         */
+        post: operations["ingestion_normalize_api_ingestion_normalize_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ingestion/rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingestion Rebuild
+         * @description Regenerate the index from the records on disk (ADR-0009), with no
+         *     embedder - ``memoria rebuild`` remains the path that loads the model
+         *     (ADR-0007). Local-only and synchronous, as ``/ingestion/normalize``.
+         */
+        post: operations["ingestion_rebuild_api_ingestion_rebuild_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/locality": {
         parameters: {
             query?: never;
@@ -1161,6 +1229,45 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
+         * IngestionRunOut
+         * @description What one launched pass did (ADR-0009): ``kind`` is ``normalize`` or
+         *     ``rebuild``, ``summary`` the counts that pass's own report carries.
+         */
+        IngestionRunOut: {
+            /** Kind */
+            kind: string;
+            /** Summary */
+            summary: {
+                [key: string]: number;
+            };
+            /** Elapsed Seconds */
+            elapsed_seconds: number;
+        };
+        /**
+         * IngestionStatusOut
+         * @description Every raw unit in the ledger with its conversion, index and
+         *     extraction state, and the tallies over them.
+         *
+         *     ``units`` is ``None`` when no evidence corpus is configured - "not
+         *     checked", the same distinction ``memoria.health`` draws - and an empty
+         *     list when the ledger is empty. ``is_normalized`` and ``is_indexed`` are
+         *     the build signals the empty states branch on (#157).
+         */
+        IngestionStatusOut: {
+            /** Units */
+            units: components["schemas"]["UnitStatusOut"][] | null;
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /** Is Normalized */
+            is_normalized: boolean;
+            /** Is Indexed */
+            is_indexed: boolean;
+            /** Generated At */
+            generated_at: string;
+        };
+        /**
          * LocalityOut
          * @description Whether this connection's client is on the same machine as the
          *     server.
@@ -1950,6 +2057,37 @@ export interface components {
             /** Sessions */
             sessions: components["schemas"]["SessionSuppliedContextOut"][];
         };
+        /**
+         * UnitStatusOut
+         * @description One raw unit's ingestion row (``memoria.ingestion.UnitStatus``).
+         *
+         *     ``converted`` is one of ``current``, ``out_of_date``,
+         *     ``not_yet_converted``, ``failed``, ``unconvertible``, ``container``,
+         *     ``stub`` or ``deleted``; a consumer renders whatever value is present
+         *     rather than assuming that list is closed, the posture
+         *     ``SourceSummary.source_type`` already takes. The three ``None``-able
+         *     counts mean "not checked" - no record, or no index built - never zero.
+         */
+        UnitStatusOut: {
+            /** Id */
+            id: string;
+            /** Path */
+            path: string;
+            /** Deleted */
+            deleted: boolean;
+            /** Converted */
+            converted: string;
+            /** Failure Reason */
+            failure_reason: string | null;
+            /** Record Paragraphs */
+            record_paragraphs: number | null;
+            /** Indexed Paragraphs */
+            indexed_paragraphs: number | null;
+            /** Extracted Paragraphs */
+            extracted_paragraphs: number | null;
+            /** Email Message Index */
+            email_message_index: number | null;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -2065,6 +2203,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingestion_api_ingestion_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestionStatusOut"];
+                };
+            };
+        };
+    };
+    ingestion_normalize_api_ingestion_normalize_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestionRunOut"];
+                };
+            };
+        };
+    };
+    ingestion_rebuild_api_ingestion_rebuild_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestionRunOut"];
                 };
             };
         };

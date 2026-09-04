@@ -188,9 +188,20 @@ def test_every_call_is_ledgered_as_spend_beside_what_was_served(tmp_path):
     events = _ledger(repository)
     tools = [event["tool"] for event in events]
     assert tools[:2] == ["extraction_brief", "extraction_next_paragraphs"]
+    assert tools[:6] == [
+        "extraction_brief",
+        "extraction_next_paragraphs",
+        "model_call",
+        "extraction_brief",
+        "extraction_next_paragraphs",
+        "model_call",
+    ]
     assert tools.count("model_call") == 2
     served = [event for event in events if event["tool"] == "extraction_next_paragraphs"]
-    assert served[0]["served"] == ["src-000001-p1", "src-000001-p2"]
+    assert [event["served"] for event in served] == [
+        ["src-000001-p1"],
+        ["src-000001-p2"],
+    ]
 
     call = _model_calls(repository)[0]
     assert call["pass"] == "extraction"
@@ -283,7 +294,27 @@ def test_a_provider_failure_stops_the_run_and_keeps_what_was_recorded(tmp_path):
     assert [c["stop_reason"] for c in calls] == ["end_turn", "error"]
     assert calls[1]["error"] == "rate-limited"
     assert calls[1]["input_tokens"] == 0 and calls[1]["model"] == ""
+    served = [
+        event["served"]
+        for event in _ledger(repository)
+        if event["tool"] == "extraction_next_paragraphs"
+    ]
+    assert served == [["src-000001-p1"], ["src-000001-p2"]]
     assert len(ex.pending_paragraphs(repository)) == 3
+
+
+def test_summary_and_done_phases_do_not_ledger_an_unsent_extraction_brief(tmp_path):
+    repository = _repo(tmp_path, ["Bob and the acquisition.", "Bob again."])
+    model = FakeModel(_summary_or_reading)
+    drivers.run_extraction(repository, model, SESSION, limit=10, recurrence_threshold=1)
+    brief_count = sum(event["tool"] == "extraction_brief" for event in _ledger(repository))
+
+    drivers.run_extraction(repository, model, SESSION, limit=10, recurrence_threshold=1)
+    drivers.run_extraction(repository, model, SESSION, limit=10, recurrence_threshold=1)
+
+    assert sum(
+        event["tool"] == "extraction_brief" for event in _ledger(repository)
+    ) == brief_count
 
 
 def test_a_limit_below_one_is_refused(tmp_path):
@@ -519,7 +550,7 @@ def test_the_style_analysis_records_what_quotes_the_samples_and_refuses_what_doe
     assert report.accepted == 1
     assert len(report.rejected) == 1
     assert report.rejected[0].anchor == "2"
-    assert "not in the samples verbatim" in report.rejected[0].reason
+    assert "not in a sample verbatim" in report.rejected[0].reason
     pending = style.pending_observations(repository)
     assert [o.observation for o in pending] == ["End on the noun."]
     events = _ledger(repository)

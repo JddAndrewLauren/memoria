@@ -63,6 +63,9 @@ export type AuditRunOut = components["schemas"]["AuditRunOut"];
 export type StyleRunOut = components["schemas"]["StyleRunOut"];
 export type SpendOut = components["schemas"]["SpendOut"];
 export type RejectionOut = components["schemas"]["RejectionOut"];
+export type IngestionStatusOut = components["schemas"]["IngestionStatusOut"];
+export type UnitStatusOut = components["schemas"]["UnitStatusOut"];
+export type IngestionRunOut = components["schemas"]["IngestionRunOut"];
 
 class ApiError extends Error {
   constructor(
@@ -253,6 +256,27 @@ export function applyRewrite(
 // served with the review - and a 409 means the entry moved underneath.
 export function settleFinding(sectionId: string, request: SettleRequest): Promise<SettlementOut> {
   return post(`/api/sections/${encodeURIComponent(sectionId)}/settlements`, request);
+}
+
+// The ingestion status: every raw unit in the ledger with its conversion,
+// index and extraction state, derived on the server from the ledger, the
+// records and the index (part 05 §5.4: "the record is the state"). Read by
+// the `/ingestion` page, the SOURCES tree's glyphs and the source viewer's
+// badge - one query, joined by id on the client.
+export function readIngestionStatus(): Promise<IngestionStatusOut> {
+  return get(`/api/ingestion`);
+}
+
+// The two model-free passes the author may launch from the page
+// (ADR-0009). Only ever called when `checkLocality` has said `is_local` -
+// the server refuses either way, and the buttons that reach these are
+// absent, not disabled, otherwise. A 409 is another pass still running.
+export function runNormalize(): Promise<IngestionRunOut> {
+  return post(`/api/ingestion/normalize`);
+}
+
+export function runRebuild(): Promise<IngestionRunOut> {
+  return post(`/api/ingestion/rebuild`);
 }
 
 export function search(query: string): Promise<SearchResponse> {

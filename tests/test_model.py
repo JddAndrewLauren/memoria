@@ -42,6 +42,16 @@ def test_a_corrupt_file_loads_as_disabled_rather_than_raising(tmp_path):
     assert m.load_settings(_repo(tmp_path)) == m.ModelSettings()
 
 
+@pytest.mark.parametrize("enabled", ["false", 1, 0, [], {}])
+def test_a_non_boolean_enable_value_loads_as_disabled(tmp_path, enabled):
+    repository = _repo(tmp_path)
+    path = m.settings_path(repository)
+    path.parent.mkdir()
+    path.write_text(json.dumps({"enabled": enabled, "api_key": "stored"}), encoding="utf-8")
+
+    assert m.load_settings(repository).enabled is False
+
+
 def test_save_creates_the_directory_writes_owner_only_and_round_trips(tmp_path):
     repository = _repo(tmp_path)
     settings = m.ModelSettings(enabled=True, model="claude-sonnet-5", api_key="sk-test")
@@ -61,6 +71,19 @@ def test_save_overwrites_in_place_and_keeps_the_mode(tmp_path):
     m.save_settings(repository, m.ModelSettings(enabled=False, api_key=None))
     assert m.load_settings(repository) == m.ModelSettings(enabled=False)
     assert stat.S_IMODE(m.settings_path(repository).stat().st_mode) == 0o600
+
+
+def test_save_does_not_reuse_a_permissive_temp_file(tmp_path):
+    repository = _repo(tmp_path)
+    path = m.settings_path(repository)
+    path.parent.mkdir()
+    temp = path.with_name(path.name + ".tmp")
+    temp.write_text("stale", encoding="utf-8")
+    temp.chmod(0o644)
+
+    m.save_settings(repository, m.ModelSettings(enabled=True, api_key="secret"))
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 def test_an_empty_model_id_falls_back_to_the_default(tmp_path):

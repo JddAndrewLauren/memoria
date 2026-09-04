@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from memoria import drivers
 from memoria.mcp import server
 from memoria.records import (
     NORMALIZED_RELATIVE_PATH,
@@ -90,6 +91,37 @@ def _repo_with_evidence(tmp_path):
         "The unnormalized text.\n", encoding="utf-8"
     )
     return Repository(root=tmp_path, evidence_root=evidence_root)
+
+
+def test_direct_run_rendering_stops_automatic_continuation_after_rejection():
+    rejection = (drivers.Rejection("src-000001-p1", "the model refused"),)
+    extraction_report = drivers.ExtractionRun(
+        phase="paragraphs",
+        paragraphs_read=1,
+        paragraphs_accepted=0,
+        paragraphs_remaining=1,
+        summaries_written=0,
+        summaries_remaining=0,
+        finished=False,
+        promotions=(),
+        rejected=rejection,
+        spend=drivers.Spend(calls=1),
+    )
+    audit_report = drivers.AuditRun(
+        accepted=0,
+        findings=0,
+        remaining=1,
+        rejected=rejection,
+        spend=drivers.Spend(calls=1),
+    )
+
+    extraction_rendered = server.render_extraction_run(extraction_report)
+    audit_rendered = server.render_audit_run(audit_report)
+
+    assert "call extraction_run again to continue" not in extraction_rendered
+    assert "call audit_run again to continue" not in audit_rendered
+    assert "wait for an explicit retry request" in extraction_rendered
+    assert "wait for an explicit retry request" in audit_rendered
 
 
 @pytest.fixture(autouse=True)

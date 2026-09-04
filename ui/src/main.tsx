@@ -10,6 +10,7 @@ import EntryPage from "./routes/EntryPage";
 import SectionPage from "./routes/SectionPage";
 import ReviewPage from "./routes/ReviewPage";
 import SuppliedContextPage from "./routes/SuppliedContextPage";
+import IngestionPage from "./routes/IngestionPage";
 import "./index.css";
 import "./prose.css";
 
@@ -27,6 +28,7 @@ ReactDOM.createRoot(rootElement).render(
         <Routes>
           <Route path="/" element={<App />}>
             <Route index element={<Home />} />
+            <Route path="ingestion" element={<IngestionPage />} />
             <Route path="sources/:id" element={<SourceDetailPage />} />
             <Route path="sources/:id/raw" element={<RawSourcePage />} />
             <Route
