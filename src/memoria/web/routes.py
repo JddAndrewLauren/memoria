@@ -23,7 +23,10 @@ import ipaddress
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 import memoria.references as references
-from memoria.index import SearchFilters
+from memoria.index import IndexBuildError, IndexSchemaError, SearchFilters
+from memoria.ingestion import RunInProgress, ingestion_status
+from memoria.ingestion import run_normalize as run_normalize_core
+from memoria.ingestion import run_rebuild as run_rebuild_core
 from memoria.index import appearances_supported
 from memoria.index import gather as gather_set
 from memoria.index import is_built as index_is_built
@@ -125,6 +128,9 @@ from memoria.web.schemas import (
     SubjectListResponse,
     SubjectSummary,
     SuppliedContextOut,
+    IngestionRunOut,
+    IngestionStatusOut,
+    UnitStatusOut,
 )
 from memoria.write import Rejected, WriteError, repository_actor
 
@@ -223,6 +229,83 @@ def raw_source(
     except (ReadError, NoEvidenceRoot) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return RawSourceResponse(text=raw.text, original_locator=raw.original_locator)
+
+
+@router.get("/ingestion")
+def ingestion(repository: Repository = Depends(get_repository)) -> IngestionStatusOut:
+    """Every raw unit in the ledger with its conversion, index and
+    extraction state - derived from the ledger, the records and the index,
+    never recorded (part 05 §5.4). ``memoria.ingestion`` computes it; this
+    shapes it.
+    """
+    status = ingestion_status(repository)
+    return IngestionStatusOut(
+        units=(
+            None
+            if status.units is None
+            else [
+                UnitStatusOut(
+                    id=unit.id,
+                    path=unit.path,
+                    deleted=unit.deleted,
+                    converted=unit.converted,
+                    failure_reason=unit.failure_reason,
+                    record_paragraphs=unit.record_paragraphs,
+                    indexed_paragraphs=unit.indexed_paragraphs,
+                    extracted_paragraphs=unit.extracted_paragraphs,
+                    email_message_index=unit.email_message_index,
+                )
+                for unit in status.units
+            ]
+        ),
+        counts=dict(status.counts),
+        is_normalized=status.is_normalized,
+        is_indexed=status.is_indexed,
+        generated_at=status.generated_at,
+    )
+
+
+@router.post("/ingestion/normalize")
+def ingestion_normalize(
+    request: Request, repository: Repository = Depends(get_repository)
+) -> IngestionRunOut:
+    """Run one normalization pass (ADR-0009): the same pass ``memoria
+    normalize`` runs, on the author's own machine only - the same peer
+    check ``reveal`` makes, for the same reason. Synchronous: the response
+    is the pass's report. A 409 is another pass already running.
+    """
+    if not _is_local(request):
+        raise HTTPException(status_code=403, detail="normalize is local-only")
+    try:
+        outcome = run_normalize_core(repository)
+    except NoEvidenceRoot as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RunInProgress as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return IngestionRunOut(
+        kind=outcome.kind, summary=outcome.summary, elapsed_seconds=outcome.elapsed_seconds
+    )
+
+
+@router.post("/ingestion/rebuild")
+def ingestion_rebuild(
+    request: Request, repository: Repository = Depends(get_repository)
+) -> IngestionRunOut:
+    """Regenerate the index from the records on disk (ADR-0009), with no
+    embedder - ``memoria rebuild`` remains the path that loads the model
+    (ADR-0007). Local-only and synchronous, as ``/ingestion/normalize``.
+    """
+    if not _is_local(request):
+        raise HTTPException(status_code=403, detail="rebuild is local-only")
+    try:
+        outcome = run_rebuild_core(repository)
+    except RunInProgress as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (IndexBuildError, IndexSchemaError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return IngestionRunOut(
+        kind=outcome.kind, summary=outcome.summary, elapsed_seconds=outcome.elapsed_seconds
+    )
 
 
 @router.get("/locality")

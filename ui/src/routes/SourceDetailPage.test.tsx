@@ -353,3 +353,52 @@ describe('"Reveal in editor" (#65)', () => {
     expect(await screen.findByText("Could not reveal the original file.")).toBeInTheDocument();
   });
 });
+
+describe("the source viewer's ingestion badges", () => {
+  const INGESTION = {
+    units: [
+      {
+        id: "SRC-000184",
+        path: "raw/vol-01/text.txt",
+        deleted: false,
+        converted: "out_of_date",
+        failure_reason: null,
+        record_paragraphs: 2,
+        indexed_paragraphs: 2,
+        extracted_paragraphs: 1,
+        email_message_index: null,
+      },
+    ],
+    counts: { out_of_date: 1 },
+    is_normalized: true,
+    is_indexed: true,
+    generated_at: "2026-09-03T10:00:00+00:00",
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/ingestion")) {
+          return new Response(JSON.stringify(INGESTION), { status: 200 });
+        }
+        if (url.includes("/api/sources/SRC-000184")) {
+          return new Response(JSON.stringify(SOURCE_DETAIL), { status: 200 });
+        }
+        return new Response(JSON.stringify({ detail: "not found" }), { status: 404 });
+      }),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("shows the record's conversion state and how much the extraction has read", async () => {
+    renderAt("/sources/SRC-000184");
+
+    expect(await screen.findByText("out of date")).toBeInTheDocument();
+    expect(screen.getByText("extracted 1 of 2")).toBeInTheDocument();
+  });
+});
