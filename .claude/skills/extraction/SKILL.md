@@ -38,12 +38,13 @@ on under Settings > Model in the app (ADR-0010) - Memoria calling a metered
 model API itself, off by default.
 
 - **If it says ready**, and the author said go: call `extraction_run(limit=20)`
-  and read its report; call it again until it says `phase: done`. Each call
-  reads a batch of paragraphs or writes a batch of summaries on the server,
-  nothing is lost between calls and nothing repeats, and every metered call
-  is ledgered. Report its numbers - including what it says was metered -
-  and skip the brief and the two loops below; the promotion section still
-  applies.
+  and read its report. If it reports any rejection, stop, report the rejection
+  to the author, and do not call it again unless the author explicitly asks to
+  retry. Otherwise call it again until it says `phase: done`. Each call reads
+  a batch of paragraphs or writes a batch of summaries on the server, nothing
+  is lost between calls and nothing repeats, and every metered call is
+  ledgered. Report its numbers - including what it says was metered - and skip
+  the brief and the two loops below; the promotion section still applies.
 - **Otherwise**, this session is the model: drive the pass yourself, as
   follows. Do not tell the author to switch direct runs on; that is their
   decision, and the session run is the default.

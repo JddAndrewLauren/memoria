@@ -21,8 +21,9 @@ or a tool can loop and show progress, a capacity limit leaves nothing
 half-done, and "what is left" stays a query over what is absent (the
 extraction's own rule). An item the model refused, truncated or answered
 with something the core rejects is one ``Rejection`` in the report; the
-run goes on. A provider failure (``ModelError``) stops the run where it
-is, and what was recorded before it stays recorded.
+bounded step goes on, but its caller stops continuation when the report
+contains a rejection. A provider failure (``ModelError``) stops the run
+where it is, and what was recorded before it stays recorded.
 
 **Metered spend is ledgered per call** (``ledger.append_model_call``), and
 what entered the model's context is ledgered by the same lines a session's
@@ -397,15 +398,20 @@ def run_extraction(
     if limit < 1:
         raise ValueError("limit must be at least 1")
     meter = _Meter()
-    brief = extraction.brief(repository)
-    ledger.append_extraction_brief(repository, session_id, [s.id for s in brief.subjects])
-    system = extraction_system_text(brief)
-
     pending = extraction.pending_paragraphs(repository, limit=limit)
     if pending:
-        ledger.append_extraction_batch(repository, session_id, [p.anchor for p in pending])
+        brief = extraction.brief(repository)
+        system = extraction_system_text(brief)
         results: list[tuple[str, extraction.ParagraphExtraction]] = []
         for paragraph in pending:
+            # Each paragraph is a separate model context. Ledger only the
+            # brief and paragraph that are about to enter this call; if a
+            # provider failure stops the loop, untouched anchors never read
+            # as supplied.
+            ledger.append_extraction_brief(
+                repository, session_id, [subject.id for subject in brief.subjects]
+            )
+            ledger.append_extraction_batch(repository, session_id, [paragraph.anchor])
             reply = _call(
                 repository,
                 session_id,

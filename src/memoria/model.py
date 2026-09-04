@@ -38,6 +38,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -102,7 +103,7 @@ def load_settings(repository: Repository) -> ModelSettings:
     api_key = raw.get("api_key")
     provider = raw.get("provider")
     return ModelSettings(
-        enabled=bool(raw.get("enabled", False)),
+        enabled=raw.get("enabled") is True,
         provider=provider if isinstance(provider, str) and provider else DEFAULT_PROVIDER,
         model=model if isinstance(model, str) and model.strip() else DEFAULT_MODEL,
         api_key=api_key if isinstance(api_key, str) and api_key else None,
@@ -115,8 +116,8 @@ def save_settings(repository: Repository, settings: ModelSettings) -> None:
     Temp file plus rename, like ``memoria.write``, so a reader never sees a
     half-written file - but written here directly, because ``.memoria/`` is
     derived-class state that no commit closes (ADR-0003 is about durable
-    files). ``os.open`` with mode 0600 rather than ``chmod`` afterwards, so
-    the key is never world-readable even for an instant.
+    files). The temporary file is created exclusively with mode 0600, so an
+    old permissive inode can never be reused for the key.
     """
     path = settings_path(repository)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -129,15 +130,17 @@ def save_settings(repository: Repository, settings: ModelSettings) -> None:
         },
         indent=2,
     )
-    temp = path.with_name(path.name + ".tmp")
-    descriptor = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    descriptor, temp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temp = Path(temp_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             handle.write(payload + "\n")
+        os.replace(temp, path)
     except BaseException:
         temp.unlink(missing_ok=True)
         raise
-    os.replace(temp, path)
 
 
 KEY_FROM_ENVIRONMENT = "environment"

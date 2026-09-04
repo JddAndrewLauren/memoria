@@ -862,8 +862,10 @@ def extraction_run(limit: int = 20) -> str:
     Reads up to ``limit`` paragraphs (one metered call each) and records
     them; once every paragraph is read, closes the pass and writes up to
     ``limit`` cluster summaries, leaves first. Call it again until it says
-    ``done``; nothing is lost between calls and nothing repeats. The
-    report names every item the model refused or the core rejected.
+    ``done`` unless a report contains a rejection; then stop and wait for
+    the author to request a retry. Nothing is lost between calls and nothing
+    repeats. The report names every item the model refused or the core
+    rejected.
     """
     if limit < 1:
         raise ToolError("limit must be at least 1")
@@ -893,7 +895,12 @@ def render_extraction_run(report: drivers.ExtractionRun) -> str:
         )
     lines += render_rejections(report.rejected)
     lines.append(render_spend(report.spend))
-    if report.phase == "done":
+    if report.rejected:
+        lines.append(
+            "stopped after rejection(s); report them to the author and wait for "
+            "an explicit retry request"
+        )
+    elif report.phase == "done":
         lines.append(
             "The extraction asserted nothing. Every candidate is a proposal; "
             "match terms decide what is placed."
@@ -916,7 +923,9 @@ def audit_run(
 
     Answers up to ``limit`` of the target's not-current judgements, one
     metered call each, and records them exactly as ``audit_record`` would.
-    Call it again while it reports judgements remaining.
+    Call it again while it reports judgements remaining unless a report
+    contains a rejection; then stop and wait for the author to request a
+    retry.
     """
     if limit < 1:
         raise ToolError("limit must be at least 1")
@@ -943,7 +952,12 @@ def render_audit_run(report: drivers.AuditRun) -> str:
     ]
     lines += render_rejections(report.rejected)
     lines.append(render_spend(report.spend))
-    if report.remaining:
+    if report.rejected:
+        lines.append(
+            "stopped after rejection(s); report them to the author and wait for "
+            "an explicit retry request"
+        )
+    elif report.remaining:
         lines.append("call audit_run again to continue")
     return "\n".join(lines)
 
