@@ -26,6 +26,16 @@ Call `style_status()` and show the author what it says. Two things matter:
 **Then ask whether to run it, and wait.** The pass reads every sample with a
 model, and part 08 §12.1's rule is that nothing needing a model runs unasked.
 
+## Where it runs: a direct run, or this session
+
+Call `model_status()`. If it says ready - the author switched direct runs on
+under Settings > Model (ADR-0010) - and the author said go, call `style_run()`
+once: it reads every sample on the server against the metered model and
+records the observations it proposes exactly as `style_record` would. Report
+what it accepted, what it rejected and why, and what it says was metered, then
+close with the report below. Otherwise this session is the model: continue
+with the brief.
+
 ## The brief
 
 Call `style_brief()` **once** and keep it. It carries the analysis prompt,

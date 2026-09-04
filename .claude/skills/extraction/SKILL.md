@@ -31,6 +31,23 @@ nothing needing a model runs unasked. The tools are registered in every
 session; the author saying go is what stands between a session and a
 full-corpus pass.
 
+## Where it runs: a direct run, or this session
+
+Call `model_status()`. It says whether the author switched **direct runs**
+on under Settings > Model in the app (ADR-0010) - Memoria calling a metered
+model API itself, off by default.
+
+- **If it says ready**, and the author said go: call `extraction_run(limit=20)`
+  and read its report; call it again until it says `phase: done`. Each call
+  reads a batch of paragraphs or writes a batch of summaries on the server,
+  nothing is lost between calls and nothing repeats, and every metered call
+  is ledgered. Report its numbers - including what it says was metered -
+  and skip the brief and the two loops below; the promotion section still
+  applies.
+- **Otherwise**, this session is the model: drive the pass yourself, as
+  follows. Do not tell the author to switch direct runs on; that is their
+  decision, and the session run is the default.
+
 ## The brief
 
 Call `extraction_brief()` **once** and keep it. It carries the extraction

@@ -52,6 +52,8 @@ ALLOWED_IMPORTS = {
     "memoria.record_extractor",  # #34: the record extractor's tools, driven by the curation skill
     "memoria.human_touched",  # #34: curation_flag, the flagging step on its own
     "memoria.style",  # ADR-0009: writing_style and the style_* analysis tools
+    "memoria.model",  # ADR-0010: readiness, and the seam the *_run tools ask for a model at the point of use
+    "memoria.drivers",  # ADR-0010: the four direct-run loops
 }
 
 FILE_OPENING_CALLS = {"open", "read_text", "read_bytes", "write_text", "write_bytes"}
@@ -468,6 +470,13 @@ def test_the_tool_surface_is_the_read_tools_and_the_extraction_tools():
         "style_status",
         "style_brief",
         "style_record",
+        # ADR-0010: direct runs - the one class that reaches a generative
+        # model, through the seam, only when the author switched it on
+        # under Settings > Model. Off by default; each refuses until then.
+        "model_status",
+        "extraction_run",
+        "audit_run",
+        "style_run",
     }
 
 

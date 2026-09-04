@@ -624,3 +624,16 @@ def test_the_skill_makes_the_author_confirm_before_the_pass_runs():
     text = SKILL.read_text(encoding="utf-8")
     assert "extraction_status()" in text
     assert "ask" in text.lower()
+
+
+def test_the_skill_checks_for_a_direct_run_after_the_author_says_go():
+    """ADR-0010: the skill asks `model_status()` and, only when it says
+    ready, hands the pass to `extraction_run` instead of looping itself -
+    after the author's go, never before it, and never telling the author
+    to switch direct runs on."""
+    text = SKILL.read_text(encoding="utf-8")
+    gate = text.index("Then ask whether to run it")
+    assert text.index("model_status()") > gate
+    assert "extraction_run(" in text
+    assert "phase: done" in text
+    assert "Do not tell the author to switch direct runs on" in text
